@@ -10,7 +10,10 @@
 #     -v dockbrr-data:/data ghcr.io/yorah/dockbrr
 FROM docker:28-cli
 
-COPY dockbrr /usr/local/bin/dockbrr
+# GoReleaser (dockers_v2) lays the per-platform binary out under $TARGETPLATFORM/
+# (e.g. linux/amd64/dockbrr, linux/arm64/dockbrr) in the build context.
+ARG TARGETPLATFORM
+COPY ${TARGETPLATFORM}/dockbrr /usr/local/bin/dockbrr
 
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/dockbrr"]

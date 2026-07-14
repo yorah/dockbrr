@@ -51,41 +51,26 @@ nfpms:
     # package dependency because the Docker package name differs across distros
     # (docker-ce vs docker.io vs moby-engine). Documented as a prerequisite.
 
-dockers:
-  - id: amd64
-    goos: linux
-    goarch: amd64
+# dockers_v2 builds a single multi-arch image + manifest natively via buildx
+# (no separate docker_manifests needed). The Dockerfile copies the per-platform
+# binary from the $TARGETPLATFORM/ subdir of the build context.
+dockers_v2:
+  - id: dockbrr
+    ids: [dockbrr]
+    images:
+      - ghcr.io/yorah/dockbrr
+    tags:
+      - "{{ .Version }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
     dockerfile: Dockerfile
-    use: buildx
-    image_templates:
-      - "ghcr.io/yorah/dockbrr:{{ .Version }}-amd64"
-    build_flag_templates:
-      - "--platform=linux/amd64"
-      - "--label=org.opencontainers.image.source=https://github.com/yorah/dockbrr"
-      - "--label=org.opencontainers.image.version={{ .Version }}"
-      - "--label=org.opencontainers.image.licenses=GPL-3.0"
-  - id: arm64
-    goos: linux
-    goarch: arm64
-    dockerfile: Dockerfile
-    use: buildx
-    image_templates:
-      - "ghcr.io/yorah/dockbrr:{{ .Version }}-arm64"
-    build_flag_templates:
-      - "--platform=linux/arm64"
-      - "--label=org.opencontainers.image.source=https://github.com/yorah/dockbrr"
-      - "--label=org.opencontainers.image.version={{ .Version }}"
-      - "--label=org.opencontainers.image.licenses=GPL-3.0"
-
-docker_manifests:
-  - name_template: "ghcr.io/yorah/dockbrr:{{ .Version }}"
-    image_templates:
-      - "ghcr.io/yorah/dockbrr:{{ .Version }}-amd64"
-      - "ghcr.io/yorah/dockbrr:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/yorah/dockbrr:latest"
-    image_templates:
-      - "ghcr.io/yorah/dockbrr:{{ .Version }}-amd64"
-      - "ghcr.io/yorah/dockbrr:{{ .Version }}-arm64"
+    sbom: "false" # keep releases SBOM-free (matches the no-SBOM choice)
+    labels:
+      org.opencontainers.image.source: https://github.com/yorah/dockbrr
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.licenses: GPL-3.0
 
 checksum:
   name_template: "checksums.txt"
