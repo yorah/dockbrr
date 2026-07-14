@@ -1,4 +1,9 @@
 package version
 
 // Version is the dockbrr build version.
-const Version = "0.1.0-dev"
+//
+// It is a var (not const) so release builds can override it at link time via
+// -ldflags "-X dockbrr/internal/version.Version=<tag>" (see .goreleaser.yaml).
+// The literal below is kept in sync with releases by release-please via the
+// x-release-please-version annotation.
+var Version = "0.1.0-dev" // x-release-please-version

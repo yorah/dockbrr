@@ -2,6 +2,7 @@
 /dockbrr
 /bin/
 /.dev/
+/dist/   # goreleaser output
 
 # Runtime data
 /data/

@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Web (typecheck, test, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Typecheck
+        run: ./node_modules/.bin/tsc -b --noEmit
+      - name: Test
+        run: npm test
+      - name: Build SPA
+        run: npm run build
+
+  go:
+    name: Go (vet, test, static build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Vet
+        run: go vet ./...
+      # Safety invariant #1: the binary must stay CGO-free / statically linkable.
+      # A build with CGO_ENABLED=0 fails fast if a cgo dependency sneaks in.
+      - name: Static build (CGO-free)
+        run: CGO_ENABLED=0 go build ./...
+      - name: Test (race)
+        run: go test -race ./...
+
+  release-dryrun:
+    name: Release dry-run (goreleaser snapshot)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      # --snapshot builds binaries, archives, deb/rpm and docker images WITHOUT
+      # publishing, so the whole release pipeline is validated on every PR.
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --snapshot --clean

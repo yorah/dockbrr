@@ -47,11 +47,69 @@ your Docker socket.
 
 ## Getting started
 
-dockbrr doesn't have packaged releases or a container image yet. For now, build it
-from source.
+### Requirements
 
-You'll need [mise](https://mise.jdx.dev/) (or Go 1.26 and Node.js if you'd rather
-run the underlying commands by hand).
+dockbrr applies updates by running `docker compose` on the host, so wherever it
+runs needs:
+
+- **Docker Engine** with the **Compose v2 plugin** (the `docker compose`
+  subcommand, not the legacy standalone `docker-compose`). It ships with Docker
+  Desktop and with most distro Docker packages (`docker-ce`, `docker.io`, or
+  `moby-engine`, depending on your distro).
+- Access to the Docker socket, `/var/run/docker.sock` by default.
+
+To build from source you'll also need [mise](https://mise.jdx.dev/) (or Go 1.26
+and Node.js, if you'd rather run the underlying commands by hand).
+
+### Docker image
+
+Multi-arch images (amd64/arm64) are published to the GitHub Container Registry
+at [`ghcr.io/yorah/dockbrr`](https://github.com/yorah/dockbrr/pkgs/container/dockbrr).
+
+```bash
+docker run -d --name dockbrr \
+  -p 8080:8080 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v dockbrr-data:/data \
+  -e DOCKBRR_DATA_DIR=/data \
+  ghcr.io/yorah/dockbrr:latest
+```
+
+Or with Docker Compose, save this as `compose.yaml` and run `docker compose up -d`:
+
+```yaml
+services:
+  dockbrr:
+    image: ghcr.io/yorah/dockbrr:latest
+    container_name: dockbrr
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - DOCKBRR_DATA_DIR=/data
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - dockbrr-data:/data
+
+volumes:
+  dockbrr-data:
+```
+
+The image bundles the Docker CLI + Compose plugin and drives your host's Docker
+through the mounted socket. To *apply* updates to a Compose project, the
+container also needs to see that project's files at the same paths they live on
+the host, so bind-mount those directories too (see the path note below).
+
+### Prebuilt binaries and packages
+
+Each [release](https://github.com/yorah/dockbrr/releases) attaches:
+
+- Standalone binaries (`dockbrr_<version>_<os>_<arch>.tar.gz` / `.zip`) for
+  linux, macOS, and Windows on amd64 and arm64. Extract and run `./dockbrr`.
+- `.deb` and `.rpm` packages for Debian/Ubuntu and RHEL/Fedora, installing
+  `dockbrr` to `/usr/bin`.
+
+### Build from source
 
 ```bash
 git clone https://github.com/yorah/dockbrr.git
