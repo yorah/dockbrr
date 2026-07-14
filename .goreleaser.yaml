@@ -1,0 +1,100 @@
+# GoReleaser config for dockbrr. https://goreleaser.com
+#
+# release-please owns versioning: it maintains CHANGELOG.md and creates the
+# GitHub Release + git tag. GoReleaser runs afterwards (triggered by that tag)
+# only to BUILD and UPLOAD artifacts, so it appends to the existing release and
+# does not regenerate release notes.
+#
+# Test locally without publishing:  goreleaser release --snapshot --clean
+version: 2
+
+project_name: dockbrr
+
+before:
+  hooks:
+    - go mod download
+    # Build the React SPA so `go build` embeds it via embed.FS (internal/httpapi).
+    - sh -c "cd web && npm ci"
+    - sh -c "cd web && npm run build"
+
+builds:
+  - id: dockbrr
+    main: ./cmd/dockbrr
+    binary: dockbrr
+    env:
+      - CGO_ENABLED=0 # static binary invariant; sqlite is pure-Go (modernc.org)
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+      - -X dockbrr/internal/version.Version={{ .Version }}
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+nfpms:
+  - id: packages
+    package_name: dockbrr
+    vendor: yorah
+    homepage: https://github.com/yorah/dockbrr
+    maintainer: yorah <mathis.harmelin@gmail.com>
+    description: Self-hosted Docker compose update manager.
+    license: GPL-3.0
+    formats: [deb, rpm]
+    bindir: /usr/bin
+    # Note: dockbrr execs `docker compose`; it is intentionally NOT declared as a
+    # package dependency because the Docker package name differs across distros
+    # (docker-ce vs docker.io vs moby-engine). Documented as a prerequisite.
+
+dockers:
+  - id: amd64
+    goos: linux
+    goarch: amd64
+    dockerfile: Dockerfile
+    use: buildx
+    image_templates:
+      - "ghcr.io/yorah/dockbrr:{{ .Version }}-amd64"
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.source=https://github.com/yorah/dockbrr"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.licenses=GPL-3.0"
+  - id: arm64
+    goos: linux
+    goarch: arm64
+    dockerfile: Dockerfile
+    use: buildx
+    image_templates:
+      - "ghcr.io/yorah/dockbrr:{{ .Version }}-arm64"
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.source=https://github.com/yorah/dockbrr"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.licenses=GPL-3.0"
+
+docker_manifests:
+  - name_template: "ghcr.io/yorah/dockbrr:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/yorah/dockbrr:{{ .Version }}-amd64"
+      - "ghcr.io/yorah/dockbrr:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/yorah/dockbrr:latest"
+    image_templates:
+      - "ghcr.io/yorah/dockbrr:{{ .Version }}-amd64"
+      - "ghcr.io/yorah/dockbrr:{{ .Version }}-arm64"
+
+checksum:
+  name_template: "checksums.txt"
+
+# release-please already wrote the changelog; don't duplicate it here.
+changelog:
+  disable: true
+
+release:
+  # Append artifacts to the release release-please created for this tag,
+  # leaving its notes intact.
+  mode: append
