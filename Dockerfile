@@ -8,7 +8,7 @@
 # and simply copied in here. Run with the host socket mounted, e.g.:
 #   docker run -v /var/run/docker.sock:/var/run/docker.sock -p 8080:8080 \
 #     -v dockbrr-data:/data ghcr.io/yorah/dockbrr
-FROM docker:28-cli
+FROM docker:29-cli
 
 # GoReleaser (dockers_v2) lays the per-platform binary out under $TARGETPLATFORM/
 # (e.g. linux/amd64/dockbrr, linux/arm64/dockbrr) in the build context.
