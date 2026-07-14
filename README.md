@@ -47,11 +47,24 @@ your Docker socket.
 
 ## Getting started
 
+### Requirements
+
+dockbrr applies updates by running `docker compose` on the host, so wherever it
+runs needs:
+
+- **Docker Engine** with the **Compose v2 plugin** (the `docker compose`
+  subcommand, not the legacy standalone `docker-compose`). It ships with Docker
+  Desktop and with most distro Docker packages (`docker-ce`, `docker.io`, or
+  `moby-engine`, depending on your distro).
+- Access to the Docker socket, `/var/run/docker.sock` by default.
+
+To build from source you'll also need [mise](https://mise.jdx.dev/) (or Go 1.26
+and Node.js, if you'd rather run the underlying commands by hand).
+
+### Build from source
+
 dockbrr doesn't have packaged releases or a container image yet. For now, build it
 from source.
-
-You'll need [mise](https://mise.jdx.dev/) (or Go 1.26 and Node.js if you'd rather
-run the underlying commands by hand).
 
 ```bash
 git clone https://github.com/yorah/dockbrr.git
