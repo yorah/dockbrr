@@ -75,6 +75,26 @@ docker run -d --name dockbrr \
   ghcr.io/yorah/dockbrr:latest
 ```
 
+Or with Docker Compose, save this as `compose.yaml` and run `docker compose up -d`:
+
+```yaml
+services:
+  dockbrr:
+    image: ghcr.io/yorah/dockbrr:latest
+    container_name: dockbrr
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - DOCKBRR_DATA_DIR=/data
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - dockbrr-data:/data
+
+volumes:
+  dockbrr-data:
+```
+
 The image bundles the Docker CLI + Compose plugin and drives your host's Docker
 through the mounted socket. To *apply* updates to a Compose project, the
 container also needs to see that project's files at the same paths they live on
