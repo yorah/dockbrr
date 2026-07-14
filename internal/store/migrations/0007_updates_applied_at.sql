@@ -1,0 +1,1 @@
+ALTER TABLE updates ADD COLUMN applied_at TIMESTAMP;

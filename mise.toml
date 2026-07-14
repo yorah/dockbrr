@@ -1,0 +1,52 @@
+[tools]
+go = "1.26.4"
+watchexec = "latest"   # dev-only: Go auto-reload in dev-api
+
+# Tasks: run with `mise run <name>` (or `mise <name>`). List: `mise tasks`.
+
+[tasks.build-web]
+description = "Build SPA into internal/httpapi/dist for embedding"
+dir = "web"
+sources = ["src/**/*", "index.html", "package.json", "vite.config.ts"]
+outputs = ["../internal/httpapi/dist/assets/**/*"]
+run = "npm ci && npm run build"
+
+[tasks.build]
+description = "Build static dockbrr binary (embeds SPA)"
+depends = ["build-web"]
+run = [
+  "CGO_ENABLED=0 go build -o dockbrr ./cmd/dockbrr",
+  # Restore tracked placeholder clobbered by the vite build.
+  "git checkout -- internal/httpapi/dist/index.html",
+]
+
+[tasks.run]
+description = "Build then launch dockbrr"
+depends = ["build"]
+run = "./dockbrr"
+
+[tasks.dev]
+description = "Full dev loop: API (:3625) + vite (:5173) together; Ctrl-C stops both"
+run = "mise run dev-api ::: dev-web"
+
+[tasks.dev-api]
+description = "Run API on :3625 (vite proxy target); auto-restarts on Go changes"
+env = { DOCKBRR_BIND = ":3625" }
+# --print-events names the path+kind behind every restart (a restart with no
+# event line above it did not come from the file watcher).
+# build+exec, not `go run`: watchexec SIGTERMs the command, and `go run`'s
+# compiled child can outlive it, and the orphan keeps holding :3625 and logging.
+run = "watchexec -r -e go --print-events --stop-signal SIGTERM -- 'go build -o ./.dev/dockbrr ./cmd/dockbrr && exec ./.dev/dockbrr'"
+
+[tasks.dev-web]
+description = "Run vite dev server (:5173, proxies /api -> :3625)"
+dir = "web"
+run = "npm run dev"
+
+[tasks.check]
+description = "Vet + test Go and web"
+run = [
+  "go vet ./...",
+  "go test ./...",
+  "cd web && npm test",
+]

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="dockbrr">
+  <!-- Gap between the badge and the crate is masked out rather than drawn as a
+       background-coloured ring: the mark carries no ground of its own, so it has
+       to read on white and on near-black alike. -->
+  <mask id="badge-gap">
+    <rect width="64" height="64" fill="#fff"/>
+    <circle cx="51" cy="12.5" r="11.5" fill="#000"/>
+  </mask>
+  <g mask="url(#badge-gap)" fill="none" stroke="#2563eb" stroke-width="5" stroke-linecap="round">
+    <rect x="7" y="20" width="39" height="36" rx="6"/>
+    <path d="M7 32h39"/>
+    <path d="M21 44h11" opacity=".45"/>
+  </g>
+  <circle cx="51" cy="12.5" r="8.5" fill="#f59e0b"/>
+</svg>

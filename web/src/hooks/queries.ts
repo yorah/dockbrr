@@ -1,0 +1,54 @@
+import { useQuery } from "@tanstack/react-query";
+import { apiFetch } from "@/api/client";
+import { keys } from "@/api/keys";
+import type {
+  Project, Update, Settings, Registry, Me, SetupStatus,
+  ServiceEvent, CommandPreview, Job, JobRow, Scope, SystemStatus, ComposeFiles, SystemInfo,
+} from "@/api/types";
+
+// Dashboard freshness is push-driven now: the global SSE stream (useEventStream)
+// invalidates these queries on detected / job_finished / reconciled events, so no
+// polling interval is needed here (see audit A10).
+export const useProjects = () =>
+  useQuery({ queryKey: keys.projects, queryFn: () => apiFetch<Project[]>("/api/projects") });
+export const useUpdates = () =>
+  useQuery({ queryKey: keys.updates, queryFn: () => apiFetch<Update[]>("/api/updates") });
+export const useLastApplied = () =>
+  useQuery({ queryKey: keys.lastApplied, queryFn: () => apiFetch<Update[]>("/api/updates/last-applied") });
+export const useSettings = () =>
+  useQuery({ queryKey: keys.settings, queryFn: () => apiFetch<Settings>("/api/settings") });
+export const useRegistries = () =>
+  useQuery({ queryKey: keys.registries, queryFn: () => apiFetch<Registry[]>("/api/registries") });
+export const useMe = () =>
+  useQuery({ queryKey: keys.me, queryFn: () => apiFetch<Me>("/api/auth/me") });
+export const useSetupStatus = () =>
+  useQuery({ queryKey: keys.setupStatus, queryFn: () => apiFetch<SetupStatus>("/api/setup/status") });
+export const useStatus = () =>
+  useQuery({ queryKey: keys.status, queryFn: () => apiFetch<SystemStatus>("/api/status"), refetchInterval: 60_000 });
+export const useSystemInfo = () =>
+  useQuery({ queryKey: keys.systemInfo, queryFn: () => apiFetch<SystemInfo>("/api/system/info") });
+export const useJobs = (limit = 100) =>
+  useQuery({ queryKey: keys.jobs, queryFn: () => apiFetch<JobRow[]>(`/api/jobs?limit=${limit}`) });
+export const useServiceEvents = (id: number) =>
+  useQuery({ queryKey: keys.serviceEvents(id), queryFn: () => apiFetch<ServiceEvent[]>(`/api/services/${id}/events`) });
+export const useUpdatePreview = (id: number, scope: Scope, enabled = true) =>
+  useQuery({
+    queryKey: keys.updatePreview(id, scope), enabled,
+    queryFn: () => apiFetch<CommandPreview>(`/api/updates/${id}/preview?scope=${scope}`),
+  });
+export const useProjectCompose = (id: number, enabled = true) =>
+  useQuery({
+    queryKey: keys.projectCompose(id), enabled,
+    queryFn: () => apiFetch<ComposeFiles>(`/api/projects/${id}/compose`),
+  });
+export const useJob = (id: number, enabled = true) =>
+  useQuery({
+    queryKey: keys.job(id), enabled,
+    queryFn: () => apiFetch<Job>(`/api/jobs/${id}`),
+    refetchInterval: (q) => {
+      // Terminal job statuses per store/jobs.go: success|failed|canceled. Stop
+      // polling once the job finishes; keep polling while queued|running.
+      const s = q.state.data?.status;
+      return s && ["success", "failed", "canceled"].includes(s) ? false : 1500;
+    },
+  });

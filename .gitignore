@@ -1,0 +1,27 @@
+# Build artifacts
+/dockbrr
+/bin/
+/.dev/
+
+# Runtime data
+/data/
+*.db
+*.db-wal
+*.db-shm
+secret.key
+
+# Go
+vendor/
+
+# Frontend build output embedded by internal/httpapi/spa.go (Task 6 keeps the
+# placeholder index.html tracked but ignores hashed build assets).
+/internal/httpapi/dist/assets/
+/internal/httpapi/dist/favicon.svg
+
+# Internal SDD dev-process scratch: completed phase plans and ledgers have no
+# ongoing value once shipped (code is the source of truth); kept locally only.
+/.superpowers/
+/docs/dev/plans/archive/
+
+# Per-developer local tool config, not meant to ship.
+/.claude/settings.local.json

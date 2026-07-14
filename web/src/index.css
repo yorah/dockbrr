@@ -1,0 +1,112 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  /* Surfaces */
+  --background: #ffffff;
+  --foreground: #0f172a;
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+  --muted: #f1f5f9;
+  --muted-foreground: #475569;
+  /* One step lighter than --border, so an outlined control's hover fill does
+     not swallow its own edge. */
+  --accent: #e8edf3;
+  --accent-foreground: #0f172a;
+  --border: #e2e8f0;
+  --input: #e2e8f0;
+  --overlay: #020617;
+
+  /* Accent: the ONLY place the brand colour is named. A future theme
+     overrides just these two (plus their foreground) and nothing else. */
+  --primary: #2563eb;
+  --primary-foreground: #f8fafc;
+  --ring: #3b82f6;
+
+  /* Semantic severity. Dark enough to clear WCAG AA (4.5:1) as text-xs on
+     their own /15 tint, which is how badges render them. */
+  --success: #15803d;
+  --warning: #b45309;
+  --danger: #dc2626;
+  --info: #0369a1;
+
+  --radius: 0.5rem;
+}
+
+.dark {
+  --background: #020617;
+  --foreground: #f8fafc;
+  --card: #0f172a;
+  --card-foreground: #f8fafc;
+  --muted: #1e293b;
+  --muted-foreground: #94a3b8;
+  /* One step lighter than --border, so an outlined control's hover fill does
+     not swallow its own edge. Mirrors the light-mode relationship. */
+  --accent: #3f4c61;
+  --accent-foreground: #f8fafc;
+  --border: #334155;
+  --input: #334155;
+  --overlay: #000000;
+
+  --primary: #2563eb;
+  --primary-foreground: #f8fafc;
+  --ring: #60a5fa;
+
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --info: #38bdf8;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-overlay: var(--overlay);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+}
+html { font-family: var(--font-sans); }
+code, pre, .font-mono { font-family: var(--font-mono); }
+
+/* Minimal readability styles for sanitized changelog markdown (Changelog.tsx).
+   No typography plugin is installed, and Tailwind's preflight strips default
+   heading/list styling, so restore just enough to read release notes. */
+.changelog-body :is(h1, h2, h3, h4, h5, h6) {
+  font-weight: 600;
+  margin-top: 0.75rem;
+  margin-bottom: 0.375rem;
+}
+.changelog-body h1 { font-size: 1.125rem; }
+.changelog-body h2 { font-size: 1.0625rem; }
+.changelog-body h3 { font-size: 1rem; }
+.changelog-body p { margin-bottom: 0.5rem; }
+.changelog-body ul, .changelog-body ol { margin: 0 0 0.5rem 1.25rem; }
+.changelog-body ul { list-style: disc; }
+.changelog-body ol { list-style: decimal; }
+.changelog-body a { color: #2563eb; text-decoration: underline; }
+.dark .changelog-body a { color: #60a5fa; }
+.changelog-body code { font-family: var(--font-mono); background: rgb(148 163 184 / 0.15); padding: 0 0.25rem; border-radius: 0.25rem; }
+.changelog-body pre { background: rgb(148 163 184 / 0.15); padding: 0.5rem; border-radius: 0.375rem; overflow-x: auto; }
+.changelog-body blockquote { border-left: 2px solid rgb(148 163 184 / 0.5); padding-left: 0.75rem; opacity: 0.85; }
