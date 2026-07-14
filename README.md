@@ -61,10 +61,35 @@ runs needs:
 To build from source you'll also need [mise](https://mise.jdx.dev/) (or Go 1.26
 and Node.js, if you'd rather run the underlying commands by hand).
 
-### Build from source
+### Docker image
 
-dockbrr doesn't have packaged releases or a container image yet. For now, build it
-from source.
+Multi-arch images (amd64/arm64) are published to the GitHub Container Registry
+at [`ghcr.io/yorah/dockbrr`](https://github.com/yorah/dockbrr/pkgs/container/dockbrr).
+
+```bash
+docker run -d --name dockbrr \
+  -p 8080:8080 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v dockbrr-data:/data \
+  -e DOCKBRR_DATA_DIR=/data \
+  ghcr.io/yorah/dockbrr:latest
+```
+
+The image bundles the Docker CLI + Compose plugin and drives your host's Docker
+through the mounted socket. To *apply* updates to a Compose project, the
+container also needs to see that project's files at the same paths they live on
+the host, so bind-mount those directories too (see the path note below).
+
+### Prebuilt binaries and packages
+
+Each [release](https://github.com/yorah/dockbrr/releases) attaches:
+
+- Standalone binaries (`dockbrr_<version>_<os>_<arch>.tar.gz` / `.zip`) for
+  linux, macOS, and Windows on amd64 and arm64. Extract and run `./dockbrr`.
+- `.deb` and `.rpm` packages for Debian/Ubuntu and RHEL/Fedora, installing
+  `dockbrr` to `/usr/bin`.
+
+### Build from source
 
 ```bash
 git clone https://github.com/yorah/dockbrr.git
