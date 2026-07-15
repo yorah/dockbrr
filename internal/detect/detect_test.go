@@ -31,6 +31,10 @@ type fakeResolver struct {
 	// version-naming scan. A missing ref falls back to img.Digest.
 	head    map[string]string
 	headErr error
+
+	// headSeen, when non-nil, counts Head calls per ref (maps are reference
+	// types, so a value-receiver method still mutates the shared map).
+	headSeen map[string]int
 }
 
 func (f fakeResolver) Resolve(_ context.Context, ref string, _ registry.Platform) (registry.RemoteImage, error) {
@@ -53,6 +57,9 @@ func (f fakeResolver) ListTags(_ context.Context, _ string) ([]string, error) {
 }
 
 func (f fakeResolver) Head(_ context.Context, ref string) (string, error) {
+	if f.headSeen != nil {
+		f.headSeen[ref]++
+	}
 	if f.headErr != nil {
 		return "", f.headErr
 	}
@@ -93,7 +100,7 @@ func seedSvc(t *testing.T, db *store.DB, ref, digest string, pinned bool) store.
 func newDetector(db *store.DB, r detect.Resolver) *detect.Detector {
 	return detect.NewDetector(
 		r, store.NewUpdates(db), store.NewImages(db),
-		store.NewRemoteStates(db), store.NewEvents(db),
+		store.NewRemoteStates(db), store.NewEvents(db), store.NewTagDigests(db),
 		registry.HostPlatform(), func() time.Duration { return time.Minute },
 	)
 }
@@ -479,7 +486,7 @@ func TestDetectCacheTTLReadPerCall(t *testing.T) {
 	ttl := 5 * time.Minute // long enough to cover the 90s-old row
 	d := detect.NewDetector(
 		r, store.NewUpdates(db), store.NewImages(db),
-		store.NewRemoteStates(db), store.NewEvents(db),
+		store.NewRemoteStates(db), store.NewEvents(db), store.NewTagDigests(db),
 		registry.HostPlatform(), func() time.Duration { return ttl },
 	)
 
@@ -579,6 +586,47 @@ func TestDetectFloatingReverseLookupNonFatal(t *testing.T) {
 	}
 	if u.Severity != "digest-only" {
 		t.Fatalf("severity = %q, want digest-only", u.Severity)
+	}
+}
+
+// TestDetectReverseLookupUsesTagCache proves the permanent tag->digest cache
+// spares a re-HEAD: a pre-cached version tag is matched from the cache (no Head
+// call), while an uncached tag is HEADed once and then cached.
+func TestDetectReverseLookupUsesTagCache(t *testing.T) {
+	db := newDB(t)
+	const repo = "docker.io/garethgeorge/backrest"
+	// Pre-cache the running release's digest so its HEAD is unnecessary.
+	if err := store.NewTagDigests(db).Put(repo, "v1.13.0", "sha256:v1130"); err != nil {
+		t.Fatal(err)
+	}
+	svc := seedSvc(t, db, repo+":latest", "sha256:v1130", false)
+	seen := map[string]int{}
+	r := fakeResolver{
+		img:  registry.RemoteImage{Digest: "sha256:v1141", PlatformDigest: "sha256:v1141"},
+		tags: []string{"v1.13.0", "v1.14.0", "v1.14.1", "latest"},
+		head: map[string]string{
+			repo + ":v1.14.0": "sha256:v1140",
+			repo + ":v1.14.1": "sha256:v1141",
+		},
+		headSeen: seen,
+	}
+	u, err := newDetector(db, r).Detect(context.Background(), svc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u == nil || u.FromVersion != "v1.13.0" || u.ToVersion != "v1.14.1" {
+		t.Fatalf("versions = %+v, want v1.13.0 -> v1.14.1", u)
+	}
+	// The cached tag must not have been HEADed; the uncached target tag must.
+	if n := seen[repo+":v1.13.0"]; n != 0 {
+		t.Fatalf("v1.13.0 HEAD count = %d, want 0 (served from cache)", n)
+	}
+	if n := seen[repo+":v1.14.1"]; n != 1 {
+		t.Fatalf("v1.14.1 HEAD count = %d, want 1", n)
+	}
+	// The HEAD result must have been written back to the cache.
+	if dg, ok, err := store.NewTagDigests(db).Get(repo, "v1.14.1"); err != nil || !ok || dg != "sha256:v1141" {
+		t.Fatalf("cache after Detect: dg=%q ok=%v err=%v, want sha256:v1141", dg, ok, err)
 	}
 }
 

@@ -28,6 +28,7 @@ type Detector struct {
 	images   *store.Images
 	states   *store.RemoteStates
 	events   *store.Events
+	tagCache *store.TagDigests
 	plat     registry.Platform
 	cacheTTL func() time.Duration
 }
@@ -41,6 +42,7 @@ func NewDetector(
 	images *store.Images,
 	states *store.RemoteStates,
 	events *store.Events,
+	tagCache *store.TagDigests,
 	plat registry.Platform,
 	cacheTTL func() time.Duration,
 ) *Detector {
@@ -49,7 +51,8 @@ func NewDetector(
 	}
 	return &Detector{
 		resolver: resolver, updates: updates, images: images,
-		states: states, events: events, plat: plat, cacheTTL: cacheTTL,
+		states: states, events: events, tagCache: tagCache,
+		plat: plat, cacheTTL: cacheTTL,
 	}
 }
 
@@ -258,13 +261,13 @@ func (d *Detector) reverseVersions(ctx context.Context, repo, fromDigest string,
 		if fromVer != "" && toVer != "" {
 			break
 		}
-		dg, herr := d.resolver.Head(ctx, repo+":"+t)
-		if herr != nil {
-			if registry.IsRateLimited(herr) {
+		dg, err := d.tagDigest(ctx, repo, t)
+		if err != nil {
+			if registry.IsRateLimited(err) {
 				logger.Warnf("detect: head %s:%s rate-limited (reverse-lookup aborted)", repo, t)
 				break
 			}
-			logger.Tracef("detect: head %s:%s: %v (reverse-lookup continues)", repo, t, herr)
+			logger.Tracef("detect: head %s:%s: %v (reverse-lookup continues)", repo, t, err)
 			continue
 		}
 		if toVer == "" && (dg == target.Digest || dg == target.PlatformDigest) {
@@ -275,6 +278,30 @@ func (d *Detector) reverseVersions(ctx context.Context, repo, fromDigest string,
 		}
 	}
 	return fromVer, toVer
+}
+
+// tagDigest returns the served digest for repo:tag, preferring the permanent
+// tag-digest cache (exact-semver tags are immutable) and falling back to a
+// registry HEAD, whose result is then cached. A HEAD error is returned so the
+// caller can distinguish a rate-limit (abort) from a per-tag failure (skip).
+func (d *Detector) tagDigest(ctx context.Context, repo, tag string) (string, error) {
+	if d.tagCache != nil {
+		if dg, ok, err := d.tagCache.Get(repo, tag); err != nil {
+			logger.Warnf("detect: tag-cache get %s:%s: %v (falling back to head)", repo, tag, err)
+		} else if ok {
+			return dg, nil
+		}
+	}
+	dg, err := d.resolver.Head(ctx, repo+":"+tag)
+	if err != nil {
+		return "", err
+	}
+	if d.tagCache != nil {
+		if err := d.tagCache.Put(repo, tag, dg); err != nil {
+			logger.Warnf("detect: tag-cache put %s:%s: %v", repo, tag, err)
+		}
+	}
+	return dg, nil
 }
 
 // freshCachedDigest returns the cached remote digest for (repo, tag) when the
