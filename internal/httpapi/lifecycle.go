@@ -3,14 +3,22 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+	"strconv"
 
 	"dockbrr/internal/store"
+)
+
+const (
+	defaultLogTail = 500
+	maxLogTail     = 2000
 )
 
 var (
 	errInvalidAction       = errors.New("action must be start, stop, or restart")
 	errRemoveNotStandalone = errors.New("remove is only allowed for standalone containers")
 	errRemoveNotStopped    = errors.New("remove is only allowed for a stopped container")
+	errLogsUnavailable     = errors.New("logs are unavailable")
+	errBadTail             = errors.New("tail must be between 1 and 2000")
 )
 
 var lifecycleActions = map[string]bool{"start": true, "stop": true, "restart": true}
@@ -62,6 +70,38 @@ func (s *Server) handleRemove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]int64{"job_id": jobID})
+}
+
+// handleLogs returns a bounded tail of a service's first container logs.
+// Read-only (invariant 2 permits API->docker reads; only mutation is forbidden).
+func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
+	svc, _, ok := s.loadServiceProject(w, r)
+	if !ok {
+		return
+	}
+	if s.deps.DockerLogs == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, errLogsUnavailable)
+		return
+	}
+	if len(svc.ContainerIDs) == 0 {
+		writeJSON(w, http.StatusOK, map[string]string{"logs": ""})
+		return
+	}
+	tail := defaultLogTail
+	if q := r.URL.Query().Get("tail"); q != "" {
+		n, err := strconv.Atoi(q)
+		if err != nil || n < 1 || n > maxLogTail {
+			writeJSONError(w, http.StatusBadRequest, errBadTail)
+			return
+		}
+		tail = n
+	}
+	out, err := s.deps.DockerLogs.ContainerLogsTail(r.Context(), svc.ContainerIDs[0], tail)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"logs": out})
 }
 
 // loadServiceProject resolves the {id} path param to a service + its project,
