@@ -9,6 +9,16 @@ Format: `- [ ] [source-tag] short description, why deferred / what it needs`
 
 ## Open
 
+### Workload lifecycle Phase 1 (start/stop/restart, remove, logs; branch `feat/loose-container-grouping`, 2026-07-15, whole-phase review GO)
+
+Genuine defers from the whole-phase review. The other 5 review minors were fixed in-branch
+(commit c4f16a5): restart double-parse, "gone"-state test, LogsDrawer stale-response guard,
+frontend/backend stopped-state alignment, lifecycle event-kind labels.
+
+- [ ] [wl-p1] Lifecycle jobs emit no SSE progress lines (the Applier does). The live-log panel opens on a lifecycle job that completes with no output. Sparse but not broken; add progress emission if lifecycle jobs ever need streaming.
+- [ ] [wl-p1] Remove guard reads `store.Service.State`; after a `stop` job, State refreshes only via the event-driven discovery reconcile, so a stop-then-immediately-remove could briefly 409 on a stale "running". Not reachable via normal UI flow (remove is offered only on already-stopped rows). Harden with a live `ContainerInspect` in the guard if it ever surfaces.
+- [ ] [wl-p1] No test covers the 4 new lifecycle event `KIND_META` entries (started/stopped/restarted/removed) in `EventItem.test.tsx`. Add if event-label coverage matters.
+
 ### UX / lifecycle
 
 - [x] ~~[smoke-2026-07-10] Prune Gone services / empty projects~~, SHIPPED (dashboard-lifecycle UX batch, 2026-07-11): `auto_remove_gone` setting (default on) + `gone_grace_seconds` (default 3600) + `services.gone_since`; discovery hard-deletes gone-past-grace services + empty discovered projects (FK cascade). Manual projects never pruned.
