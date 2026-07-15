@@ -30,6 +30,10 @@ describe("Sidebar", () => {
     expect(await screen.findByRole("link", { name: /^media,/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /logout/i })).toBeInTheDocument();
     expect(await screen.findByText("v1.4.2")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /github repository/i })).toHaveAttribute(
+      "href",
+      "https://github.com/yorah/dockbrr",
+    );
   });
 
   test("shows an update-count badge only when the project has open updates", async () => {
