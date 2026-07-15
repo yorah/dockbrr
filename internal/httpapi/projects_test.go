@@ -327,3 +327,34 @@ func TestProjectsCheckStatusEmptyWhenNoRemoteState(t *testing.T) {
 		t.Fatalf("check_status=%q last_checked=%q, want both empty", checkStatus, lastChecked)
 	}
 }
+
+func TestProjectsEndpointIncludesAutoNamed(t *testing.T) {
+	srv, db, tok, csrf := authedServer(t, Deps{})
+
+	projs := store.NewProjects(db)
+	id, err := projs.Upsert(store.Project{HostID: 1, Kind: "standalone", Name: "adoring_saha", WorkingDir: ""})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := projs.SetAutoNamed(id, true); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := authReq(httptest.NewRequest(http.MethodGet, "/api/projects", nil), tok, csrf)
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	var out []struct {
+		Name      string `json:"name"`
+		AutoNamed bool   `json:"auto_named"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 || out[0].Name != "adoring_saha" || !out[0].AutoNamed {
+		t.Fatalf("projects payload = %+v, want one adoring_saha with auto_named=true", out)
+	}
+}
