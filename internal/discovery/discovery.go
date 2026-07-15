@@ -13,6 +13,7 @@ import (
 
 	"dockbrr/internal/compose"
 	"dockbrr/internal/detect"
+	"dockbrr/internal/discovery/dockername"
 	"dockbrr/internal/docker"
 	"dockbrr/internal/store"
 )
@@ -274,6 +275,13 @@ func (r *Reconciler) Reconcile(ctx context.Context) (changed bool, err error) {
 			if err := r.projects.SetUnmanaged(pid, missing); err != nil {
 				return false, err
 			}
+		}
+
+		// Loose grouping: a standalone container whose name Docker auto-assigned
+		// (adjective_surname) is throwaway noise. Compose projects are never
+		// loose. Recomputed each reconcile so pre-existing rows get corrected.
+		if err := r.projects.SetAutoNamed(pid, g.Kind == "standalone" && dockername.IsDockerAssigned(g.Name)); err != nil {
+			return false, err
 		}
 
 		// Drift: a service is drifted when the image it is actually running

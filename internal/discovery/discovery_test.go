@@ -1391,3 +1391,45 @@ func TestReconcileGoneServiceInManualProjectNeverAutoDeleted(t *testing.T) {
 		t.Fatalf("manual project must survive, got %+v", all)
 	}
 }
+
+func TestReconcileFlagsAutoNamedStandalone(t *testing.T) {
+	db := openDB(t)
+	projects := store.NewProjects(db)
+	services := store.NewServices(db)
+
+	fc := &fakeCollector{
+		containers: []docker.Container{
+			// Compose service: never loose.
+			{ID: "c1", Project: "app", Service: "web", WorkingDir: "/srv/app",
+				ConfigFiles: []string{"docker-compose.yml"}, Name: "app_web_1",
+				ImageRef: "nginx:latest", State: "running"},
+			// Standalone, explicitly named: not loose.
+			{ID: "s1", Project: "", Name: "backrest", ImageRef: "backrest:latest", State: "running"},
+			// Standalone, Docker-assigned name: loose.
+			{ID: "s2", Project: "", Name: "adoring_saha", ImageRef: "busybox:latest", State: "exited"},
+		},
+	}
+
+	r := discovery.NewReconciler(fc, projects, services, 1, nil, nil)
+	if _, err := r.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := projects.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, p := range all {
+		got[p.Name] = p.AutoNamed
+	}
+	if got["app"] {
+		t.Error("compose project 'app' flagged auto_named, want false")
+	}
+	if got["backrest"] {
+		t.Error("explicitly-named standalone 'backrest' flagged auto_named, want false")
+	}
+	if !got["adoring_saha"] {
+		t.Error("Docker-named standalone 'adoring_saha' not flagged auto_named, want true")
+	}
+}
