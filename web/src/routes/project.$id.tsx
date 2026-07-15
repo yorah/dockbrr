@@ -6,6 +6,7 @@ import { DashboardStats } from "@/components/DashboardStats";
 import { DashboardTable } from "@/components/DashboardTable";
 import { ReviewDrawer } from "@/components/ReviewDrawer";
 import { ChangelogDrawer } from "@/components/ChangelogDrawer";
+import { LogsDrawer } from "@/components/LogsDrawer";
 import { ApplyPanel } from "@/components/ApplyPanel";
 import { useDashboardRows, type FilterState } from "@/hooks/useDashboardRows";
 import { useStatus } from "@/hooks/queries";
@@ -27,6 +28,7 @@ export function ProjectRoute() {
   });
   const [selected, setSelected] = useState<Selected | null>(null);
   const [changelogFor, setChangelogFor] = useState<{ update: Update; service: Service } | null>(null);
+  const [logsFor, setLogsFor] = useState<Service | null>(null);
   const [appliedJobId, setAppliedJobId] = useState<number | null>(null);
 
   // The project filter is pinned to the route param: a status/search change
@@ -112,6 +114,7 @@ export function ProjectRoute() {
             setSelected({ update, service, project: proj });
           }}
           onChangelog={(update, service) => setChangelogFor({ update, service })}
+          onLogs={setLogsFor}
         />
       )}
 
@@ -122,6 +125,14 @@ export function ProjectRoute() {
           onClose={() => setChangelogFor(null)}
         />
       )}
+
+      <LogsDrawer
+        service={logsFor}
+        open={logsFor != null}
+        onOpenChange={(o) => {
+          if (!o) setLogsFor(null);
+        }}
+      />
 
       {selected && (
         <ReviewDrawer

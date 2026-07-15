@@ -6,6 +6,7 @@ import { DashboardStats } from "@/components/DashboardStats";
 import { DashboardTable } from "@/components/DashboardTable";
 import { ReviewDrawer } from "@/components/ReviewDrawer";
 import { ChangelogDrawer } from "@/components/ChangelogDrawer";
+import { LogsDrawer } from "@/components/LogsDrawer";
 import { ApplyPanel } from "@/components/ApplyPanel";
 import { AddProjectDialog } from "@/components/AddProjectDialog";
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,7 @@ export function DashboardRoute() {
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [selected, setSelected] = useState<Selected | null>(null);
   const [changelogFor, setChangelogFor] = useState<{ update: Update; service: Service } | null>(null);
+  const [logsFor, setLogsFor] = useState<Service | null>(null);
   // Set by ReviewDrawer's onApplied. Task 13 wires this job id into the live-log/health-gate panel.
   const [appliedJobId, setAppliedJobId] = useState<number | null>(null);
   const [addOpen, setAddOpen] = useState(false);
@@ -114,6 +116,7 @@ export function DashboardRoute() {
             setSelected({ update, service, project });
           }}
           onChangelog={(update, service) => setChangelogFor({ update, service })}
+          onLogs={setLogsFor}
         />
       )}
 
@@ -124,6 +127,14 @@ export function DashboardRoute() {
           onClose={() => setChangelogFor(null)}
         />
       )}
+
+      <LogsDrawer
+        service={logsFor}
+        open={logsFor != null}
+        onOpenChange={(o) => {
+          if (!o) setLogsFor(null);
+        }}
+      />
 
       {selected && (
         <ReviewDrawer
