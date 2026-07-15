@@ -1,4 +1,4 @@
-import { LogOut } from "lucide-react";
+import { Code, LogOut } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -57,9 +57,23 @@ export function Sidebar({ collapsed, className }: { collapsed: boolean; classNam
         </div>
         <Separator />
         {status.data && (
-          <span className={cn("px-4 text-xs text-muted-foreground", collapsed && "px-0 text-center text-[10px]")}>
-            v{status.data.version}
-          </span>
+          <div
+            className={cn(
+              "flex items-center justify-between px-4 text-xs text-muted-foreground",
+              collapsed && "flex-col gap-1 px-0 text-center text-[10px]",
+            )}
+          >
+            <span>v{status.data.version}</span>
+            <a
+              href="https://github.com/yorah/dockbrr"
+              target="_blank"
+              rel="noreferrer"
+              aria-label="GitHub repository"
+              className="transition-colors hover:text-foreground"
+            >
+              <Code className="h-4 w-4" />
+            </a>
+          </div>
         )}
       </div>
     </aside>
