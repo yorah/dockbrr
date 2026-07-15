@@ -45,6 +45,8 @@ export function DashboardRoute() {
   );
   const applicableUpdates = updatesData.filter((u) => !goneServiceIds.has(u.service_id));
 
+  const looseDefaultOpen = filters.search !== "" || filters.status !== "" || filters.onlyUpdates;
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <DashboardStats
@@ -101,6 +103,8 @@ export function DashboardRoute() {
       {!isLoading && !isError && rows.length > 0 && (
         <DashboardTable
           rows={rows}
+          groupLoose
+          looseDefaultOpen={looseDefaultOpen}
           updatesByService={updatesByService}
           onApplied={setAppliedJobId}
           onReview={(update, service, project) => {

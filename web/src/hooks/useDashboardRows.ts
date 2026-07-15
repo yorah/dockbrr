@@ -13,7 +13,8 @@ export interface FilterState {
 
 export type Row =
   | { kind: "project"; project: Project }
-  | { kind: "service"; project: Project; service: Service; update?: Update; lastApplied?: Update };
+  | { kind: "service"; project: Project; service: Service; update?: Update; lastApplied?: Update }
+  | { kind: "loose"; count: number };
 
 const openStatuses = new Set(["available"]);
 

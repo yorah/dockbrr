@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   flexRender,
@@ -58,6 +58,10 @@ export interface DashboardTableProps {
   onApplied: (jobId: number) => void;
   /** Opens the read-only changelog view for a service's pending or last-applied update. */
   onChangelog: (update: Update, service: Service) => void;
+  /** When true (dashboard only), auto-named projects render inside a collapsed "Loose" group. */
+  groupLoose?: boolean;
+  /** Initial + synced open-state for the Loose group (dashboard passes filters-active). */
+  looseDefaultOpen?: boolean;
 }
 
 // Resolve to whichever candidate actually HAS changelog content, preferring the
@@ -350,14 +354,37 @@ function buildColumns(
   ];
 }
 
-export function DashboardTable({ rows, onReview, updatesByService, onApplied, onChangelog }: DashboardTableProps) {
+export function DashboardTable({
+  rows,
+  onReview,
+  updatesByService,
+  onApplied,
+  onChangelog,
+  groupLoose = false,
+  looseDefaultOpen = false,
+}: DashboardTableProps) {
   const [collapsed, setCollapsed] = useState<Set<number>>(() => new Set());
   const [composeProject, setComposeProject] = useState<Project | null>(null);
+  const [looseOpen, setLooseOpen] = useState(looseDefaultOpen);
 
-  const visibleRows = useMemo(
-    () => rows.filter((r) => r.kind === "project" || !collapsed.has(r.project.id)),
-    [rows, collapsed],
-  );
+  // Auto-expand under an active filter, re-collapse when it clears.
+  useEffect(() => setLooseOpen(looseDefaultOpen), [looseDefaultOpen]);
+
+  const visibleRows = useMemo(() => {
+    const shown = (r: Row) => r.kind !== "service" || !collapsed.has(r.project.id);
+    if (!groupLoose) {
+      return rows.filter(shown);
+    }
+    const normal = rows.filter((r) => r.kind !== "loose" && !r.project.auto_named);
+    const loose = rows.filter((r) => r.kind !== "loose" && r.project.auto_named);
+    const looseCount = loose.filter((r) => r.kind === "project").length;
+    const out: Row[] = normal.filter(shown);
+    if (looseCount > 0) {
+      out.push({ kind: "loose", count: looseCount });
+      if (looseOpen) out.push(...loose.filter(shown));
+    }
+    return out;
+  }, [rows, collapsed, groupLoose, looseOpen]);
 
   const columns = useMemo(
     () => buildColumns(onApplied, onChangelog),
@@ -368,7 +395,12 @@ export function DashboardTable({ rows, onReview, updatesByService, onApplied, on
     data: visibleRows,
     columns,
     getCoreRowModel: getCoreRowModel(),
-    getRowId: (row) => (row.kind === "project" ? `project-${row.project.id}` : `service-${row.service.id}`),
+    getRowId: (row) =>
+      row.kind === "project"
+        ? `project-${row.project.id}`
+        : row.kind === "loose"
+          ? "loose-header"
+          : `service-${row.service.id}`,
   });
 
   function toggle(projectId: number) {
@@ -397,6 +429,35 @@ export function DashboardTable({ rows, onReview, updatesByService, onApplied, on
         <TableBody>
           {table.getRowModel().rows.map((row) => {
             const original = row.original;
+
+            if (original.kind === "loose") {
+              return (
+                <TableRow
+                  key={row.id}
+                  tabIndex={0}
+                  className="cursor-pointer bg-muted/20 font-medium text-muted-foreground"
+                  onClick={() => setLooseOpen((o) => !o)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") setLooseOpen((o) => !o);
+                  }}
+                >
+                  <TableCell colSpan={row.getVisibleCells().length}>
+                    <button
+                      type="button"
+                      className="flex items-center gap-2 font-medium"
+                      aria-expanded={looseOpen}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setLooseOpen((o) => !o);
+                      }}
+                    >
+                      <ChevronRight className={cn("h-4 w-4 transition-transform", looseOpen && "rotate-90")} />
+                      Loose ({original.count})
+                    </button>
+                  </TableCell>
+                </TableRow>
+              );
+            }
 
             if (original.kind === "project") {
               const expanded = !collapsed.has(original.project.id);

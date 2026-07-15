@@ -588,3 +588,34 @@ test("changelog column shows the pending changelog (non-muted) when the pending 
 
   await waitFor(() => expect(screen.getByText("Pending notes")).toBeInTheDocument());
 });
+
+test("hides auto-named projects behind a collapsed Loose group on the dashboard", async () => {
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 1, name: "app", kind: "compose", working_dir: "/srv",
+          auto_update_enabled: false, unmanaged: false, auto_named: false,
+          services: [{ id: 10, name: "web", image_ref: "nginx:1.27", current_digest: "sha256:a", state: "running", pinned: false, healthcheck: false, auto_update_enabled: null }],
+        },
+        {
+          id: 2, name: "adoring_saha", kind: "standalone", working_dir: "",
+          auto_update_enabled: false, unmanaged: false, auto_named: true,
+          services: [{ id: 20, name: "adoring_saha", image_ref: "busybox:latest", current_digest: "sha256:b", state: "exited", pinned: false, healthcheck: false, auto_update_enabled: null }],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () => HttpResponse.json([])),
+  );
+  renderDashboardWithRouter();
+
+  // Named project's service is visible; the loose service is hidden by default.
+  await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
+  expect(screen.queryByText("busybox:latest")).not.toBeInTheDocument();
+
+  // The Loose group header shows the count; expanding reveals the loose service.
+  // Scoped to <main>: the sidebar (Task 5) also renders its own "Loose (1)" toggle.
+  const toggle = within(screen.getByRole("main")).getByRole("button", { name: /loose \(1\)/i });
+  await userEvent.click(toggle);
+  await waitFor(() => expect(screen.getByText("busybox:latest")).toBeInTheDocument());
+});
