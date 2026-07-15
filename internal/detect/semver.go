@@ -3,6 +3,7 @@
 package detect
 
 import (
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -55,6 +56,34 @@ func NewerSemverTag(current string, tags []string) (string, bool) {
 		}
 	}
 	return best, best != ""
+}
+
+// semverTagsDesc returns the stable, fully-specified semver tags (X.Y.Z, with an
+// optional leading v) from tags, sorted newest-first. Pre-release/build
+// (1.2.3-rc1) and partial (1, 1.31) tags are excluded. It backs the floating-tag
+// reverse version-naming scan, which walks tags newest-first.
+func semverTagsDesc(tags []string) []string {
+	type tc struct {
+		tag  string
+		core [3]int
+	}
+	var out []tc
+	for _, t := range tags {
+		if !exactSemverRe.MatchString(t) || strings.ContainsAny(t, "-+") {
+			continue
+		}
+		c, ok := parseCore(t)
+		if !ok {
+			continue
+		}
+		out = append(out, tc{t, c})
+	}
+	sort.Slice(out, func(i, j int) bool { return coreLess(out[j].core, out[i].core) })
+	res := make([]string, 0, len(out))
+	for _, e := range out {
+		res = append(res, e.tag)
+	}
+	return res
 }
 
 // ParseCore extracts the lenient [major, minor, patch] core of a version string

@@ -120,6 +120,7 @@ func run(args []string, getenv func(string) string) error {
 	events := store.NewEvents(db)
 	images := store.NewImages(db)
 	states := store.NewRemoteStates(db)
+	tagCache := store.NewTagDigests(db)
 	jobs := store.NewJobs(db)
 	jobLogs := store.NewJobLogs(db)
 	snapshots := store.NewSnapshots(db)
@@ -162,7 +163,7 @@ func run(args []string, getenv func(string) string) error {
 	plat := registry.HostPlatform()
 	resolver := registry.NewResolver(creds)
 	cacheTTL := func() time.Duration { return settingDuration(settings, "cache_ttl_seconds", 10*time.Minute) }
-	detector := detect.NewDetector(resolver, updates, images, states, events, plat, cacheTTL)
+	detector := detect.NewDetector(resolver, updates, images, states, events, tagCache, plat, cacheTTL)
 
 	httpClient := &http.Client{Timeout: httpClientTTL}
 	tokenFn := func() string {

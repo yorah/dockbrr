@@ -16,6 +16,7 @@ import (
 type Resolver interface {
 	Resolve(ctx context.Context, ref string, plat registry.Platform) (registry.RemoteImage, error)
 	ListTags(ctx context.Context, repo string) ([]string, error)
+	Head(ctx context.Context, ref string) (string, error)
 }
 
 // Detector compares a service's running digest against remote registry state
@@ -27,6 +28,7 @@ type Detector struct {
 	images   *store.Images
 	states   *store.RemoteStates
 	events   *store.Events
+	tagCache *store.TagDigests
 	plat     registry.Platform
 	cacheTTL func() time.Duration
 }
@@ -40,6 +42,7 @@ func NewDetector(
 	images *store.Images,
 	states *store.RemoteStates,
 	events *store.Events,
+	tagCache *store.TagDigests,
 	plat registry.Platform,
 	cacheTTL func() time.Duration,
 ) *Detector {
@@ -48,7 +51,8 @@ func NewDetector(
 	}
 	return &Detector{
 		resolver: resolver, updates: updates, images: images,
-		states: states, events: events, plat: plat, cacheTTL: cacheTTL,
+		states: states, events: events, tagCache: tagCache,
+		plat: plat, cacheTTL: cacheTTL,
 	}
 }
 
@@ -151,6 +155,24 @@ func (d *Detector) Detect(ctx context.Context, svc store.Service) (*store.Update
 	if toVer == "" {
 		toVer = targetRemote.Labels["org.opencontainers.image.version"]
 	}
+	// 5b. Reverse version-naming for a fully-floating tag (latest, stable,
+	// named): the tag carries no semver and many images ship no version label
+	// (e.g. backrest sets only image.source), so both ends read blank. Name them
+	// by matching the running + target digests back to the repo's stable semver
+	// tags. This is COSMETIC: apply still floats the SAME tag, so targetTag and
+	// ToDigest are untouched (we never suggest moving latest -> v1.14.1).
+	// Partial-semver floating tags (1, 1.31) are excluded (semverOrEmpty(tag) is
+	// non-empty): their stream name is not a release name. Best-effort + bounded:
+	// a list/head failure or rate-limit leaves the version blank.
+	if semverOrEmpty(tag) == "" && ClassifyTag(repo+":"+tag) == TagFloating && (fromVer == "" || toVer == "") {
+		rf, rt := d.reverseVersions(ctx, repo, svc.CurrentDigest, targetRemote)
+		if fromVer == "" {
+			fromVer = rf
+		}
+		if toVer == "" {
+			toVer = rt
+		}
+	}
 	if toVer == "" {
 		toVer = fromVer
 	}
@@ -210,6 +232,76 @@ func (d *Detector) recordImage(repo, tag string, remote registry.RemoteImage, la
 	}); err != nil {
 		logger.Errorf("detect: record image %s@%s: %v", repo, remote.Digest, err)
 	}
+}
+
+// reverseScanCap bounds how many stable semver tags the floating-tag reverse
+// version-naming scan will HEAD before giving up. A floating tag's running and
+// target images sit near the head of the release list in practice, so a modest
+// cap names them while keeping registry traffic (and rate-limit exposure)
+// bounded on large repos (e.g. 300+ tags).
+const reverseScanCap = 50
+
+// reverseVersions best-effort names the from (running) and to (target) digests
+// of a fully-floating tag by HEAD-matching them against the repo's stable semver
+// tags, newest-first. It stops once both ends are named, the scan cap is hit, or
+// the registry rate-limits. Returns ("", "") on a tag-list failure. It uses Head
+// (digest only) rather than Resolve to avoid pulling a config blob per tag.
+func (d *Detector) reverseVersions(ctx context.Context, repo, fromDigest string, target registry.RemoteImage) (fromVer, toVer string) {
+	tags, err := d.resolver.ListTags(ctx, repo)
+	if err != nil {
+		logger.Warnf("detect: list tags %q: %v (version reverse-lookup skipped)", repo, err)
+		return "", ""
+	}
+	cands := semverTagsDesc(tags)
+	if len(cands) > reverseScanCap {
+		logger.Debugf("detect: %s reverse-lookup capped at %d of %d semver tags", repo, reverseScanCap, len(cands))
+		cands = cands[:reverseScanCap]
+	}
+	for _, t := range cands {
+		if fromVer != "" && toVer != "" {
+			break
+		}
+		dg, err := d.tagDigest(ctx, repo, t)
+		if err != nil {
+			if registry.IsRateLimited(err) {
+				logger.Warnf("detect: head %s:%s rate-limited (reverse-lookup aborted)", repo, t)
+				break
+			}
+			logger.Tracef("detect: head %s:%s: %v (reverse-lookup continues)", repo, t, err)
+			continue
+		}
+		if toVer == "" && (dg == target.Digest || dg == target.PlatformDigest) {
+			toVer = t
+		}
+		if fromVer == "" && dg == fromDigest {
+			fromVer = t
+		}
+	}
+	return fromVer, toVer
+}
+
+// tagDigest returns the served digest for repo:tag, preferring the permanent
+// tag-digest cache (exact-semver tags are immutable) and falling back to a
+// registry HEAD, whose result is then cached. A HEAD error is returned so the
+// caller can distinguish a rate-limit (abort) from a per-tag failure (skip).
+func (d *Detector) tagDigest(ctx context.Context, repo, tag string) (string, error) {
+	if d.tagCache != nil {
+		if dg, ok, err := d.tagCache.Get(repo, tag); err != nil {
+			logger.Warnf("detect: tag-cache get %s:%s: %v (falling back to head)", repo, tag, err)
+		} else if ok {
+			return dg, nil
+		}
+	}
+	dg, err := d.resolver.Head(ctx, repo+":"+tag)
+	if err != nil {
+		return "", err
+	}
+	if d.tagCache != nil {
+		if err := d.tagCache.Put(repo, tag, dg); err != nil {
+			logger.Warnf("detect: tag-cache put %s:%s: %v", repo, tag, err)
+		}
+	}
+	return dg, nil
 }
 
 // freshCachedDigest returns the cached remote digest for (repo, tag) when the
