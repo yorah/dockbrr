@@ -6,7 +6,18 @@ import {
   useReactTable,
   type ColumnDef,
 } from "@tanstack/react-table";
-import { AlertTriangle, ArrowUpCircle, ChevronRight, Eye, FileText, RefreshCw } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowUpCircle,
+  ChevronRight,
+  Eye,
+  FileText,
+  Play,
+  RefreshCw,
+  RotateCw,
+  ScrollText,
+  Square,
+} from "lucide-react";
 import { cn } from "@/lib/cn";
 import { relative } from "@/components/RelativeTime";
 import {
@@ -21,11 +32,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { StatusBadge, computeStatus } from "@/components/StatusBadge";
+import { StatusBadge, computeStatus, isStopped } from "@/components/StatusBadge";
 import { SeverityDelta } from "@/components/SeverityDelta";
 import { DigestShort } from "@/components/DigestShort";
 import { ComposeModal } from "@/components/ComposeModal";
-import { useApply, useCheck, useToggleProjectAuto } from "@/hooks/mutations";
+import { useApply, useCheck, useLifecycle, useToggleProjectAuto } from "@/hooks/mutations";
 import { ApplyAllButton, CheckAllButton } from "@/components/BulkActions";
 import type { Row } from "@/hooks/useDashboardRows";
 import type { Project, Service, Update } from "@/api/types";
@@ -58,6 +69,8 @@ export interface DashboardTableProps {
   onApplied: (jobId: number) => void;
   /** Opens the read-only changelog view for a service's pending or last-applied update. */
   onChangelog: (update: Update, service: Service) => void;
+  /** Opens the live tail-logs drawer for a service. Defaults to a no-op (wired in Task 8). */
+  onLogs?: (service: Service) => void;
   /** When true (dashboard only), auto-named projects render inside a collapsed "Loose" group. */
   groupLoose?: boolean;
   /** Initial + synced open-state for the Loose group (dashboard passes filters-active). */
@@ -80,6 +93,7 @@ function ActionsCell({
   changelog,
   onApplied,
   onChangelog,
+  onLogs,
 }: {
   service: Service;
   update: Update | undefined;
@@ -87,13 +101,25 @@ function ActionsCell({
   changelog: Update | undefined;
   onApplied: DashboardTableProps["onApplied"];
   onChangelog: DashboardTableProps["onChangelog"];
+  onLogs: (service: Service) => void;
 }) {
   const check = useCheck();
   const apply = useApply();
+  const lifecycle = useLifecycle();
   // A gone service has no container to recreate. Applying would just create
   // a fresh one for something the user (or something else) removed.
   const canApply = update?.status === "available" && service.state !== "gone";
   const isHistory = !!changelog && changelog !== update;
+  // "gone" services have no container left to start/stop/restart: only Logs
+  // (which reads cached history, not a live container) still makes sense.
+  const gone = service.state === "gone";
+  const stopped = isStopped(service.state);
+  const runLifecycle = (action: "start" | "stop" | "restart") => {
+    lifecycle.mutate(
+      { serviceId: service.id, action },
+      { onSuccess: (res) => onApplied(res.job_id) },
+    );
+  };
   return (
     <div className="flex items-center gap-1">
         <Tooltip>
@@ -161,6 +187,83 @@ function ActionsCell({
             </Button>
           </TooltipTrigger>
           <TooltipContent>Check now</TooltipContent>
+        </Tooltip>
+        {!gone && stopped && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 w-7 p-0"
+                disabled={lifecycle.isPending}
+                aria-label={`Start ${service.name}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  runLifecycle("start");
+                }}
+              >
+                <Play className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Start</TooltipContent>
+          </Tooltip>
+        )}
+        {!gone && !stopped && (
+          <>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 w-7 p-0"
+                  disabled={lifecycle.isPending}
+                  aria-label={`Stop ${service.name}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    runLifecycle("stop");
+                  }}
+                >
+                  <Square className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Stop</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 w-7 p-0"
+                  disabled={lifecycle.isPending}
+                  aria-label={`Restart ${service.name}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    runLifecycle("restart");
+                  }}
+                >
+                  <RotateCw className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Restart</TooltipContent>
+            </Tooltip>
+          </>
+        )}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0"
+              aria-label={`Logs for ${service.name}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onLogs(service);
+              }}
+            >
+              <ScrollText className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Logs</TooltipContent>
         </Tooltip>
       </div>
   );
@@ -233,6 +336,7 @@ function ProjectBulkActions({
 function buildColumns(
   onApplied: DashboardTableProps["onApplied"],
   onChangelog: DashboardTableProps["onChangelog"],
+  onLogs: (service: Service) => void,
 ): ColumnDef<Row>[] {
   return [
     {
@@ -347,6 +451,7 @@ function buildColumns(
             changelog={changelogUpdate(r)}
             onApplied={onApplied}
             onChangelog={onChangelog}
+            onLogs={onLogs}
           />
         );
       },
@@ -360,6 +465,7 @@ export function DashboardTable({
   updatesByService,
   onApplied,
   onChangelog,
+  onLogs = () => {},
   groupLoose = false,
   looseDefaultOpen = false,
 }: DashboardTableProps) {
@@ -387,8 +493,8 @@ export function DashboardTable({
   }, [rows, collapsed, groupLoose, looseOpen]);
 
   const columns = useMemo(
-    () => buildColumns(onApplied, onChangelog),
-    [onApplied, onChangelog],
+    () => buildColumns(onApplied, onChangelog, onLogs),
+    [onApplied, onChangelog, onLogs],
   );
 
   const table = useReactTable({

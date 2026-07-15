@@ -589,6 +589,71 @@ test("changelog column shows the pending changelog (non-muted) when the pending 
   await waitFor(() => expect(screen.getByText("Pending notes")).toBeInTheDocument());
 });
 
+test("action menu is state-aware and wires Stop to the lifecycle endpoint", async () => {
+  const calls: Array<{ id: string; action: string }> = [];
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 1,
+          name: "app",
+          kind: "compose",
+          working_dir: "/srv",
+          auto_update_enabled: false,
+          services: [
+            {
+              id: 10,
+              name: "web",
+              image_ref: "nginx:1.27",
+              current_digest: "sha256:a",
+              state: "running",
+              pinned: false,
+              healthcheck: false,
+              auto_update_enabled: null,
+            },
+            {
+              id: 11,
+              name: "cache",
+              image_ref: "redis:8.8",
+              current_digest: "sha256:c",
+              state: "exited",
+              pinned: false,
+              healthcheck: false,
+              auto_update_enabled: null,
+            },
+          ],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () => HttpResponse.json([])),
+    http.post("/api/services/:id/lifecycle", async ({ request, params }) => {
+      const body = (await request.json()) as { action: string };
+      calls.push({ id: String(params.id), action: body.action });
+      return HttpResponse.json({ job_id: 555 });
+    }),
+  );
+  renderDashboardWithRouter();
+  await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
+
+  const webRow = screen.getByText("web").closest("tr")!;
+  const cacheRow = screen.getByText("cache").closest("tr")!;
+
+  // Running row: Stop + Restart, no Start.
+  expect(within(webRow).getByRole("button", { name: /^stop web$/i })).toBeInTheDocument();
+  expect(within(webRow).getByRole("button", { name: /^restart web$/i })).toBeInTheDocument();
+  expect(within(webRow).queryByRole("button", { name: /^start web$/i })).not.toBeInTheDocument();
+  expect(within(webRow).getByRole("button", { name: /^logs for web$/i })).toBeInTheDocument();
+
+  // Stopped row: Start, no Stop/Restart.
+  expect(within(cacheRow).getByRole("button", { name: /^start cache$/i })).toBeInTheDocument();
+  expect(within(cacheRow).queryByRole("button", { name: /^stop cache$/i })).not.toBeInTheDocument();
+  expect(within(cacheRow).queryByRole("button", { name: /^restart cache$/i })).not.toBeInTheDocument();
+  expect(within(cacheRow).getByRole("button", { name: /^logs for cache$/i })).toBeInTheDocument();
+
+  await userEvent.click(within(webRow).getByRole("button", { name: /^stop web$/i }));
+  await waitFor(() => expect(calls).toEqual([{ id: "10", action: "stop" }]));
+});
+
 test("hides auto-named projects behind a collapsed Loose group on the dashboard", async () => {
   server.use(
     http.get("/api/projects", () =>
