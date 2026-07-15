@@ -3,7 +3,7 @@ import { joinRows } from "./useDashboardRows";
 import type { Project, Update } from "@/api/types";
 
 const projects: Project[] = [{
-  id: 1, name: "app", kind: "compose", working_dir: "/srv", auto_update_enabled: false, unmanaged: false,
+  id: 1, name: "app", kind: "compose", working_dir: "/srv", auto_update_enabled: false, unmanaged: false, auto_named: false,
   services: [
     { id: 10, name: "web", image_ref: "nginx:1.27", current_digest: "sha256:a", state: "running", pinned: false, drifted: false, healthcheck: false, auto_update_enabled: null, check_status: "ok", last_checked: "" },
     { id: 11, name: "db", image_ref: "postgres:16", current_digest: "sha256:b", state: "running", pinned: true, drifted: false, healthcheck: true, auto_update_enabled: null, check_status: "ok", last_checked: "" },
@@ -53,7 +53,7 @@ describe("joinRows", () => {
 
   test("a project whose only service is gone produces no header when showRemoved is off, and one when on", () => {
     const goneOnly: Project[] = [{
-      id: 2, name: "torn-down", kind: "compose", working_dir: "/srv2", auto_update_enabled: false, unmanaged: false,
+      id: 2, name: "torn-down", kind: "compose", working_dir: "/srv2", auto_update_enabled: false, unmanaged: false, auto_named: false,
       services: [
         { id: 20, name: "old", image_ref: "redis:6", current_digest: "sha256:x", state: "gone", pinned: false, drifted: false, healthcheck: false, auto_update_enabled: null, check_status: "ok", last_checked: "" },
       ],

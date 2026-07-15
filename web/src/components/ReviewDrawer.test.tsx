@@ -41,6 +41,7 @@ const project: Project = {
   working_dir: "/srv",
   auto_update_enabled: false,
   unmanaged: false,
+  auto_named: false,
   services: [service],
 };
 

@@ -7,7 +7,7 @@ import { renderApp } from "@/test/utils";
 import { SIDEBAR_STORAGE_KEY } from "@/hooks/useSidebar";
 
 const service = { id: 10, name: "plex", image_ref: "plex:1", current_digest: "sha256:a", state: "running", pinned: false, drifted: false, healthcheck: true, auto_update_enabled: null, check_status: "ok", last_checked: "2026-07-12T10:00:00Z" };
-const project = { id: 1, name: "media", kind: "compose", working_dir: "/srv/media", auto_update_enabled: false, unmanaged: false, services: [service] };
+const project = { id: 1, name: "media", kind: "compose", working_dir: "/srv/media", auto_update_enabled: false, unmanaged: false, auto_named: false, services: [service] };
 
 beforeEach(() => {
   localStorage.clear();
@@ -74,5 +74,22 @@ describe("Sidebar", () => {
     const sidebar = within(screen.getByRole("complementary"));
     expect(await sidebar.findByRole("button", { name: /add project/i })).toBeInTheDocument();
     expect(sidebar.queryByRole("link", { name: /^media,/ })).not.toBeInTheDocument();
+  });
+
+  test("groups auto-named projects under a collapsed Loose section", async () => {
+    const loose = { id: 2, name: "adoring_saha", kind: "standalone", working_dir: "", auto_update_enabled: false, unmanaged: false, auto_named: true, services: [] };
+    server.use(http.get("/api/projects", () => HttpResponse.json([project, loose])));
+    renderApp("/");
+
+    // Named project is a normal top-level link.
+    expect(await screen.findByRole("link", { name: /^media,/ })).toBeInTheDocument();
+    // Loose project is hidden until the group is expanded.
+    expect(screen.queryByRole("link", { name: /^adoring_saha,/ })).not.toBeInTheDocument();
+
+    const toggle = screen.getByRole("button", { name: /loose/i });
+    expect(toggle).toHaveTextContent("Loose (1)");
+    await userEvent.click(toggle);
+
+    expect(await screen.findByRole("link", { name: /^adoring_saha,/ })).toBeInTheDocument();
   });
 });
