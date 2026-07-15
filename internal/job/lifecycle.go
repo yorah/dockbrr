@@ -72,8 +72,12 @@ func (l *Lifecycle) Handle(ctx context.Context, job store.Job) {
 	case "stop":
 		err = l.runOrdered(ctx, svc, proj, "stop")
 	case "restart":
-		if err = l.runOrdered(ctx, svc, proj, "stop"); err == nil {
-			err = l.runOrdered(ctx, svc, proj, "start")
+		// Compute dependent container ids once (parses the compose file) and
+		// reuse for both the stop and start phases, instead of re-deriving
+		// per phase.
+		depIDs := l.dependentContainerIDs(ctx, svc, proj)
+		if err = l.runOrderedWithDeps(ctx, svc, depIDs, "stop"); err == nil {
+			err = l.runOrderedWithDeps(ctx, svc, depIDs, "start")
 		}
 	case "remove":
 		err = l.runRemove(ctx, svc, proj)
@@ -98,6 +102,14 @@ func (l *Lifecycle) Handle(ctx context.Context, job store.Job) {
 // dependents.
 func (l *Lifecycle) runOrdered(ctx context.Context, svc store.Service, proj store.Project, verb string) error {
 	depIDs := l.dependentContainerIDs(ctx, svc, proj)
+	return l.runOrderedWithDeps(ctx, svc, depIDs, verb)
+}
+
+// runOrderedWithDeps is runOrdered's implementation, taking the target's
+// namespace-dependent container ids (depIDs) as a precomputed input rather
+// than deriving them itself. This lets a restart compute depIDs once and
+// reuse them for both its stop and start phases.
+func (l *Lifecycle) runOrderedWithDeps(ctx context.Context, svc store.Service, depIDs []string, verb string) error {
 	targetIDs := svc.ContainerIDs
 
 	var order []string

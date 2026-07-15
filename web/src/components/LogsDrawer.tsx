@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { RefreshCw } from "lucide-react";
 import {
   Drawer,
@@ -24,19 +24,29 @@ export function LogsDrawer({ service, open, onOpenChange }: LogsDrawerProps) {
   const [logs, setLogs] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isError, setIsError] = useState(false);
+  // Tracks which service the in-flight fetch was issued for, so a slow
+  // response for a service the user has since navigated away from can't
+  // clobber the currently selected service's state (e.g. clicking Logs on
+  // service A then quickly on service B).
+  const requestedServiceId = useRef<number | null>(null);
 
   const load = useCallback(() => {
     if (!service) return;
+    const serviceId = service.id;
+    requestedServiceId.current = serviceId;
     setIsLoading(true);
     setIsError(false);
-    fetchServiceLogs(service.id)
+    fetchServiceLogs(serviceId)
       .then((res) => {
+        if (requestedServiceId.current !== serviceId) return;
         setLogs(res.logs);
       })
       .catch(() => {
+        if (requestedServiceId.current !== serviceId) return;
         setIsError(true);
       })
       .finally(() => {
+        if (requestedServiceId.current !== serviceId) return;
         setIsLoading(false);
       });
   }, [service]);

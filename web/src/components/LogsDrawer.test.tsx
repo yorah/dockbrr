@@ -2,6 +2,7 @@ import { expect, test, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { server } from "@/test/msw";
 import { renderWithClient } from "@/test/utils";
 import { LogsDrawer } from "./LogsDrawer";
@@ -56,4 +57,39 @@ test("shows an error state when the fetch fails", async () => {
 test("renders nothing fetched when no service is set", () => {
   renderWithClient(<LogsDrawer service={null} open={false} onOpenChange={vi.fn()} />);
   expect(screen.queryByText(/failed to load logs/i)).not.toBeInTheDocument();
+});
+
+test("ignores a stale response for a service the user has since switched away from", async () => {
+  const other: Service = { ...service, id: 11, name: "cache" };
+  let resolveSlow: (() => void) | undefined;
+  server.use(
+    http.get("/api/services/10/logs", () =>
+      new Promise((resolve) => {
+        resolveSlow = () => resolve(HttpResponse.json({ logs: "slow service-10 logs" }));
+      }),
+    ),
+    http.get("/api/services/11/logs", () => HttpResponse.json({ logs: "fast service-11 logs" })),
+  );
+
+  const { client, rerender } = renderWithClient(
+    <LogsDrawer service={service} open onOpenChange={vi.fn()} />,
+  );
+
+  // Switch to a different service before the first (slow) fetch resolves.
+  // Re-wrap with the same QueryClientProvider/client so the query context
+  // isn't dropped by the rerender.
+  rerender(
+    <QueryClientProvider client={client}>
+      <LogsDrawer service={other} open onOpenChange={vi.fn()} />
+    </QueryClientProvider>,
+  );
+
+  expect(await screen.findByText(/fast service-11 logs/)).toBeInTheDocument();
+
+  // Now let the stale service-10 response resolve; it must not clobber the
+  // logs currently shown for service-11.
+  resolveSlow?.();
+  await new Promise((r) => setTimeout(r, 0));
+  expect(screen.getByText(/fast service-11 logs/)).toBeInTheDocument();
+  expect(screen.queryByText(/slow service-10 logs/)).not.toBeInTheDocument();
 });

@@ -80,7 +80,7 @@ test("gone service is not counted in the Stopped tile", () => {
   ];
   render(<DashboardStats projects={goneProjects} updates={[]} onFilter={onFilter} />);
   const stoppedTile = screen.getByText(/stopped/i).closest("button") as HTMLButtonElement;
-  // Only the "exited" service counts; "gone" is excluded (STOPPED_STATES = {exited, dead}).
+  // Only the "exited" service counts; "gone" is excluded (STOPPED_STATES = {exited, dead, created}).
   expect(within(stoppedTile).getByText("1")).toBeInTheDocument();
 });
 

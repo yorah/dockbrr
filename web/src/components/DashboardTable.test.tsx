@@ -654,6 +654,45 @@ test("action menu is state-aware and wires Stop to the lifecycle endpoint", asyn
   await waitFor(() => expect(calls).toEqual([{ id: "10", action: "stop" }]));
 });
 
+test("a gone service's row offers only Logs, no lifecycle buttons", async () => {
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 1,
+          name: "app",
+          kind: "compose",
+          working_dir: "/srv",
+          auto_update_enabled: false,
+          services: [
+            {
+              id: 10,
+              name: "web",
+              image_ref: "nginx:1.27",
+              current_digest: "sha256:a",
+              state: "gone",
+              pinned: false,
+              healthcheck: false,
+              auto_update_enabled: null,
+            },
+          ],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () => HttpResponse.json([])),
+  );
+  renderDashboardWithRouter();
+  // "gone" rows are hidden by default; toggle "Show removed" to see it.
+  await userEvent.click(await screen.findByRole("switch", { name: /show removed/i }));
+  await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
+
+  const main = within(screen.getByRole("main"));
+  expect(main.getByRole("button", { name: /^logs for web$/i })).toBeInTheDocument();
+  expect(main.queryByRole("button", { name: /^start web$/i })).not.toBeInTheDocument();
+  expect(main.queryByRole("button", { name: /^stop web$/i })).not.toBeInTheDocument();
+  expect(main.queryByRole("button", { name: /^restart web$/i })).not.toBeInTheDocument();
+});
+
 test("hides auto-named projects behind a collapsed Loose group on the dashboard", async () => {
   server.use(
     http.get("/api/projects", () =>
