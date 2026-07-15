@@ -32,7 +32,7 @@ New package `internal/discovery/dockername`:
   no maintenance. Header comment cites the source + frozen status; lists are MIT
   (moby/moby).
 - `IsDockerAssigned(name string) bool`:
-  1. Strip a single optional trailing digit (`focused_turing3` → `focused_turing`) — the
+  1. Strip a single optional trailing digit (`focused_turing3` -> `focused_turing`): the
      collision suffix that `GetRandomName` appends.
   2. Split on the first `_` into `adjective`, `surname`.
   3. Return `adjective ∈ adjectives && surname ∈ surnames`.

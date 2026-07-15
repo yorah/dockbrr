@@ -102,6 +102,7 @@ export function SidebarProjects({ collapsed }: { collapsed: boolean }) {
               onClick={() => setLooseOpen((o) => !o)}
               className={cn(rowClass, "text-muted-foreground", collapsed && "justify-center px-0")}
               aria-expanded={looseOpen}
+              aria-label={`Loose (${loose.length})`}
             >
               <ChevronRight className={cn("h-4 w-4 shrink-0 transition-transform", looseOpen && "rotate-90")} />
               {!collapsed && <span className="truncate">Loose ({loose.length})</span>}
