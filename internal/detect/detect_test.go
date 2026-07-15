@@ -26,6 +26,11 @@ type fakeResolver struct {
 	// simulate a cross-tag resolve returning a different digest than the
 	// tracked tag's same-tag resolve).
 	byRef map[string]registry.RemoteImage
+
+	// head/headErr back Head, consulted by the floating-tag reverse
+	// version-naming scan. A missing ref falls back to img.Digest.
+	head    map[string]string
+	headErr error
 }
 
 func (f fakeResolver) Resolve(_ context.Context, ref string, _ registry.Platform) (registry.RemoteImage, error) {
@@ -45,6 +50,18 @@ func (f fakeResolver) Resolve(_ context.Context, ref string, _ registry.Platform
 
 func (f fakeResolver) ListTags(_ context.Context, _ string) ([]string, error) {
 	return f.tags, f.tagsErr
+}
+
+func (f fakeResolver) Head(_ context.Context, ref string) (string, error) {
+	if f.headErr != nil {
+		return "", f.headErr
+	}
+	if f.head != nil {
+		if d, ok := f.head[ref]; ok {
+			return d, nil
+		}
+	}
+	return f.img.Digest, nil
 }
 
 func newDB(t *testing.T) *store.DB {
@@ -435,6 +452,10 @@ func (c countingResolver) ListTags(_ context.Context, _ string) ([]string, error
 	return nil, nil
 }
 
+func (c countingResolver) Head(_ context.Context, _ string) (string, error) {
+	return c.digest, nil
+}
+
 // TestDetectCacheTTLReadPerCall proves cacheTTL is consulted on every Detect
 // call rather than captured once at NewDetector time: the same detector
 // instance, given the same stale-ish cache row, behaves differently across
@@ -488,6 +509,76 @@ func TestDetectCacheTTLReadPerCall(t *testing.T) {
 	}
 	if u2 == nil || u2.ToDigest != "sha256:resolved" {
 		t.Fatalf("expected update from resolver after ttl flip, got %+v", u2)
+	}
+}
+
+// TestDetectFloatingTagNamesVersionsViaReverseLookup covers the backrest case:
+// a fully-floating tag (latest) with no version label. Both the running and the
+// target digests are named by HEAD-matching them back to the repo's stable
+// semver tags. The reported tag/to_digest stay the floating tag (apply floats
+// latest, it never moves to v1.14.1); only the version strings are enriched.
+func TestDetectFloatingTagNamesVersionsViaReverseLookup(t *testing.T) {
+	db := newDB(t)
+	svc := seedSvc(t, db, "docker.io/garethgeorge/backrest:latest", "sha256:v1130", false)
+	r := fakeResolver{
+		// latest resolves to the newest release digest (drift vs running), no
+		// version label (mirrors backrest, which sets only image.source).
+		img:  registry.RemoteImage{Digest: "sha256:v1141", PlatformDigest: "sha256:v1141"},
+		tags: []string{"v1.13.0", "v1.14.0", "v1.14.1", "v1.14.1-rc1", "latest"},
+		head: map[string]string{
+			"docker.io/garethgeorge/backrest:v1.13.0": "sha256:v1130",
+			"docker.io/garethgeorge/backrest:v1.14.0": "sha256:v1140",
+			"docker.io/garethgeorge/backrest:v1.14.1": "sha256:v1141",
+		},
+	}
+	u, err := newDetector(db, r).Detect(context.Background(), svc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u == nil {
+		t.Fatal("expected an update, got nil")
+	}
+	// Apply floats latest: the update stays on the tracked tag + its digest.
+	if u.Tag != "latest" {
+		t.Fatalf("tag = %q, want latest (apply floats the tracked tag)", u.Tag)
+	}
+	if u.ToDigest != "sha256:v1141" {
+		t.Fatalf("to_digest = %q, want sha256:v1141", u.ToDigest)
+	}
+	// ...but the version strings are named from the digests.
+	if u.FromVersion != "v1.13.0" || u.ToVersion != "v1.14.1" {
+		t.Fatalf("versions = %s -> %s, want v1.13.0 -> v1.14.1", u.FromVersion, u.ToVersion)
+	}
+	if u.Severity != "minor" {
+		t.Fatalf("severity = %q, want minor", u.Severity)
+	}
+}
+
+// TestDetectFloatingReverseLookupNonFatal proves the reverse scan is best-effort:
+// a tag-list failure leaves the version strings blank and the update is still
+// recorded as a plain digest-only drift.
+func TestDetectFloatingReverseLookupNonFatal(t *testing.T) {
+	db := newDB(t)
+	svc := seedSvc(t, db, "docker.io/garethgeorge/backrest:latest", "sha256:v1130", false)
+	r := fakeResolver{
+		img:     registry.RemoteImage{Digest: "sha256:v1141", PlatformDigest: "sha256:v1141"},
+		tagsErr: errors.New("list tags: boom"),
+	}
+	u, err := newDetector(db, r).Detect(context.Background(), svc)
+	if err != nil {
+		t.Fatalf("reverse-lookup tag-list failure must be non-fatal, got %v", err)
+	}
+	if u == nil {
+		t.Fatal("expected a digest-only update despite the tag-list failure")
+	}
+	if u.ToDigest != "sha256:v1141" || u.Tag != "latest" {
+		t.Fatalf("update = %s@%s, want latest@sha256:v1141", u.Tag, u.ToDigest)
+	}
+	if u.FromVersion != "" || u.ToVersion != "" {
+		t.Fatalf("versions = %q -> %q, want both blank", u.FromVersion, u.ToVersion)
+	}
+	if u.Severity != "digest-only" {
+		t.Fatalf("severity = %q, want digest-only", u.Severity)
 	}
 }
 

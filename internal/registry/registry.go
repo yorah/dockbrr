@@ -165,6 +165,34 @@ func (r *Resolver) ListTags(ctx context.Context, repo string) ([]string, error) 
 	return tags, nil
 }
 
+// Head resolves ref to the registry-served manifest digest without fetching the
+// manifest body or config blob. It is the cheap path used by the detector's
+// floating-tag reverse version-naming scan (many tags, digest match only).
+// Anonymous-first with the same credential-retry-on-401 behavior as Resolve.
+func (r *Resolver) Head(ctx context.Context, ref string) (string, error) {
+	parsed, err := name.ParseReference(ref)
+	if err != nil {
+		return "", fmt.Errorf("registry: parse ref %q: %w", ref, err)
+	}
+	desc, err := remote.Head(parsed, remote.WithContext(ctx), remote.WithAuth(authn.Anonymous))
+	if err == nil {
+		return desc.Digest.String(), nil
+	}
+	if !IsUnauthorized(err) || r.creds == nil {
+		return "", fmt.Errorf("registry: head %q: %w", ref, err)
+	}
+	user, pass, ok := r.creds.Lookup(parsed.Context().RegistryStr())
+	if !ok {
+		return "", fmt.Errorf("registry: head %q: %w", ref, err)
+	}
+	auth := authn.FromConfig(authn.AuthConfig{Username: user, Password: pass})
+	desc, err = remote.Head(parsed, remote.WithContext(ctx), remote.WithAuth(auth))
+	if err != nil {
+		return "", fmt.Errorf("registry: head %q (with creds): %w", ref, err)
+	}
+	return desc.Digest.String(), nil
+}
+
 // IsRateLimited reports whether err is a registry 429 (Too Many Requests).
 func IsRateLimited(err error) bool {
 	var terr *transport.Error
