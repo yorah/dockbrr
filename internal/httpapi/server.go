@@ -78,7 +78,7 @@ type Deps struct {
 	// endpoint (returns 503). Read-only: this is the sole API->docker read path.
 	DockerLogs DockerLogsReader
 	Bus        *Bus
-	LogConfig    LogConfig
+	LogConfig  LogConfig
 	// NextScan reports when the scheduler will next run a check-all. Zero time
 	// (or a nil func, as in tests) means "unknown" and is omitted from /status.
 	NextScan func() time.Time
