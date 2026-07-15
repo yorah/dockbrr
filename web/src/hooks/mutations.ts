@@ -29,6 +29,27 @@ export function useApply() {
     onError: toastError,
   });
 }
+export function useLifecycle() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { serviceId: number; action: "start" | "stop" | "restart" }) =>
+      apiFetch<{ job_id: number }>(`/api/services/${v.serviceId}/lifecycle`, {
+        method: "POST",
+        body: { action: v.action },
+      }),
+    onSuccess: () => invalidate(qc, keys.projects),
+    onError: toastError,
+  });
+}
+export function useRemoveContainer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (serviceId: number) =>
+      apiFetch<{ job_id: number }>(`/api/services/${serviceId}/remove`, { method: "POST" }),
+    onSuccess: () => invalidate(qc, keys.projects),
+    onError: toastError,
+  });
+}
 export function useDismiss() {
   const qc = useQueryClient();
   return useMutation({
