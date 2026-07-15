@@ -262,3 +262,38 @@ func TestEffectiveAutoUpdateServiceVetoOverride(t *testing.T) {
 		t.Error("explicit per-service false must veto")
 	}
 }
+
+func TestProjectsSetAutoNamed(t *testing.T) {
+	db := openTempStore(t)
+	p := store.NewProjects(db)
+	id, err := p.Upsert(store.Project{HostID: 1, Kind: "standalone", Name: "adoring_saha", Source: "discovered"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Default is false straight after insert.
+	got, err := p.Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AutoNamed {
+		t.Fatal("AutoNamed = true on fresh insert, want false")
+	}
+	// SetAutoNamed(true) is reflected by Get and List.
+	if err := p.SetAutoNamed(id, true); err != nil {
+		t.Fatal(err)
+	}
+	got, err = p.Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.AutoNamed {
+		t.Fatal("AutoNamed = false after SetAutoNamed(true), want true")
+	}
+	all, err := p.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 1 || !all[0].AutoNamed {
+		t.Fatalf("List AutoNamed = %+v, want one row with AutoNamed=true", all)
+	}
+}
