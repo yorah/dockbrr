@@ -131,7 +131,7 @@ func (l *Lifecycle) runRemove(ctx context.Context, svc store.Service, proj store
 	if proj.Kind != "standalone" {
 		return fmt.Errorf("remove refused: %s is not a standalone container", svc.Name)
 	}
-	if !isStoppedState(svc.State) {
+	if !store.IsStoppedState(svc.State) {
 		return fmt.Errorf("remove refused: %s is not stopped (state=%s)", svc.Name, svc.State)
 	}
 	for _, id := range svc.ContainerIDs {
@@ -197,17 +197,6 @@ func (l *Lifecycle) rediscover(ctx context.Context, svc store.Service, proj stor
 	}
 	if err := l.services.UpdateRuntime(svc.ID, ids, digest); err != nil {
 		logger.Warnf("lifecycle: update runtime for %s: %v", svc.Name, err)
-	}
-}
-
-// isStoppedState reports whether a service state is a non-running state that
-// permits removal.
-func isStoppedState(state string) bool {
-	switch state {
-	case "exited", "dead", "created":
-		return true
-	default:
-		return false
 	}
 }
 

@@ -126,6 +126,17 @@ func (s *Services) MarkGone(id int64) error {
 // ErrServiceNotFound is returned by Services.Get when no row matches.
 var ErrServiceNotFound = errors.New("service not found")
 
+// IsStoppedState reports whether a service state permits removal (any
+// non-running, non-transitional state).
+func IsStoppedState(state string) bool {
+	switch state {
+	case "exited", "dead", "created":
+		return true
+	default:
+		return false
+	}
+}
+
 // Get returns the service by id, or ErrServiceNotFound.
 func (s *Services) Get(id int64) (Service, error) {
 	var (

@@ -148,6 +148,8 @@ func (s *Server) routes() {
 		r.Post("/api/updates/{id}/dismiss", s.handleDismiss)
 		r.Post("/api/updates/{id}/restore", s.handleRestore)
 		r.Post("/api/services/{id}/check", s.handleCheck)
+		r.Post("/api/services/{id}/lifecycle", s.handleLifecycle)
+		r.Post("/api/services/{id}/remove", s.handleRemove)
 		r.Post("/api/scan", s.handleScanAll)
 		r.Get("/api/services/{id}/events", s.handleServiceEvents)
 		r.Get("/api/jobs", s.handleListJobs)
