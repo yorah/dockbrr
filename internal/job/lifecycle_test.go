@@ -2,6 +2,7 @@ package job_test
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -12,22 +13,37 @@ import (
 
 type opRec struct{ kind, id string }
 
-type fakeMutator struct{ ops []opRec }
+type fakeMutator struct {
+	ops    []opRec
+	failOn string // if set, return error when op kind matches
+}
 
 func (f *fakeMutator) ContainerStart(_ context.Context, id string) error {
 	f.ops = append(f.ops, opRec{"start", id})
+	if f.failOn == "start" {
+		return fmt.Errorf("injected error for start")
+	}
 	return nil
 }
 func (f *fakeMutator) ContainerStop(_ context.Context, id string) error {
 	f.ops = append(f.ops, opRec{"stop", id})
+	if f.failOn == "stop" {
+		return fmt.Errorf("injected error for stop")
+	}
 	return nil
 }
 func (f *fakeMutator) ContainerRestart(_ context.Context, id string) error {
 	f.ops = append(f.ops, opRec{"restart", id})
+	if f.failOn == "restart" {
+		return fmt.Errorf("injected error for restart")
+	}
 	return nil
 }
 func (f *fakeMutator) ContainerRemove(_ context.Context, id string) error {
 	f.ops = append(f.ops, opRec{"remove", id})
+	if f.failOn == "remove" {
+		return fmt.Errorf("injected error for remove")
+	}
 	return nil
 }
 
@@ -195,5 +211,46 @@ func TestLifecycleRemoveStoppedStandalone(t *testing.T) {
 	done, _ := jobs.Get(jid)
 	if done.Status != "success" {
 		t.Fatalf("status = %q, want success", done.Status)
+	}
+}
+
+func TestLifecycleRestartOrdersStopThenStart(t *testing.T) {
+	db := openJobDB(t)
+	pid, dbSvc, _ := seedComposeProject(t, db)
+	m := &fakeMutator{}
+	jobs := store.NewJobs(db)
+	jid, _ := jobs.Enqueue(store.Job{Type: "restart", ServiceID: &dbSvc.ID, ProjectID: &pid, Scope: "service"})
+	j, _ := jobs.Get(jid)
+
+	newLifecycle(db, m).Handle(context.Background(), j)
+
+	want := []opRec{{"stop", "web-cid"}, {"stop", "db-cid"}, {"start", "db-cid"}, {"start", "web-cid"}}
+	if len(m.ops) != len(want) {
+		t.Fatalf("restart ops = %+v, want %+v", m.ops, want)
+	}
+	for i := range want {
+		if m.ops[i] != want[i] {
+			t.Fatalf("restart ops = %+v, want %+v", m.ops, want)
+		}
+	}
+	done, _ := jobs.Get(jid)
+	if done.Status != "success" {
+		t.Fatalf("status = %q, want success", done.Status)
+	}
+}
+
+func TestLifecycleMutatorErrorFailsJob(t *testing.T) {
+	db := openJobDB(t)
+	pid, dbSvc, _ := seedComposeProject(t, db)
+	m := &fakeMutator{failOn: "stop"}
+	jobs := store.NewJobs(db)
+	jid, _ := jobs.Enqueue(store.Job{Type: "stop", ServiceID: &dbSvc.ID, ProjectID: &pid, Scope: "service"})
+	j, _ := jobs.Get(jid)
+
+	newLifecycle(db, m).Handle(context.Background(), j)
+
+	done, _ := jobs.Get(jid)
+	if done.Status != "failed" {
+		t.Fatalf("status = %q, want failed", done.Status)
 	}
 }
