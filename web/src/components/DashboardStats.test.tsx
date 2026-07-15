@@ -130,6 +130,20 @@ test("updates-available tile counts only currently-visible services, not service
   expect(within(updatesTile).getByText("0")).toBeInTheDocument();
 });
 
+test("pinned tile drops a removed (gone) service once the table hides it", () => {
+  const onFilter = vi.fn();
+  const goneProjects: Project[] = [
+    { id: 1, name: "p", kind: "compose", working_dir: "/x", auto_update_enabled: false, unmanaged: false,
+      services: [svc(1, { pinned: true }), svc(2, { pinned: true, state: "gone" })] },
+  ];
+  // showRemoved: false hides the gone service; its pin must not linger in the
+  // count. Two services are pinned, but only the visible one should tally.
+  const rows = joinRows(goneProjects, [], { onlyUpdates: false, project: "", status: "", search: "", showRemoved: false });
+  render(<DashboardStats projects={goneProjects} updates={[]} rows={rows} onFilter={onFilter} />);
+  const pinnedTile = screen.getByRole("button", { name: /pinned/i });
+  expect(within(pinnedTile).getByText("1")).toBeInTheDocument();
+});
+
 test("last-scan tile counts down to the scheduler's next check", () => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-07-04T12:00:00Z"));

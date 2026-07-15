@@ -71,8 +71,13 @@ export function DashboardStats({ projects, updates, rows, status, activeStatus =
     ? new Set(rows.filter((r) => r.kind === "service").map((r) => r.service.id))
     : new Set(services.map((s) => s.id));
   const open = updates.filter((u) => u.status === "available" && visibleServiceIds.has(u.service_id));
-  const pinned = services.filter((s) => s.pinned);
-  const stopped = services.filter((s) => isStopped(s.state));
+  // Pinned/Stopped count only currently-visible services, so a removed (Gone)
+  // service that stays pinned drops out of the tile the moment the table hides
+  // it. Without this the Pinned count outlived the container until "Show
+  // removed" was toggled on.
+  const visible = services.filter((s) => visibleServiceIds.has(s.id));
+  const pinned = visible.filter((s) => s.pinned);
+  const stopped = visible.filter((s) => isStopped(s.state));
   const gone = services.filter((s) => s.state === "gone");
 
   // Second click on the already-active status tile reverts to "Any status"
