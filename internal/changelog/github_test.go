@@ -3,6 +3,7 @@ package changelog_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -602,6 +603,50 @@ func TestGitHubRangeCapsTextSizeWithNote(t *testing.T) {
 	}
 	if !strings.Contains(res.Text, "compare/7.2.0...8.0.0") {
 		t.Fatalf("capped text must link the GitHub compare view:\n%s", res.Text[len(res.Text)-300:])
+	}
+}
+
+func TestGitHubRateLimitedYieldsErrRateLimited(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	t.Cleanup(srv.Close)
+	s := changelog.NewGitHubSource(srv.Client(), srv.URL, srv.URL, func() string { return "" }, nil, time.Hour)
+	_, err := s.Resolve(context.Background(), ghInput("ghcr.io/autobrr/autobrr:latest", "1.82.1"))
+	if !errors.Is(err, changelog.ErrRateLimited) {
+		t.Fatalf("err = %v, want ErrRateLimited", err)
+	}
+}
+
+func TestGitHubForbiddenWithoutRateHeaderIsGenericError(t *testing.T) {
+	// A 403 that is NOT a primary-limit exhaustion (no X-RateLimit-Remaining:0),
+	// and a 401 auth failure, must stay generic errors, not ErrRateLimited.
+	for _, tc := range []struct {
+		name   string
+		status int
+		remain string
+	}{
+		{"secondary-403", http.StatusForbidden, "42"},
+		{"auth-401", http.StatusUnauthorized, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if tc.remain != "" {
+					w.Header().Set("X-RateLimit-Remaining", tc.remain)
+				}
+				w.WriteHeader(tc.status)
+			}))
+			t.Cleanup(srv.Close)
+			s := changelog.NewGitHubSource(srv.Client(), srv.URL, srv.URL, func() string { return "" }, nil, time.Hour)
+			_, err := s.Resolve(context.Background(), ghInput("ghcr.io/autobrr/autobrr:latest", "1.82.1"))
+			if err == nil {
+				t.Fatal("err = nil, want a non-nil generic error")
+			}
+			if errors.Is(err, changelog.ErrRateLimited) {
+				t.Fatalf("err = %v, want NOT ErrRateLimited", err)
+			}
+		})
 	}
 }
 

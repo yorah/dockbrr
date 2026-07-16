@@ -3,6 +3,7 @@ package changelog
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,6 +29,13 @@ const (
 	// "releases omitted" note always survives the cap.
 	noteReserve = 512
 )
+
+// ErrRateLimited signals that a GitHub Releases request was rejected for primary
+// rate-limit exhaustion (HTTP 403/429 with X-RateLimit-Remaining: 0). It is
+// distinct from an auth failure (401) or a forbidden resource, which stay
+// generic errors. The resolver surfaces it only when the whole source chain
+// finds no changelog content.
+var ErrRateLimited = errors.New("changelog: github rate limited")
 
 // repoCache is GitHubSource's optional image->repo resolution cache. nil
 // disables caching (every Resolve re-resolves live).
@@ -354,6 +362,10 @@ func (s *GitHubSource) fetchReleasesPage(ctx context.Context, owner, repo string
 	case http.StatusNotFound:
 		return nil, false, nil
 	default:
+		if (resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests) &&
+			resp.Header.Get("X-RateLimit-Remaining") == "0" {
+			return nil, false, ErrRateLimited
+		}
 		return nil, false, fmt.Errorf("github releases: status %d", resp.StatusCode)
 	}
 }
