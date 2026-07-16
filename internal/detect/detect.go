@@ -148,6 +148,15 @@ func (d *Detector) Detect(ctx context.Context, svc store.Service) (*store.Update
 	// it can be more precise than the tag itself (e.g. a floating tag whose
 	// label carries the exact release).
 	fromVer := semverOrEmpty(tag)
+	// A floating tag (latest, 1, stable) carries no release in its name, so name
+	// the running side from the image's own OCI version label, captured at
+	// discovery. This mirrors how the "to" side falls back to the target's label
+	// below, and is why e.g. linuxserver's "1.6.0-lsNNN" images (whose versioned
+	// tags the reverse scan skips) now show a "from" version. Empty when the
+	// image ships no version label; the reverse-lookup below then fills the gap.
+	if fromVer == "" {
+		fromVer = svc.ImageVersion
+	}
 	var toVer string
 	if targetTag != tag {
 		toVer = semverOrEmpty(targetTag)

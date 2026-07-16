@@ -26,6 +26,7 @@ type DiscoveredService struct {
 	ImageRef       string
 	CurrentDigest  string // maps from docker.Container.RepoDigest
 	CurrentImageID string // maps from docker.Container.ImageID
+	ImageVersion   string // maps from docker.Container.Version
 	Pinned         bool
 	State          string
 	Healthcheck    bool
@@ -96,6 +97,7 @@ func Group(cs []docker.Container) []DiscoveredProject {
 					ImageRef:       c.ImageRef,
 					CurrentDigest:  c.RepoDigest,
 					CurrentImageID: c.ImageID,
+					ImageVersion:   c.Version,
 					Pinned:         c.Pinned,
 					State:          c.State,
 					Healthcheck:    c.Healthcheck,
@@ -116,6 +118,7 @@ func Group(cs []docker.Container) []DiscoveredProject {
 							ImageRef:       c.ImageRef,
 							CurrentDigest:  c.RepoDigest,
 							CurrentImageID: c.ImageID,
+							ImageVersion:   c.Version,
 							Pinned:         c.Pinned,
 							State:          c.State,
 							Healthcheck:    c.Healthcheck,
@@ -328,6 +331,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) (changed bool, err error) {
 				ImageRef:       s.ImageRef,
 				CurrentDigest:  s.CurrentDigest,
 				CurrentImageID: s.CurrentImageID,
+				ImageVersion:   s.ImageVersion,
 				Pinned:         s.Pinned,
 				Drifted:        declaredDiffers(declared[s.Name], s.ImageRef),
 				State:          s.State,

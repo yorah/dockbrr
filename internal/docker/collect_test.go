@@ -61,6 +61,35 @@ func TestContainerFromInspect(t *testing.T) {
 			},
 		},
 		{
+			name: "reads image version label from image config",
+			ctJSON: `{
+				"Id": "ver789",
+				"Name": "/bazarr",
+				"State": {"Status": "running"},
+				"Image": "sha256:imgidver",
+				"Config": {
+					"Image": "ghcr.io/linuxserver/bazarr:latest"
+				}
+			}`,
+			imgJSON: `{
+				"Id": "sha256:imgidver",
+				"RepoTags": ["ghcr.io/linuxserver/bazarr:latest"],
+				"RepoDigests": ["ghcr.io/linuxserver/bazarr@sha256:5d916d074042"],
+				"Config": {
+					"Labels": {"org.opencontainers.image.version": "1.6.0-ls354"}
+				}
+			}`,
+			want: Container{
+				ID:         "ver789",
+				Name:       "bazarr",
+				ImageRef:   "ghcr.io/linuxserver/bazarr:latest",
+				RepoDigest: "sha256:5d916d074042",
+				ImageID:    "sha256:imgidver",
+				Version:    "1.6.0-ls354",
+				State:      "running",
+			},
+		},
+		{
 			name: "standalone",
 			ctJSON: `{
 				"Id": "def456",

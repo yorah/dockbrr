@@ -23,6 +23,7 @@ type Container struct {
 	ImageRef    string   // Config.Image (the configured ref)
 	RepoDigest  string   // "sha256:..." from image RepoDigests ("" if none)
 	ImageID     string   // image content id (sha256:...)
+	Version     string   // org.opencontainers.image.version image label ("" if unset)
 	Pinned      bool     // ImageRef contains "@sha256:"
 	State       string   // State.Status (running|exited|...)
 	Healthcheck bool     // State.Health != nil
@@ -63,6 +64,15 @@ func containerFromInspect(ct dcontainer.InspectResponse, img dimage.InspectRespo
 		imageID = ct.Image
 	}
 
+	// Running image's OCI version label (e.g. linuxserver's "1.6.0-ls355"),
+	// read from the image config so it reflects the image actually running, not
+	// whatever the tracked tag now resolves to. Names the "from" side of a
+	// floating-tag update the same way the target's label names the "to" side.
+	version := ""
+	if img.Config != nil {
+		version = img.Config.Labels["org.opencontainers.image.version"]
+	}
+
 	// State and health.
 	state := ""
 	var healthcheck bool
@@ -85,6 +95,7 @@ func containerFromInspect(ct dcontainer.InspectResponse, img dimage.InspectRespo
 		ImageRef:    imageRef,
 		RepoDigest:  repoDigest,
 		ImageID:     imageID,
+		Version:     version,
 		Pinned:      pinned,
 		State:       state,
 		Healthcheck: healthcheck,
