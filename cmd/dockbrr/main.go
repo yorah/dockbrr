@@ -220,7 +220,11 @@ func run(args []string, getenv func(string) string) error {
 			plat, healthTimeout, healthPoll,
 		)
 		lifecycle := job.NewLifecycle(jobs, services, projects, events, dc, job.RealComposer{}, locator)
-		engine.SetHandler(job.NewDispatcher(applier, lifecycle))
+		standalone := job.NewStandaloneApplier(
+			jobs, updates, services, projects, snapshots, events,
+			resolver, dc, plat, healthTimeout, healthPoll,
+		)
+		engine.SetHandler(job.NewDispatcher(applier, lifecycle, standalone, projects))
 		if n, rerr := engine.ResumeInterrupted(); rerr != nil {
 			logger.Errorf("job engine: resume interrupted: %v", rerr)
 		} else if n > 0 {
