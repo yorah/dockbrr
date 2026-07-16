@@ -414,7 +414,7 @@ function buildColumns(
         return (
           <div className="flex flex-col gap-0.5">
             <ImageRefLabel imageRef={r.service.image_ref} />
-            {showFrom && <span className="text-xs text-muted-foreground">{from}</span>}
+            {showFrom && <span>{from}</span>}
             <DigestShort digest={r.service.current_digest} />
           </div>
         );
