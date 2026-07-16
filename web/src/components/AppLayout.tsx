@@ -20,7 +20,13 @@ export function AppLayout() {
         {overlay && (
           <div className="fixed inset-0 z-30 bg-overlay/50" aria-hidden="true" onClick={toggle} />
         )}
-        <Sidebar collapsed={collapsed} className={overlay ? "fixed inset-y-0 left-0 z-40" : undefined} />
+        <Sidebar
+          collapsed={collapsed}
+          // Non-overlay: pin to viewport height and stick to the top so the
+          // logout/version footer stays in view no matter how tall the main
+          // content (or project list) grows. Overlay mode fixes it full-height.
+          className={overlay ? "fixed inset-y-0 left-0 z-40" : "sticky top-0 h-screen"}
+        />
         <div className="flex min-w-0 flex-1 flex-col">
           <Topbar collapsed={collapsed} onToggle={toggle} />
           <main className="flex min-h-0 w-full flex-1 flex-col p-4">

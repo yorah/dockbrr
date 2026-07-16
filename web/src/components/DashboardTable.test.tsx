@@ -858,6 +858,98 @@ test("offers a per-row Remove button for a stopped standalone container and remo
   }
 });
 
+test("surfaces reverse-resolved versions for a floating tag, not just ':latest'", async () => {
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 1, name: "app", kind: "compose", working_dir: "/srv",
+          auto_update_enabled: false, unmanaged: false, auto_named: false,
+          services: [{ id: 10, name: "backrest", image_ref: "garethgeorge/backrest:latest", current_digest: "sha256:9c9966b5c285", state: "running", pinned: false, healthcheck: false, auto_update_enabled: null }],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () =>
+      HttpResponse.json([
+        {
+          id: 100, service_id: 10, from_digest: "sha256:9c9966b5c285", to_digest: "sha256:b85297975428",
+          from_version: "v1.13.0", to_version: "v1.14.1", tag: "latest", severity: "minor",
+          changelog_url: "", changelog_text: "", status: "available", detected_at: "2026-07-16T00:00:00Z",
+        },
+      ]),
+    ),
+  );
+  renderDashboardWithRouter();
+  await waitFor(() => expect(screen.getByRole("main")).toBeInTheDocument());
+  const main = within(screen.getByRole("main"));
+  // Running version (from_version) shows under the floating ref.
+  await waitFor(() => expect(main.getByText("v1.13.0")).toBeInTheDocument());
+  // Target version leads the Latest column, tag kept as a secondary hint.
+  expect(main.getByText("v1.14.1")).toBeInTheDocument();
+  expect(main.getByText("(latest)")).toBeInTheDocument();
+});
+
+test("per-row Remove button disables while its removal is in flight, so it can't re-enqueue", async () => {
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 5, name: "my-standalone", kind: "standalone", working_dir: "",
+          auto_update_enabled: false, unmanaged: false, auto_named: false,
+          services: [{ id: 30, name: "grafana", image_ref: "grafana:11", current_digest: "sha256:g", state: "exited", pinned: false, healthcheck: false, auto_update_enabled: null }],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () => HttpResponse.json([])),
+    // Never resolves: the enqueue stays pending, but the button must stay
+    // disabled off the local removing marker regardless of enqueue timing.
+    http.post("/api/services/:id/remove", async () => {
+      await delay("infinite");
+      return HttpResponse.json({ job_id: 1 });
+    }),
+  );
+  const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+  try {
+    renderDashboardWithRouter();
+    await waitFor(() => expect(screen.getByText("grafana")).toBeInTheDocument());
+    // Re-query each time: TanStack re-renders the cell, replacing the DOM node.
+    const btn = () => screen.getByRole("button", { name: /^remove grafana$/i });
+    expect(btn()).not.toBeDisabled();
+    await userEvent.click(btn());
+    await waitFor(() => expect(btn()).toBeDisabled());
+  } finally {
+    confirmSpy.mockRestore();
+  }
+});
+
+test("shows the Compose button only on compose project headers, not standalone ones", async () => {
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 1, name: "app", kind: "compose", working_dir: "/srv",
+          auto_update_enabled: false, unmanaged: false, auto_named: false,
+          services: [{ id: 10, name: "web", image_ref: "nginx:1.27", current_digest: "sha256:a", state: "running", pinned: false, healthcheck: false, auto_update_enabled: null }],
+        },
+        {
+          id: 5, name: "my-standalone", kind: "standalone", working_dir: "",
+          auto_update_enabled: false, unmanaged: false, auto_named: false,
+          services: [{ id: 30, name: "grafana", image_ref: "grafana:11", current_digest: "sha256:g", state: "running", pinned: false, healthcheck: false, auto_update_enabled: null }],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () => HttpResponse.json([])),
+  );
+  renderDashboardWithRouter();
+  await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
+  // Scope to <main>: the sidebar project list also renders "app"/"my-standalone".
+  const main = within(screen.getByRole("main"));
+  const composeHeader = main.getByText("app").closest("tr")!;
+  const standaloneHeader = main.getByText("my-standalone").closest("tr")!;
+  expect(within(composeHeader).getByRole("button", { name: /compose/i })).toBeInTheDocument();
+  expect(within(standaloneHeader).queryByRole("button", { name: /compose/i })).not.toBeInTheDocument();
+});
+
 test("no per-row Remove button for a running standalone or a stopped compose service", async () => {
   server.use(
     http.get("/api/projects", () =>
