@@ -783,3 +783,60 @@ test("bulk-removes selected stopped loose containers after a confirm listing the
     confirmSpy.mockRestore();
   }
 });
+
+test("offers a per-row Remove button for a stopped standalone container and removes it on confirm", async () => {
+  const removed: string[] = [];
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 5, name: "my-standalone", kind: "standalone", working_dir: "",
+          auto_update_enabled: false, unmanaged: false, auto_named: false,
+          services: [{ id: 30, name: "grafana", image_ref: "grafana:11", current_digest: "sha256:g", state: "exited", pinned: false, healthcheck: false, auto_update_enabled: null }],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () => HttpResponse.json([])),
+    http.post("/api/services/:id/remove", ({ params }) => {
+      removed.push(String(params.id));
+      return HttpResponse.json({ job_id: 999 });
+    }),
+  );
+  const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+  try {
+    renderDashboardWithRouter();
+    await waitFor(() => expect(screen.getByText("grafana")).toBeInTheDocument());
+    const row = screen.getByText("grafana").closest("tr")!;
+    await userEvent.click(within(row).getByRole("button", { name: /^remove grafana$/i }));
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(removed).toEqual(["30"]));
+  } finally {
+    confirmSpy.mockRestore();
+  }
+});
+
+test("no per-row Remove button for a running standalone or a stopped compose service", async () => {
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 5, name: "run-standalone", kind: "standalone", working_dir: "",
+          auto_update_enabled: false, unmanaged: false, auto_named: false,
+          services: [{ id: 30, name: "grafana", image_ref: "grafana:11", current_digest: "sha256:g", state: "running", pinned: false, healthcheck: false, auto_update_enabled: null }],
+        },
+        {
+          id: 1, name: "app", kind: "compose", working_dir: "/srv",
+          auto_update_enabled: false, unmanaged: false, auto_named: false,
+          services: [{ id: 10, name: "web", image_ref: "nginx:1.27", current_digest: "sha256:a", state: "exited", pinned: false, healthcheck: false, auto_update_enabled: null }],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () => HttpResponse.json([])),
+  );
+  renderDashboardWithRouter();
+  await waitFor(() => expect(screen.getByText("grafana")).toBeInTheDocument());
+  const runRow = screen.getByText("grafana").closest("tr")!;
+  const composeRow = screen.getByText("web").closest("tr")!;
+  expect(within(runRow).queryByRole("button", { name: /^remove grafana$/i })).not.toBeInTheDocument();
+  expect(within(composeRow).queryByRole("button", { name: /^remove web$/i })).not.toBeInTheDocument();
+});

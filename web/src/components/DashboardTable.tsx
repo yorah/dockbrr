@@ -101,6 +101,7 @@ function ActionsCell({
   onApplied,
   onChangelog,
   onLogs,
+  canRemove,
 }: {
   service: Service;
   update: Update | undefined;
@@ -109,10 +110,13 @@ function ActionsCell({
   onApplied: DashboardTableProps["onApplied"];
   onChangelog: DashboardTableProps["onChangelog"];
   onLogs: (service: Service) => void;
+  /** True only for stopped standalone containers (backend guard mirror). */
+  canRemove: boolean;
 }) {
   const check = useCheck();
   const apply = useApply();
   const lifecycle = useLifecycle();
+  const removeContainer = useRemoveContainer();
   // A gone service has no container to recreate. Applying would just create
   // a fresh one for something the user (or something else) removed.
   const canApply = update?.status === "available" && service.state !== "gone";
@@ -272,6 +276,27 @@ function ActionsCell({
           </TooltipTrigger>
           <TooltipContent>Logs</TooltipContent>
         </Tooltip>
+        {canRemove && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 w-7 p-0"
+                disabled={removeContainer.isPending}
+                aria-label={`Remove ${service.name}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!window.confirm(`Remove stopped container "${service.name}"? This cannot be undone.`)) return;
+                  removeContainer.mutate(service.id);
+                }}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Remove</TooltipContent>
+          </Tooltip>
+        )}
       </div>
   );
 }
@@ -473,6 +498,7 @@ function buildColumns(
             service={r.service}
             update={r.update}
             changelog={changelogUpdate(r)}
+            canRemove={r.project.kind === "standalone" && isStopped(r.service.state)}
             onApplied={onApplied}
             onChangelog={onChangelog}
             onLogs={onLogs}
