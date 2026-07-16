@@ -207,3 +207,9 @@ Known-accepted:
 - The dashboard column and the service-detail history timeline cannot disagree: the timeline
   LEFT JOINs `updates` on `(service_id, to_digest)` per event and is untouched; the dashboard
   shows one row per service. Both are views of the same retained row.
+
+## Changelog rate-limit signal (2026-07-17, merged from feat/changelog-rate-limit-signal)
+
+Non-blocking Minors deferred from the whole-branch review (behavior correct, gaps are test-only):
+- [ ] [crl-M1] changelog/github_test: rate-limit detection has no explicit "403 with X-RateLimit-Remaining absent" case (uses remaining:42) and no positive "429 + remaining:0" case. Same code path as the tested 403+0 by construction; add explicit cases if that branch ever grows conditional logic.
+- [ ] [crl-M2] scan: no end-to-end test drives the clear-on-success round-trip through CheckService (rate_limited -> successful resolve -> changelog_status back to ''). The clear is guaranteed by SetChangelog's SQL (changelog_status='') and unit-tested at the store layer; add a scan-level test if the switch in CheckService ever changes.
