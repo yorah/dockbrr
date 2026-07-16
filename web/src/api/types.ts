@@ -32,6 +32,7 @@ export interface Update {
   severity: "major" | "minor" | "patch" | "digest-only" | string;
   changelog_url: string;
   changelog_text: string;
+  changelog_status?: string;
   status: string;
   detected_at: string;
 }

@@ -67,7 +67,7 @@ export function ChangelogDrawer({ update, service, onClose }: ChangelogDrawerPro
 
         <section>
           <h3 className="mb-1 text-sm font-medium">Changelog</h3>
-          <Changelog markdown={update.changelog_text} />
+          <Changelog markdown={update.changelog_text} status={update.changelog_url ? undefined : update.changelog_status} />
           {update.changelog_url && (
             <a
               href={update.changelog_url}

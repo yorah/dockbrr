@@ -36,3 +36,16 @@ test("shows a fallback message when no markdown is available", () => {
   render(<Changelog markdown="" />);
   expect(screen.getByText(/no changelog available/i)).toBeInTheDocument();
 });
+
+test("shows a rate-limit hint with a settings link when status is rate_limited", () => {
+  render(<Changelog markdown="" status="rate_limited" />);
+  expect(screen.getByText(/rate limit/i)).toBeInTheDocument();
+  const link = screen.getByRole("link", { name: /token in settings/i });
+  expect(link).toHaveAttribute("href", "/settings/registries");
+});
+
+test("plain empty state when status is absent", () => {
+  render(<Changelog markdown="" />);
+  expect(screen.getByText(/no changelog available/i)).toBeInTheDocument();
+  expect(screen.queryByText(/rate limit/i)).not.toBeInTheDocument();
+});
