@@ -10,6 +10,7 @@ import (
 
 	dcontainer "github.com/docker/docker/api/types/container"
 	dimage "github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
 )
 
@@ -73,6 +74,9 @@ func createArgsFromInspect(inspectJSON, newImage string) (*dcontainer.Config, *d
 	if in.ContainerJSONBase != nil {
 		host = in.HostConfig
 	}
+	if host != nil {
+		reattachVolumeMounts(host, in.Mounts)
+	}
 
 	nets := map[string]*network.EndpointSettings{}
 	if in.NetworkSettings != nil {
@@ -92,4 +96,46 @@ func createArgsFromInspect(inspectJSON, newImage string) (*dcontainer.Config, *d
 		}
 	}
 	return cfg, host, netCfg, extra, nil
+}
+
+// reattachVolumeMounts ensures named and anonymous volumes recorded in the
+// inspect's runtime Mounts array are reattached to the new container. Docker
+// only persists volume identity through HostConfig.Binds for volumes bound by
+// name at `docker run` time; anonymous volumes and image VOLUME declarations
+// exist only in inspect.Mounts (Type "volume", a generated Name). Without
+// this, recreate would provision fresh empty volumes at those destinations
+// and orphan the old data.
+//
+// Bind mounts (Type "bind") are already represented in HostConfig.Binds and
+// are skipped here. Any destination already covered by an existing
+// HostConfig.Mounts entry or Binds entry is left untouched to avoid Docker's
+// "Duplicate mount point" error on create.
+func reattachVolumeMounts(host *dcontainer.HostConfig, mounts []dcontainer.MountPoint) {
+	covered := map[string]bool{}
+	for _, m := range host.Mounts {
+		if m.Target != "" {
+			covered[m.Target] = true
+		}
+	}
+	for _, b := range host.Binds {
+		parts := strings.Split(b, ":")
+		if len(parts) >= 2 && parts[1] != "" {
+			covered[parts[1]] = true
+		}
+	}
+	for _, mp := range mounts {
+		if mp.Type != mount.TypeVolume || mp.Name == "" {
+			continue
+		}
+		if covered[mp.Destination] {
+			continue
+		}
+		host.Mounts = append(host.Mounts, mount.Mount{
+			Type:     mount.TypeVolume,
+			Source:   mp.Name,
+			Target:   mp.Destination,
+			ReadOnly: !mp.RW,
+		})
+		covered[mp.Destination] = true
+	}
 }

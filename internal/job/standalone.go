@@ -97,8 +97,18 @@ func (a *StandaloneApplier) runApply(ctx context.Context, job store.Job) {
 	oldID := svc.ContainerIDs[0]
 
 	// Precheck: re-resolve the tracked ref and confirm the target digest is
-	// still served; else the update was superseded.
+	// still served; else the update was superseded. A cross-tag update (the
+	// semver scan suggested a newer tag than the one tracked) must re-resolve
+	// THAT tag, not the tracked tag, mirroring the compose Applier's crossTag
+	// handling (worker.go): otherwise the precheck compares against a digest
+	// the tracked tag will never serve and every semver-suggested apply aborts
+	// as "superseded". upd.Tag is empty for updates recorded before this
+	// feature (or same-tag drift), so targetRef falls back to svc.ImageRef.
+	repo, trackedTag := detect.SplitRef(svc.ImageRef)
 	targetRef := svc.ImageRef
+	if upd.Tag != "" && upd.Tag != trackedTag {
+		targetRef = repo + ":" + upd.Tag
+	}
 	remote, err := a.resolver.Resolve(ctx, targetRef, a.plat)
 	if err != nil {
 		a.fail(job, "precheck: re-resolve: "+err.Error())
@@ -116,7 +126,6 @@ func (a *StandaloneApplier) runApply(ctx context.Context, job store.Job) {
 	if st, ierr := a.docker.InspectStatus(ctx, oldID); ierr == nil && st.RawJSON != "" {
 		inspect = st.RawJSON
 	}
-	repo, _ := detect.SplitRef(svc.ImageRef)
 	if _, serr := a.snapshots.Insert(store.Snapshot{
 		ServiceID: svc.ID, JobID: &job.ID,
 		PrevRepo: repo, PrevDigest: svc.CurrentDigest, PrevImageID: svc.CurrentImageID,

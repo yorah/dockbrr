@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	dcontainer "github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
 )
 
@@ -62,6 +63,67 @@ func TestCreateArgsFromInspect(t *testing.T) {
 	}
 	if !seen["net-a"] || !seen["net-b"] {
 		t.Fatalf("networks lost: %+v", seen)
+	}
+}
+
+func TestCreateArgsFromInspectReattachesVolumes(t *testing.T) {
+	// An anonymous volume at /data (only present in Mounts, generated Name),
+	// plus a named-volume bind already covering /named via HostConfig.Binds.
+	in := dcontainer.InspectResponse{
+		ContainerJSONBase: &dcontainer.ContainerJSONBase{
+			Name: "/adoring_saha",
+			HostConfig: &dcontainer.HostConfig{
+				Binds: []string{"myvol:/named"},
+			},
+		},
+		Config: &dcontainer.Config{Image: "postgres:16"},
+		Mounts: []dcontainer.MountPoint{
+			{Type: mount.TypeVolume, Name: "abc123", Destination: "/data", RW: true},
+			{Type: mount.TypeVolume, Name: "myvol", Destination: "/named", RW: true},
+			{Type: mount.TypeBind, Source: "/host/path", Destination: "/host-bound", RW: true},
+		},
+	}
+	raw, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, host, _, _, err := createArgsFromInspect(string(raw), "postgres:16")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if host == nil {
+		t.Fatal("HostConfig is nil")
+	}
+
+	var dataMount *mount.Mount
+	for i := range host.Mounts {
+		if host.Mounts[i].Target == "/data" {
+			dataMount = &host.Mounts[i]
+		}
+		if host.Mounts[i].Target == "/named" {
+			t.Fatalf("duplicate mount for /named (already covered by Binds): %+v", host.Mounts)
+		}
+	}
+	if dataMount == nil {
+		t.Fatalf("expected an anonymous-volume mount for /data, got HostConfig.Mounts=%+v", host.Mounts)
+	}
+	if dataMount.Type != mount.TypeVolume || dataMount.Source != "abc123" {
+		t.Fatalf("anonymous volume mount = %+v, want Type=volume Source=abc123", dataMount)
+	}
+	if dataMount.ReadOnly {
+		t.Fatalf("anonymous volume mount should be read-write (RW=true in inspect): %+v", dataMount)
+	}
+	// /named must still be reachable only via Binds, not duplicated in Mounts.
+	if len(host.Binds) != 1 || host.Binds[0] != "myvol:/named" {
+		t.Fatalf("Binds should be untouched: %+v", host.Binds)
+	}
+	// The bind-type mount (/host-bound) must not be copied into HostConfig.Mounts
+	// either: bind mounts are represented via Binds/other mechanisms, not here.
+	for _, m := range host.Mounts {
+		if m.Target == "/host-bound" {
+			t.Fatalf("bind-type inspect mount should not be added to HostConfig.Mounts: %+v", host.Mounts)
+		}
 	}
 }
 

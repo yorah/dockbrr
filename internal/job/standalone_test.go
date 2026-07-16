@@ -46,6 +46,17 @@ func (f *fakeRecreator) ContainerCreateFromInspect(_ context.Context, _, newImag
 	}
 	return f.newID, nil
 }
+
+// pullRefs returns every ref passed to ImagePull, in order.
+func (f *fakeRecreator) pullRefs() []string {
+	var refs []string
+	for _, o := range f.ops {
+		if o.kind == "pull" {
+			refs = append(refs, o.arg)
+		}
+	}
+	return refs
+}
 func (f *fakeRecreator) InspectStatus(_ context.Context, id string) (job.ContainerStatus, error) {
 	st := f.status
 	if st == "" {
@@ -54,10 +65,20 @@ func (f *fakeRecreator) InspectStatus(_ context.Context, id string) (job.Contain
 	return job.ContainerStatus{State: st, RawJSON: `{"Config":{"Image":"busybox:1"},"Name":"/adoring_saha"}`}, nil
 }
 
-type fakeResolver2 struct{ digest string }
+// fakeResolver2 returns digest for any ref by default; byRef overrides that
+// per-ref when set, so a test can give two tags of the same repo distinct
+// remote digests (needed to prove a cross-tag resolve used the right tag).
+type fakeResolver2 struct {
+	digest string
+	byRef  map[string]string
+}
 
 func (f fakeResolver2) Resolve(_ context.Context, ref string, _ registry.Platform) (registry.RemoteImage, error) {
-	return registry.RemoteImage{Ref: ref, Digest: f.digest, PlatformDigest: f.digest}, nil
+	d := f.digest
+	if v, ok := f.byRef[ref]; ok {
+		d = v
+	}
+	return registry.RemoteImage{Ref: ref, Digest: d, PlatformDigest: d}, nil
 }
 func (f fakeResolver2) ListTags(_ context.Context, _ string) ([]string, error) { return nil, nil }
 func (f fakeResolver2) Head(_ context.Context, _ string) (string, error)       { return "", nil }
@@ -88,11 +109,46 @@ func seedStandaloneUpdate(t *testing.T, db *store.DB) (pid int64, svc store.Serv
 	return pid, svc, upd
 }
 
+// seedStandaloneCrossTagUpdate seeds a standalone service tracking an exact
+// tag (busybox:1.36) with an open update suggested by the semver scan: a
+// newer tag (1.37) whose remote digest (sha256:new) differs from what the
+// tracked tag itself serves. Mirrors the compose crossTag scenario
+// (worker.go) but for the standalone applier.
+func seedStandaloneCrossTagUpdate(t *testing.T, db *store.DB) (pid int64, svc store.Service, upd store.Update) {
+	t.Helper()
+	projects := store.NewProjects(db)
+	services := store.NewServices(db)
+	updates := store.NewUpdates(db)
+	var err error
+	pid, err = projects.Upsert(store.Project{HostID: 1, Kind: "standalone", Name: "adoring_saha", Source: "discovered"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid, err := services.Upsert(store.Service{ProjectID: pid, Name: "adoring_saha",
+		ImageRef: "busybox:1.36", CurrentDigest: "sha256:old", State: "running", ContainerIDs: []string{"old-cid"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, _ = services.Get(sid)
+	uid, _, err := updates.RecordDrift(store.Update{ServiceID: sid, FromDigest: "sha256:old",
+		ToDigest: "sha256:new", Tag: "1.37", Severity: "minor", Status: "available"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	upd, _ = updates.GetLatestOpenByService(sid)
+	_ = uid
+	return pid, svc, upd
+}
+
 func newStandaloneApplier(db *store.DB, r *fakeRecreator) *job.StandaloneApplier {
+	return newStandaloneApplierWithResolver(db, r, fakeResolver2{digest: "sha256:new"})
+}
+
+func newStandaloneApplierWithResolver(db *store.DB, r *fakeRecreator, resolver fakeResolver2) *job.StandaloneApplier {
 	return job.NewStandaloneApplier(
 		store.NewJobs(db), store.NewUpdates(db), store.NewServices(db), store.NewProjects(db),
 		store.NewSnapshots(db), store.NewEvents(db),
-		fakeResolver2{digest: "sha256:new"}, r, registry.HostPlatform(),
+		resolver, r, registry.HostPlatform(),
 		func() time.Duration { return time.Minute }, func() time.Duration { return time.Millisecond },
 	)
 }
@@ -271,5 +327,56 @@ func TestStandaloneApplyRestoresOnCreateFailure(t *testing.T) {
 	got, _ := store.NewServices(db).Get(svc.ID)
 	if got.CurrentDigest != "sha256:old" {
 		t.Fatalf("digest = %q, want unchanged sha256:old after failed apply", got.CurrentDigest)
+	}
+}
+
+// TestStandaloneApplyHonorsCrossTagUpdate proves runApply resolves/pulls/
+// creates against the update's suggested tag (upd.Tag), not the tracked tag
+// (svc.ImageRef), when the semver scan proposed a newer tag. Before the fix,
+// targetRef stayed pinned to svc.ImageRef ("busybox:1.36"), whose remote
+// digest ("sha256:old-remote") never matches upd.ToDigest ("sha256:new"), so
+// the precheck always marked the update "superseded" and apply never ran.
+func TestStandaloneApplyHonorsCrossTagUpdate(t *testing.T) {
+	db := openJobDB(t)
+	pid, svc, _ := seedStandaloneCrossTagUpdate(t, db)
+	r := &fakeRecreator{newID: "new-cid", status: "running"}
+	resolver := fakeResolver2{
+		digest: "sha256:old-remote", // wrong-tag resolves would hit this and fail precheck
+		byRef:  map[string]string{"busybox:1.37": "sha256:new"},
+	}
+	jobs := store.NewJobs(db)
+	jid, _ := jobs.Enqueue(store.Job{Type: "apply", ServiceID: &svc.ID, ProjectID: &pid, Scope: "service"})
+	j, _ := jobs.Get(jid)
+
+	newStandaloneApplierWithResolver(db, r, resolver).Handle(context.Background(), j)
+
+	done, _ := jobs.Get(jid)
+	if done.Status != "success" {
+		t.Fatalf("status = %q, want success (cross-tag update must not be marked superseded)", done.Status)
+	}
+	upd, err := store.NewUpdates(db).GetLatestOpenByService(svc.ID)
+	if err == nil {
+		t.Fatalf("expected no open update after successful apply, got %+v", upd)
+	}
+
+	// Pull and create must have used the suggested tag "busybox:1.37", not the
+	// tracked tag "busybox:1.36".
+	refs := r.pullRefs()
+	if len(refs) != 1 || refs[0] != "busybox:1.37" {
+		t.Fatalf("pull refs = %v, want [busybox:1.37]", refs)
+	}
+	var createArg string
+	for _, o := range r.ops {
+		if o.kind == "create" {
+			createArg = o.arg
+		}
+	}
+	if createArg != "adoring_saha@busybox:1.37" {
+		t.Fatalf("create arg = %q, want adoring_saha@busybox:1.37", createArg)
+	}
+
+	got, _ := store.NewServices(db).Get(svc.ID)
+	if got.CurrentDigest != "sha256:new" {
+		t.Fatalf("digest = %q, want sha256:new after cross-tag apply", got.CurrentDigest)
 	}
 }
