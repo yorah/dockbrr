@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/yorah/dockbrr/compare/v0.3.0...v0.3.1) (2026-07-16)
+
+
+### Bug Fixes
+
+* **web:** dashboard UX fixes (remove debounce, compose gating, sticky sidebar, resolved versions) ([#22](https://github.com/yorah/dockbrr/issues/22)) ([404e018](https://github.com/yorah/dockbrr/commit/404e018245449f0440d8bf316ccf22c7ba0524e4))
+
 ## [0.3.0](https://github.com/yorah/dockbrr/compare/v0.2.0...v0.3.0) (2026-07-16)
 
 
