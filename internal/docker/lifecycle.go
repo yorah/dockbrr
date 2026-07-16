@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"regexp"
 	"strconv"
 
 	dcontainer "github.com/docker/docker/api/types/container"
@@ -53,7 +54,10 @@ func (cl *Client) ContainerRename(ctx context.Context, id, newName string) error
 func (cl *Client) ContainerIDByName(ctx context.Context, name string) (string, bool, error) {
 	list, err := cl.c.ContainerList(ctx, dcontainer.ListOptions{
 		All:     true,
-		Filters: filters.NewArgs(filters.Arg("name", "^/"+name+"$")),
+		// Docker's name filter is a regex; anchor an exact match and escape the
+		// name so a metacharacter (e.g. a "." in the container name) cannot match
+		// an unrelated container.
+		Filters: filters.NewArgs(filters.Arg("name", "^/"+regexp.QuoteMeta(name)+"$")),
 	})
 	if err != nil {
 		return "", false, fmt.Errorf("docker: list by name %s: %w", name, err)

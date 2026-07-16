@@ -227,7 +227,9 @@ func (a *StandaloneApplier) recreate(ctx context.Context, oldID, inspectJSON, ne
 
 // clearNameConflict removes a container currently holding wantName, unless it is
 // keepID (the container we are about to operate on). Best-effort: a leftover is
-// stopped then removed; errors are logged, not fatal. On a normal (non-crash)
+// stopped then removed, ignoring errors (a leftover that fails to clear just
+// makes the following rename/create fail naturally, surfaced via failApply). On
+// a normal (non-crash)
 // run, ContainerIDByName(name) returns keepID (the current container still
 // holds its primary name until this recreate renames it aside), so this is a
 // no-op; only a genuinely stale container from a prior interrupted attempt is
