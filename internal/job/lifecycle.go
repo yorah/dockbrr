@@ -15,6 +15,7 @@ type Mutator interface {
 	ContainerStart(ctx context.Context, id string) error
 	ContainerStop(ctx context.Context, id string) error
 	ContainerRemove(ctx context.Context, id string) error
+	InspectStatus(ctx context.Context, id string) (ContainerStatus, error)
 }
 
 // Lifecycle handles start/stop/restart/remove jobs. It mutates containers by
@@ -152,13 +153,26 @@ func (l *Lifecycle) runOrderedWithDeps(ctx context.Context, svc store.Service, d
 
 // runRemove removes the target's containers. Guard: the project must be
 // standalone AND every target container must be stopped. This is the backend
-// enforcement of the loose+stopped rule.
+// enforcement of the loose+stopped rule. The stored svc.State is only
+// refreshed on the event-driven discovery reconcile, so it can be stale; the
+// stored-state check below is a cheap first reject, but the authoritative
+// check is the live inspect that follows, right before any removal is
+// attempted.
 func (l *Lifecycle) runRemove(ctx context.Context, svc store.Service, proj store.Project) error {
 	if proj.Kind != "standalone" {
 		return fmt.Errorf("remove refused: %s is not a standalone container", svc.Name)
 	}
 	if !store.IsStoppedState(svc.State) {
 		return fmt.Errorf("remove refused: %s is not stopped (state=%s)", svc.Name, svc.State)
+	}
+	for _, id := range svc.ContainerIDs {
+		st, err := l.mutator.InspectStatus(ctx, id)
+		if err == nil && (st.State == "running" || st.State == "restarting") {
+			return fmt.Errorf("remove refused: %s is running (live state=%s)", svc.Name, st.State)
+		}
+		// An inspect error means the container is already gone (or otherwise
+		// unreachable): fall through to the remove attempt and let the daemon
+		// backstop it, rather than refusing a removal that already happened.
 	}
 	for _, id := range svc.ContainerIDs {
 		if err := l.mutator.ContainerRemove(ctx, id); err != nil {

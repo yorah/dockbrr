@@ -14,8 +14,9 @@ import (
 type opRec struct{ kind, id string }
 
 type fakeMutator struct {
-	ops    []opRec
-	failOn string // if set, return error when op kind matches
+	ops          []opRec
+	failOn       string // if set, return error when op kind matches
+	inspectState string // live state InspectStatus reports; default "exited" (stopped)
 }
 
 func (f *fakeMutator) ContainerStart(_ context.Context, id string) error {
@@ -38,6 +39,13 @@ func (f *fakeMutator) ContainerRemove(_ context.Context, id string) error {
 		return fmt.Errorf("injected error for remove")
 	}
 	return nil
+}
+func (f *fakeMutator) InspectStatus(_ context.Context, _ string) (job.ContainerStatus, error) {
+	state := f.inspectState
+	if state == "" {
+		state = "exited"
+	}
+	return job.ContainerStatus{State: state}, nil
 }
 
 // fakeComposer returns a fixed parsed project (web shares db's namespace).
@@ -205,6 +213,33 @@ func TestLifecycleRemoveStoppedStandalone(t *testing.T) {
 	done, _ := jobs.Get(jid)
 	if done.Status != "success" {
 		t.Fatalf("status = %q, want success", done.Status)
+	}
+}
+
+func TestLifecycleRemoveRefusesStaleStoppedState(t *testing.T) {
+	db := openJobDB(t)
+	projects := store.NewProjects(db)
+	services := store.NewServices(db)
+	pid, _ := projects.Upsert(store.Project{HostID: 1, Kind: "standalone", Name: "adoring_saha", Source: "discovered"})
+	// Stored state says stopped, but the live daemon (fakeMutator.inspectState)
+	// reports running: the discovery reconcile hasn't caught up yet. The guard
+	// must re-check live state and refuse.
+	sid, _ := services.Upsert(store.Service{ProjectID: pid, Name: "adoring_saha",
+		ImageRef: "busybox:latest", CurrentDigest: "sha256:b", State: "exited", ContainerIDs: []string{"c1"}})
+	svc, _ := services.Get(sid)
+	m := &fakeMutator{inspectState: "running"}
+	jobs := store.NewJobs(db)
+	jid, _ := jobs.Enqueue(store.Job{Type: "remove", ServiceID: &svc.ID, ProjectID: &pid, Scope: "service"})
+	j, _ := jobs.Get(jid)
+
+	newLifecycle(db, m).Handle(context.Background(), j)
+
+	if len(m.ops) != 0 {
+		t.Fatalf("live-running container must not be removed, ops=%+v", m.ops)
+	}
+	done, _ := jobs.Get(jid)
+	if done.Status != "failed" {
+		t.Fatalf("status = %q, want failed", done.Status)
 	}
 }
 
