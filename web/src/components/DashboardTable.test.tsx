@@ -589,6 +589,112 @@ test("changelog column shows the pending changelog (non-muted) when the pending 
   await waitFor(() => expect(screen.getByText("Pending notes")).toBeInTheDocument());
 });
 
+test("changelog eye is enabled for a rate-limited pending update with no changelog content", async () => {
+  // Scan sets changelog_status to "rate_limited" but leaves changelog_text and
+  // changelog_url empty. The eye must still open so ChangelogDrawer can render
+  // the "add a token" hint, rather than being disabled like a plain no-content miss.
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 1,
+          name: "app",
+          kind: "compose",
+          working_dir: "/srv",
+          auto_update_enabled: false,
+          services: [
+            {
+              id: 10,
+              name: "web",
+              image_ref: "nginx:1.29",
+              current_digest: "sha256:c",
+              state: "running",
+              pinned: false,
+              healthcheck: false,
+              auto_update_enabled: null,
+            },
+          ],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () =>
+      HttpResponse.json([
+        {
+          id: 200,
+          service_id: 10,
+          status: "available",
+          tag: "1.29",
+          to_digest: "sha256:d",
+          from_digest: "sha256:c",
+          severity: "minor",
+          changelog_url: "",
+          changelog_text: "",
+          changelog_status: "rate_limited",
+        },
+      ]),
+    ),
+    http.get("/api/updates/last-applied", () => HttpResponse.json([])),
+  );
+  renderDashboardWithRouter();
+
+  const button = await screen.findByRole("button", { name: /^changelog for web$/i });
+  expect(button).not.toBeDisabled();
+
+  await userEvent.click(button);
+
+  await waitFor(() => expect(screen.getByText(/github rate limit reached/i)).toBeInTheDocument());
+});
+
+test("changelog eye stays disabled for a pending update with no changelog and no rate limit", async () => {
+  // Guards the non-rate-limited miss case: empty changelog_text/url and no
+  // changelog_status must still leave the eye disabled (no drawer to open).
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 1,
+          name: "app",
+          kind: "compose",
+          working_dir: "/srv",
+          auto_update_enabled: false,
+          services: [
+            {
+              id: 10,
+              name: "web",
+              image_ref: "nginx:1.29",
+              current_digest: "sha256:c",
+              state: "running",
+              pinned: false,
+              healthcheck: false,
+              auto_update_enabled: null,
+            },
+          ],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () =>
+      HttpResponse.json([
+        {
+          id: 200,
+          service_id: 10,
+          status: "available",
+          tag: "1.29",
+          to_digest: "sha256:d",
+          from_digest: "sha256:c",
+          severity: "minor",
+          changelog_url: "",
+          changelog_text: "",
+        },
+      ]),
+    ),
+    http.get("/api/updates/last-applied", () => HttpResponse.json([])),
+  );
+  renderDashboardWithRouter();
+
+  const button = await screen.findByRole("button", { name: /^changelog for web$/i });
+  expect(button).toBeDisabled();
+});
+
 test("action menu is state-aware and wires Stop to the lifecycle endpoint", async () => {
   const calls: Array<{ id: string; action: string }> = [];
   server.use(

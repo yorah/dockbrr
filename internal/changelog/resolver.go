@@ -38,8 +38,10 @@ func NewResolver(sources []Source) *Resolver {
 }
 
 // Resolve enriches an update with changelog text and/or a link. It returns
-// ("","",nil) when no source hits (the caller marks the update unavailable). A
-// source error is logged and treated as a miss; the chain never aborts.
+// ("","",nil) when no source hits (the caller marks the update unavailable),
+// or ("","",ErrRateLimited) when no source hits and at least one of them
+// failed with a rate limit. A source error is logged and treated as a miss;
+// the chain never aborts.
 func (r *Resolver) Resolve(ctx context.Context, u store.Update, img registry.RemoteImage) (text, url string, err error) {
 	in := buildInput(u, img)
 	// First non-empty (sanitized) pair wins. "Always keep a link" is structural:
