@@ -6,8 +6,10 @@ package scan
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 
+	"dockbrr/internal/changelog"
 	"dockbrr/internal/detect"
 	"dockbrr/internal/logger"
 	"dockbrr/internal/registry"
@@ -122,13 +124,16 @@ func (s *Scanner) CheckService(ctx context.Context, serviceID int64) error {
 	remote := registry.RemoteImage{Ref: svc.ImageRef, Digest: upd.ToDigest, Labels: labels}
 
 	text, url, err := s.changelog.Resolve(ctx, *upd, remote)
-	if err != nil {
+	switch {
+	case errors.Is(err, changelog.ErrRateLimited):
+		if serr := s.updates.SetChangelogStatus(upd.ID, "rate_limited"); serr != nil {
+			logger.Errorf("scan: persist changelog status (update %d): %v", upd.ID, serr)
+		}
+	case err != nil:
 		logger.Errorf("scan: changelog resolve (service %d (%s)): %v", serviceID, svc.Name, err)
-		return nil // non-fatal
-	}
-	if text != "" || url != "" {
-		if err := s.updates.SetChangelog(upd.ID, url, text); err != nil {
-			logger.Errorf("scan: persist changelog (update %d): %v", upd.ID, err)
+	case text != "" || url != "":
+		if serr := s.updates.SetChangelog(upd.ID, url, text); serr != nil {
+			logger.Errorf("scan: persist changelog (update %d): %v", upd.ID, serr)
 		}
 	}
 	return nil
