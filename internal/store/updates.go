@@ -154,9 +154,12 @@ func (u *Updates) SupersedePriorOpen(serviceID int64, keepToDigest string) (int6
 
 // RecordDrift upserts the (service_id, to_digest) update and supersedes the
 // service's other still-open updates, all in ONE transaction, and reports
-// whether the update row was newly created. On an existing row it refreshes only
-// the mutable descriptor columns (from_digest/from_version/to_version/tag/
-// severity), detected_at and the cached changelog are preserved. Status is
+// whether the update row was newly created. On an existing row it refreshes the
+// mutable descriptor columns (from_digest/from_version/to_version/tag/severity);
+// detected_at and the cached changelog are preserved. A blank incoming
+// from_version/to_version (or digest-only severity) does NOT overwrite a
+// non-blank existing value, so the cheap digest-only cache-hit cycle can't wipe
+// the names a network cycle resolved. Status is
 // also preserved, except that 'failed' (transient apply failure), 'superseded'
 // (a newer target that has since flapped back to this digest), and 'applied'
 // (the service has diverged from its applied target again, e.g. a recreate,
@@ -200,11 +203,27 @@ func (u *Updates) RecordDrift(up Update) (id int64, isNew bool, err error) {
 		// below then demotes any sibling that is no longer current, leaving exactly
 		// one available row. dismissed and rolled_back (both user intent) are
 		// deliberately preserved.
+		// Version columns and severity are preserved when the incoming values are
+		// blank/digest-only: a cache-hit detect cycle re-detects the same to_digest
+		// via the cheap digest-only fast path, which carries no version info. Since
+		// a version is a pure function of the (keyed) to_digest, a blank incoming
+		// means "not computed this cycle", never "changed to blank", so wiping a
+		// name the network cycle resolved (e.g. a floating "latest" reverse-named to
+		// v1.13.0 -> v1.14.1) would be wrong. A non-blank incoming still overwrites.
 		if _, err = tx.Exec(
-			`UPDATE updates SET from_digest=?, from_version=?, to_version=?, tag=?, severity=?,
+			`UPDATE updates SET from_digest=?,
+			        from_version = CASE WHEN ?='' THEN from_version ELSE ? END,
+			        to_version   = CASE WHEN ?='' THEN to_version   ELSE ? END,
+			        tag=?,
+			        severity = CASE WHEN ?='digest-only' AND severity IN ('major','minor','patch') THEN severity ELSE ? END,
 			        status = CASE WHEN status IN ('failed','superseded','applied') THEN 'available' ELSE status END
 			  WHERE id=?`,
-			up.FromDigest, up.FromVersion, up.ToVersion, up.Tag, severity, existing,
+			up.FromDigest,
+			up.FromVersion, up.FromVersion,
+			up.ToVersion, up.ToVersion,
+			up.Tag,
+			severity, severity,
+			existing,
 		); err != nil {
 			return 0, false, err
 		}

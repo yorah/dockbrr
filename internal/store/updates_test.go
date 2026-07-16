@@ -280,6 +280,37 @@ func TestUpdatesRecordDriftPreservesChangelogAndStatus(t *testing.T) {
 	}
 }
 
+func TestUpdatesRecordDriftPreservesVersionsWhenBlank(t *testing.T) {
+	db := openImagesStore(t)
+	sid := seedService(t, db)
+	u := store.NewUpdates(db)
+	// A network cycle names both ends of a floating-tag ("latest") drift.
+	id, _, err := u.RecordDrift(store.Update{
+		ServiceID: sid, ToDigest: "sha256:to", FromDigest: "sha256:from",
+		FromVersion: "v1.13.0", ToVersion: "v1.14.1", Tag: "latest", Severity: "minor",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A later cache-hit cycle re-detects the SAME to_digest but carries no
+	// version info (blank from/to, digest-only severity). It must NOT wipe the
+	// names/severity the network cycle computed: versions are a function of the
+	// (keyed) to_digest, so a blank incoming means "not computed", not "changed".
+	if _, isNew, err := u.RecordDrift(store.Update{
+		ServiceID: sid, ToDigest: "sha256:to", FromDigest: "sha256:from",
+		Tag: "latest", Severity: "digest-only",
+	}); err != nil {
+		t.Fatal(err)
+	} else if isNew {
+		t.Fatal("isNew=true for existing row")
+	}
+	var fromV, toV, sev string
+	_ = db.QueryRow(`SELECT from_version, to_version, severity FROM updates WHERE id=?`, id).Scan(&fromV, &toV, &sev)
+	if fromV != "v1.13.0" || toV != "v1.14.1" || sev != "minor" {
+		t.Fatalf("clobbered by digest-only cycle: from=%q to=%q sev=%q, want v1.13.0/v1.14.1/minor", fromV, toV, sev)
+	}
+}
+
 func TestUpdatesGetByID(t *testing.T) {
 	db := openImagesStore(t)
 	sid := seedService(t, db)
