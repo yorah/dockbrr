@@ -110,6 +110,36 @@ func TestResolveUnavailable(t *testing.T) {
 	}
 }
 
+func TestResolverReportsRateLimitWhenChainEmpty(t *testing.T) {
+	r := changelog.NewResolver([]changelog.Source{
+		fakeSource{name: "gh", err: changelog.ErrRateLimited},
+		fakeSource{name: "oci", res: changelog.Result{}},
+	})
+	text, url, err := r.Resolve(context.Background(), store.Update{}, registry.RemoteImage{})
+	if text != "" || url != "" {
+		t.Fatalf("content = (%q,%q), want empty", text, url)
+	}
+	if !errors.Is(err, changelog.ErrRateLimited) {
+		t.Fatalf("err = %v, want ErrRateLimited", err)
+	}
+}
+
+func TestResolverIgnoresRateLimitWhenLaterSourceHasContent(t *testing.T) {
+	// A rate-limited GitHub source followed by an OCI-label link: the link is
+	// real content, so no rate-limit signal is emitted.
+	r := changelog.NewResolver([]changelog.Source{
+		fakeSource{name: "gh", err: changelog.ErrRateLimited},
+		fakeSource{name: "oci", res: changelog.Result{URL: "https://github.com/acme/web"}},
+	})
+	_, url, err := r.Resolve(context.Background(), store.Update{}, registry.RemoteImage{})
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if url != "https://github.com/acme/web" {
+		t.Fatalf("url = %q, want the oci link", url)
+	}
+}
+
 // Integration: the three real sources wired against fake GitHub/Hub hosts.
 func TestResolveGitHubFromGHCRLabel(t *testing.T) {
 	mux := http.NewServeMux()
