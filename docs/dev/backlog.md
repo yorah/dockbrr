@@ -19,6 +19,18 @@ frontend/backend stopped-state alignment, lifecycle event-kind labels.
 - [ ] [wl-p1] Remove guard reads `store.Service.State`; after a `stop` job, State refreshes only via the event-driven discovery reconcile, so a stop-then-immediately-remove could briefly 409 on a stale "running". Not reachable via normal UI flow (remove is offered only on already-stopped rows). Harden with a live `ContainerInspect` in the guard if it ever surfaces.
 - [ ] [wl-p1] No test covers the 4 new lifecycle event `KIND_META` entries (started/stopped/restarted/removed) in `EventItem.test.tsx`. Add if event-label coverage matters.
 
+### Workload lifecycle Phase 2 (standalone SDK-recreate apply; branch `feat/loose-container-grouping`, 2026-07-16, fresh whole-branch review GO)
+
+Non-blocking minors from the independent whole-branch review. The two Important findings
+(precheck-before-mutation, health-gate fail-fast) and a dead-code minor (`ContainerRestart`)
+were fixed in-branch (commit aa60cab); the anonymous-volume + cross-tag Important gaps were
+fixed earlier (0cd5193).
+
+- [ ] [wl-p2] `StandaloneApplier` emits no job log lines (no Emitter) and no `apply_started` event, unlike the compose Applier, so the live-log panel opens empty on a standalone apply. Add an emitter for parity if the empty panel confuses users.
+- [ ] [wl-p2] `failApply` on a snapshot-insert error marks the update `failed` + emits a failed event though nothing mutated (compose uses plain `fail` pre-mutation). Cosmetic: `RecordDrift` re-opens `failed` updates on the next scan.
+- [ ] [wl-p2] After a cross-tag standalone apply, `svc.ImageRef` keeps the old tag until the next reconcile (`UpdateRuntime` writes ids+digest only); brief stale-tag window on the dashboard. Self-corrects on reconcile.
+- [ ] [wl-p2] Crash-window leftovers: a hard crash between rename and finalize can strand a `<name>-dockbrr-old` container (and, post-create, two containers) that nothing cleans up. The resumed job self-heals in the pre-create window; post-create needs manual cleanup. Rare, no data loss.
+
 ### UX / lifecycle
 
 - [x] ~~[smoke-2026-07-10] Prune Gone services / empty projects~~, SHIPPED (dashboard-lifecycle UX batch, 2026-07-11): `auto_remove_gone` setting (default on) + `gone_grace_seconds` (default 3600) + `services.gone_since`; discovery hard-deletes gone-past-grace services + empty discovered projects (FK cascade). Manual projects never pruned.
