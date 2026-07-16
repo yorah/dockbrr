@@ -23,6 +23,7 @@ function project(): Project {
     working_dir: "/srv/web",
     auto_update_enabled: true,
     unmanaged: false,
+    auto_named: false,
     services: [
       {
         id: 1,

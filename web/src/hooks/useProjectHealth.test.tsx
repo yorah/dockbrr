@@ -9,7 +9,7 @@ const svc = (id: number, name: string): Service => ({
 });
 const proj = (id: number, name: string, services: Service[]): Project => ({
   id, name, kind: "compose", working_dir: `/srv/${name}`,
-  auto_update_enabled: false, unmanaged: false, services,
+  auto_update_enabled: false, unmanaged: false, auto_named: false, services,
 });
 const upd = (id: number, service_id: number, status: string): Update => ({
   id, service_id, from_digest: "sha256:a", to_digest: "sha256:b",

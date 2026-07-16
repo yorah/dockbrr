@@ -126,6 +126,17 @@ func (s *Services) MarkGone(id int64) error {
 // ErrServiceNotFound is returned by Services.Get when no row matches.
 var ErrServiceNotFound = errors.New("service not found")
 
+// IsStoppedState reports whether a service state permits removal (any
+// non-running, non-transitional state).
+func IsStoppedState(state string) bool {
+	switch state {
+	case "exited", "dead", "created":
+		return true
+	default:
+		return false
+	}
+}
+
 // Get returns the service by id, or ErrServiceNotFound.
 func (s *Services) Get(id int64) (Service, error) {
 	var (
@@ -191,6 +202,14 @@ func (s *Services) UpdateRuntime(id int64, containerIDs []string, currentDigest 
 		`UPDATE services SET container_ids=?, current_digest=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
 		string(j), currentDigest, id,
 	)
+	return err
+}
+
+// UpdateImageRef persists a service's tracked image reference (e.g. after a
+// cross-tag apply moved it to a newer tag). Discovery would re-derive it on the
+// next reconcile; this makes the dashboard reflect it immediately.
+func (s *Services) UpdateImageRef(id int64, imageRef string) error {
+	_, err := s.db.Exec(`UPDATE services SET image_ref=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, imageRef, id)
 	return err
 }
 

@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
-import { CheckCircle2, Circle, Info } from "lucide-react";
+import { CheckCircle2, Circle, Info, Play, RotateCw, Square, Trash2 } from "lucide-react";
 import { EventItem, kindMeta } from "./EventItem";
 import type { ServiceEvent } from "@/api/types";
 
@@ -29,6 +29,17 @@ describe("kindMeta", () => {
     const meta = kindMeta("something_new");
     expect(meta.icon).toBe(Circle);
     expect(meta.label).toBe("Event");
+  });
+
+  test.each([
+    ["started", "Started", Play],
+    ["stopped", "Stopped", Square],
+    ["restarted", "Restarted", RotateCw],
+    ["removed", "Removed", Trash2],
+  ])("maps lifecycle kind %s to label and icon", (kind, expectedLabel, expectedIcon) => {
+    const meta = kindMeta(kind);
+    expect(meta.label).toBe(expectedLabel);
+    expect(meta.icon).toBe(expectedIcon);
   });
 });
 

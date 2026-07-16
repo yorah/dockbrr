@@ -219,7 +219,12 @@ func run(args []string, getenv func(string) string) error {
 			compose.NewExecRunner(), resolver, dc, locator, job.RealComposer{}, engine,
 			plat, healthTimeout, healthPoll,
 		)
-		engine.SetHandler(applier)
+		lifecycle := job.NewLifecycle(jobs, services, projects, events, dc, job.RealComposer{}, locator, engine)
+		standalone := job.NewStandaloneApplier(
+			jobs, updates, services, projects, snapshots, events,
+			resolver, dc, plat, healthTimeout, healthPoll, engine,
+		)
+		engine.SetHandler(job.NewDispatcher(applier, lifecycle, standalone, projects))
 		if n, rerr := engine.ResumeInterrupted(); rerr != nil {
 			logger.Errorf("job engine: resume interrupted: %v", rerr)
 		} else if n > 0 {
@@ -330,6 +335,13 @@ func run(args []string, getenv func(string) string) error {
 	if dockerProbe != nil {
 		deps.DockerPinger = dockerProbe
 		deps.DockerVersion = dockerProbe.ServerVersion
+		// DockerLogs reuses dockerProbe (not the supervisor-owned dc): docker.New
+		// does not dial, so dockerProbe is available immediately at boot, and
+		// unlike dc it is never mutated after construction, so no dcMu is needed
+		// here. Using dc directly would race dcMu's writer and, worse, wrap a nil
+		// *docker.Client in a non-nil DockerLogsReader before Docker first
+		// connects, defeating the nil-Deps.DockerLogs -> 503 check in handleLogs.
+		deps.DockerLogs = dockerProbe
 	}
 	srv := httpapi.New(cfg, db, deps)
 	// BaseContext ties every request's context to the signal-cancelled ctx, so a

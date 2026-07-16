@@ -20,6 +20,7 @@ type Project struct {
 	AutoUpdateEnabled bool
 	UpdatePolicy      string // raw JSON
 	Unmanaged         bool   // compose files missing/unreadable; apply is refused (design §7)
+	AutoNamed         bool   // standalone container name was Docker-assigned (adjective_surname); UI groups these as "Loose"
 	LastSyncedAt      *time.Time
 	CreatedAt         time.Time
 }
@@ -63,7 +64,7 @@ func (p *Projects) Upsert(pr Project) (int64, error) {
 func (p *Projects) List() ([]Project, error) {
 	rows, err := p.db.Query(
 		`SELECT id, host_id, kind, name, working_dir, config_files, source,
-		        auto_update_enabled, update_policy, unmanaged, last_synced_at, created_at
+		        auto_update_enabled, update_policy, unmanaged, auto_named, last_synced_at, created_at
 		   FROM projects ORDER BY name`,
 	)
 	if err != nil {
@@ -78,10 +79,11 @@ func (p *Projects) List() ([]Project, error) {
 			lastSync  sql.NullTime
 			autoUpd   int
 			unmanaged int
+			autoNamed int
 		)
 		if err := rows.Scan(
 			&pr.ID, &pr.HostID, &pr.Kind, &pr.Name, &pr.WorkingDir, &cfJSON,
-			&pr.Source, &autoUpd, &pr.UpdatePolicy, &unmanaged, &lastSync, &pr.CreatedAt,
+			&pr.Source, &autoUpd, &pr.UpdatePolicy, &unmanaged, &autoNamed, &lastSync, &pr.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -90,6 +92,7 @@ func (p *Projects) List() ([]Project, error) {
 		}
 		pr.AutoUpdateEnabled = autoUpd != 0
 		pr.Unmanaged = unmanaged != 0
+		pr.AutoNamed = autoNamed != 0
 		if lastSync.Valid {
 			t := lastSync.Time
 			pr.LastSyncedAt = &t
@@ -110,15 +113,16 @@ func (p *Projects) Get(id int64) (Project, error) {
 		lastSync  sql.NullTime
 		autoUpd   int
 		unmanaged int
+		autoNamed int
 	)
 	err := p.db.QueryRow(
 		`SELECT id, host_id, kind, name, working_dir, config_files, source,
-		        auto_update_enabled, update_policy, unmanaged, last_synced_at, created_at
+		        auto_update_enabled, update_policy, unmanaged, auto_named, last_synced_at, created_at
 		   FROM projects WHERE id=?`,
 		id,
 	).Scan(
 		&pr.ID, &pr.HostID, &pr.Kind, &pr.Name, &pr.WorkingDir, &cfJSON,
-		&pr.Source, &autoUpd, &pr.UpdatePolicy, &unmanaged, &lastSync, &pr.CreatedAt,
+		&pr.Source, &autoUpd, &pr.UpdatePolicy, &unmanaged, &autoNamed, &lastSync, &pr.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Project{}, ErrProjectNotFound
@@ -131,6 +135,7 @@ func (p *Projects) Get(id int64) (Project, error) {
 	}
 	pr.AutoUpdateEnabled = autoUpd != 0
 	pr.Unmanaged = unmanaged != 0
+	pr.AutoNamed = autoNamed != 0
 	if lastSync.Valid {
 		t := lastSync.Time
 		pr.LastSyncedAt = &t
@@ -154,6 +159,14 @@ func (p *Projects) Delete(id int64) error {
 // Apply is refused for unmanaged projects (design §7).
 func (p *Projects) SetUnmanaged(id int64, v bool) error {
 	_, err := p.db.Exec(`UPDATE projects SET unmanaged=? WHERE id=?`, v, id)
+	return err
+}
+
+// SetAutoNamed flags a project whose standalone container name was assigned by
+// Docker (adjective_surname). Drives the "Loose" grouping in the UI. Idempotent
+// and recomputed on every reconcile.
+func (p *Projects) SetAutoNamed(id int64, v bool) error {
+	_, err := p.db.Exec(`UPDATE projects SET auto_named=? WHERE id=?`, v, id)
 	return err
 }
 

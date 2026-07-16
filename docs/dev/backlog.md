@@ -9,6 +9,28 @@ Format: `- [ ] [source-tag] short description, why deferred / what it needs`
 
 ## Open
 
+### Workload lifecycle Phase 1 (start/stop/restart, remove, logs; branch `feat/loose-container-grouping`, 2026-07-15, whole-phase review GO)
+
+Genuine defers from the whole-phase review. The other 5 review minors were fixed in-branch
+(commit c4f16a5): restart double-parse, "gone"-state test, LogsDrawer stale-response guard,
+frontend/backend stopped-state alignment, lifecycle event-kind labels.
+
+- [x] ~~[wl-p1] Lifecycle jobs emit no SSE progress lines~~ FIXED (217f11): `Lifecycle` gained a nil-safe `Emitter`, emits progress lines through `Handle`.
+- [x] ~~[wl-p1] Remove guard reads stale `store.Service.State`~~ FIXED (4bf86e4): `runRemove` now live-inspects the container (`InspectStatus` on the `Mutator`) and refuses if actually running/restarting, on top of the stored-state + kind guards.
+- [x] ~~[wl-p1] No test covers the 4 new lifecycle event `KIND_META` entries~~ FIXED (fdf4fc0): parametrized test over started/stopped/restarted/removed labels in `EventItem.test.tsx`.
+
+### Workload lifecycle Phase 2 (standalone SDK-recreate apply; branch `feat/loose-container-grouping`, 2026-07-16, fresh whole-branch review GO)
+
+Non-blocking minors from the independent whole-branch review. The two Important findings
+(precheck-before-mutation, health-gate fail-fast) and a dead-code minor (`ContainerRestart`)
+were fixed in-branch (commit aa60cab); the anonymous-volume + cross-tag Important gaps were
+fixed earlier (0cd5193).
+
+- [x] ~~[wl-p2] `StandaloneApplier` emits no job log lines~~ FIXED (217f11): standalone apply/rollback now emit progress lines via a nil-safe `Emitter`.
+- [x] ~~[wl-p2] `failApply` on a pre-mutation error marks the update failed~~ FIXED (9fe500f): inspect-precheck + snapshot-insert failures now use plain `fail`, leaving the update `available` for retry.
+- [x] ~~[wl-p2] Cross-tag apply leaves `svc.ImageRef` on the old tag until reconcile~~ FIXED (9fe500f): `runApply` persists the new ref via `store.Services.UpdateImageRef` on a cross-tag apply.
+- [x] ~~[wl-p2] Crash-window leftovers strand `<name>-dockbrr-old`~~ FIXED (a208b99): `recreate` is now idempotent (`ContainerIDByName` + `clearNameConflict` clears leftovers before recreating; name regex escaped in 4ac44b0).
+
 ### UX / lifecycle
 
 - [x] ~~[smoke-2026-07-10] Prune Gone services / empty projects~~, SHIPPED (dashboard-lifecycle UX batch, 2026-07-11): `auto_remove_gone` setting (default on) + `gone_grace_seconds` (default 3600) + `services.gone_since`; discovery hard-deletes gone-past-grace services + empty discovered projects (FK cascade). Manual projects never pruned.

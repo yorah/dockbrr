@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   flexRender,
@@ -6,7 +6,19 @@ import {
   useReactTable,
   type ColumnDef,
 } from "@tanstack/react-table";
-import { AlertTriangle, ArrowUpCircle, ChevronRight, Eye, FileText, RefreshCw } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowUpCircle,
+  ChevronRight,
+  Eye,
+  FileText,
+  Play,
+  RefreshCw,
+  RotateCw,
+  ScrollText,
+  Square,
+  Trash2,
+} from "lucide-react";
 import { cn } from "@/lib/cn";
 import { relative } from "@/components/RelativeTime";
 import {
@@ -21,11 +33,17 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { StatusBadge, computeStatus } from "@/components/StatusBadge";
+import { StatusBadge, computeStatus, isStopped } from "@/components/StatusBadge";
 import { SeverityDelta } from "@/components/SeverityDelta";
 import { DigestShort } from "@/components/DigestShort";
 import { ComposeModal } from "@/components/ComposeModal";
-import { useApply, useCheck, useToggleProjectAuto } from "@/hooks/mutations";
+import {
+  useApply,
+  useCheck,
+  useLifecycle,
+  useRemoveContainer,
+  useToggleProjectAuto,
+} from "@/hooks/mutations";
 import { ApplyAllButton, CheckAllButton } from "@/components/BulkActions";
 import type { Row } from "@/hooks/useDashboardRows";
 import type { Project, Service, Update } from "@/api/types";
@@ -58,6 +76,12 @@ export interface DashboardTableProps {
   onApplied: (jobId: number) => void;
   /** Opens the read-only changelog view for a service's pending or last-applied update. */
   onChangelog: (update: Update, service: Service) => void;
+  /** Opens the live tail-logs drawer for a service. Defaults to a no-op (wired in Task 8). */
+  onLogs?: (service: Service) => void;
+  /** When true (dashboard only), auto-named projects render inside a collapsed "Loose" group. */
+  groupLoose?: boolean;
+  /** Initial + synced open-state for the Loose group (dashboard passes filters-active). */
+  looseDefaultOpen?: boolean;
 }
 
 // Resolve to whichever candidate actually HAS changelog content, preferring the
@@ -76,6 +100,7 @@ function ActionsCell({
   changelog,
   onApplied,
   onChangelog,
+  onLogs,
 }: {
   service: Service;
   update: Update | undefined;
@@ -83,13 +108,25 @@ function ActionsCell({
   changelog: Update | undefined;
   onApplied: DashboardTableProps["onApplied"];
   onChangelog: DashboardTableProps["onChangelog"];
+  onLogs: (service: Service) => void;
 }) {
   const check = useCheck();
   const apply = useApply();
+  const lifecycle = useLifecycle();
   // A gone service has no container to recreate. Applying would just create
   // a fresh one for something the user (or something else) removed.
   const canApply = update?.status === "available" && service.state !== "gone";
   const isHistory = !!changelog && changelog !== update;
+  // "gone" services have no container left to start/stop/restart: only Logs
+  // (which reads cached history, not a live container) still makes sense.
+  const gone = service.state === "gone";
+  const stopped = isStopped(service.state);
+  const runLifecycle = (action: "start" | "stop" | "restart") => {
+    lifecycle.mutate(
+      { serviceId: service.id, action },
+      { onSuccess: (res) => onApplied(res.job_id) },
+    );
+  };
   return (
     <div className="flex items-center gap-1">
         <Tooltip>
@@ -157,6 +194,83 @@ function ActionsCell({
             </Button>
           </TooltipTrigger>
           <TooltipContent>Check now</TooltipContent>
+        </Tooltip>
+        {!gone && stopped && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 w-7 p-0"
+                disabled={lifecycle.isPending}
+                aria-label={`Start ${service.name}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  runLifecycle("start");
+                }}
+              >
+                <Play className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Start</TooltipContent>
+          </Tooltip>
+        )}
+        {!gone && !stopped && (
+          <>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 w-7 p-0"
+                  disabled={lifecycle.isPending}
+                  aria-label={`Stop ${service.name}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    runLifecycle("stop");
+                  }}
+                >
+                  <Square className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Stop</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 w-7 p-0"
+                  disabled={lifecycle.isPending}
+                  aria-label={`Restart ${service.name}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    runLifecycle("restart");
+                  }}
+                >
+                  <RotateCw className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Restart</TooltipContent>
+            </Tooltip>
+          </>
+        )}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0"
+              aria-label={`Logs for ${service.name}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onLogs(service);
+              }}
+            >
+              <ScrollText className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Logs</TooltipContent>
         </Tooltip>
       </div>
   );
@@ -229,6 +343,9 @@ function ProjectBulkActions({
 function buildColumns(
   onApplied: DashboardTableProps["onApplied"],
   onChangelog: DashboardTableProps["onChangelog"],
+  onLogs: (service: Service) => void,
+  looseSelected: Set<number>,
+  onToggleLooseSelect: (serviceId: number) => void,
 ): ColumnDef<Row>[] {
   return [
     {
@@ -237,15 +354,30 @@ function buildColumns(
       cell: ({ row }) => {
         const r = row.original;
         if (r.kind !== "service") return null;
+        // Only stopped loose (Docker-auto-named standalone) containers are
+        // ever removable; the backend guards the same rule, so a checkbox
+        // never appears for a running one.
+        const selectable = r.project.auto_named && isStopped(r.service.state);
         return (
-          <Link
-            to="/service/$id"
-            params={{ id: String(r.service.id) }}
-            className="pl-6 hover:underline"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {r.service.name}
-          </Link>
+          <div className="flex items-center gap-2 pl-6">
+            {selectable && (
+              <input
+                type="checkbox"
+                aria-label={`Select ${r.service.name}`}
+                checked={looseSelected.has(r.service.id)}
+                onClick={(e) => e.stopPropagation()}
+                onChange={() => onToggleLooseSelect(r.service.id)}
+              />
+            )}
+            <Link
+              to="/service/$id"
+              params={{ id: String(r.service.id) }}
+              className="hover:underline"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {r.service.name}
+            </Link>
+          </div>
         );
       },
     },
@@ -343,6 +475,7 @@ function buildColumns(
             changelog={changelogUpdate(r)}
             onApplied={onApplied}
             onChangelog={onChangelog}
+            onLogs={onLogs}
           />
         );
       },
@@ -350,25 +483,83 @@ function buildColumns(
   ];
 }
 
-export function DashboardTable({ rows, onReview, updatesByService, onApplied, onChangelog }: DashboardTableProps) {
+export function DashboardTable({
+  rows,
+  onReview,
+  updatesByService,
+  onApplied,
+  onChangelog,
+  onLogs = () => {},
+  groupLoose = false,
+  looseDefaultOpen = false,
+}: DashboardTableProps) {
   const [collapsed, setCollapsed] = useState<Set<number>>(() => new Set());
   const [composeProject, setComposeProject] = useState<Project | null>(null);
+  const [looseOpen, setLooseOpen] = useState(looseDefaultOpen);
+  const [looseSelected, setLooseSelected] = useState<Set<number>>(() => new Set());
+  const removeContainer = useRemoveContainer();
 
-  const visibleRows = useMemo(
-    () => rows.filter((r) => r.kind === "project" || !collapsed.has(r.project.id)),
-    [rows, collapsed],
+  // Auto-expand under an active filter, re-collapse when it clears.
+  useEffect(() => setLooseOpen(looseDefaultOpen), [looseDefaultOpen]);
+
+  // All loose (auto-named standalone) service rows, independent of the group's
+  // open/closed state: the bulk-remove header needs every selected service's
+  // name for the confirm prompt even though only the open ones are on screen.
+  const looseServices = useMemo(
+    () => rows.filter((r): r is Extract<Row, { kind: "service" }> => r.kind === "service" && r.project.auto_named),
+    [rows],
   );
 
+  function toggleLooseSelect(serviceId: number) {
+    setLooseSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(serviceId)) next.delete(serviceId);
+      else next.add(serviceId);
+      return next;
+    });
+  }
+
+  function removeSelectedLoose() {
+    const selected = looseServices.filter((r) => looseSelected.has(r.service.id));
+    if (selected.length === 0) return;
+    const names = selected.map((r) => r.service.name).join(", ");
+    const n = selected.length;
+    if (!window.confirm(`Remove ${n} stopped container${n > 1 ? "s" : ""}: ${names}? This cannot be undone.`)) return;
+    for (const r of selected) removeContainer.mutate(r.service.id);
+    setLooseSelected(new Set());
+  }
+
+  const visibleRows = useMemo(() => {
+    const shown = (r: Row) => r.kind !== "service" || !collapsed.has(r.project.id);
+    if (!groupLoose) {
+      return rows.filter(shown);
+    }
+    const normal = rows.filter((r) => r.kind !== "loose" && !r.project.auto_named);
+    const loose = rows.filter((r) => r.kind !== "loose" && r.project.auto_named);
+    const looseCount = loose.filter((r) => r.kind === "project").length;
+    const out: Row[] = normal.filter(shown);
+    if (looseCount > 0) {
+      out.push({ kind: "loose", count: looseCount });
+      if (looseOpen) out.push(...loose.filter(shown));
+    }
+    return out;
+  }, [rows, collapsed, groupLoose, looseOpen]);
+
   const columns = useMemo(
-    () => buildColumns(onApplied, onChangelog),
-    [onApplied, onChangelog],
+    () => buildColumns(onApplied, onChangelog, onLogs, looseSelected, toggleLooseSelect),
+    [onApplied, onChangelog, onLogs, looseSelected],
   );
 
   const table = useReactTable({
     data: visibleRows,
     columns,
     getCoreRowModel: getCoreRowModel(),
-    getRowId: (row) => (row.kind === "project" ? `project-${row.project.id}` : `service-${row.service.id}`),
+    getRowId: (row) =>
+      row.kind === "project"
+        ? `project-${row.project.id}`
+        : row.kind === "loose"
+          ? "loose-header"
+          : `service-${row.service.id}`,
   });
 
   function toggle(projectId: number) {
@@ -397,6 +588,50 @@ export function DashboardTable({ rows, onReview, updatesByService, onApplied, on
         <TableBody>
           {table.getRowModel().rows.map((row) => {
             const original = row.original;
+
+            if (original.kind === "loose") {
+              return (
+                <TableRow
+                  key={row.id}
+                  tabIndex={0}
+                  className="cursor-pointer bg-muted/20 font-medium text-muted-foreground"
+                  onClick={() => setLooseOpen((o) => !o)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") setLooseOpen((o) => !o);
+                  }}
+                >
+                  <TableCell colSpan={row.getVisibleCells().length}>
+                    <div className="flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        className="flex items-center gap-2 font-medium"
+                        aria-expanded={looseOpen}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setLooseOpen((o) => !o);
+                        }}
+                      >
+                        <ChevronRight className={cn("h-4 w-4 transition-transform", looseOpen && "rotate-90")} />
+                        Loose ({original.count})
+                      </button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 gap-1 px-2 text-xs"
+                        disabled={looseSelected.size === 0}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeSelectedLoose();
+                        }}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Remove selected
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            }
 
             if (original.kind === "project") {
               const expanded = !collapsed.has(original.project.id);

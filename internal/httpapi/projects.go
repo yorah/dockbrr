@@ -35,6 +35,7 @@ type projectDTO struct {
 	WorkingDir        string       `json:"working_dir"`
 	AutoUpdateEnabled bool         `json:"auto_update_enabled"`
 	Unmanaged         bool         `json:"unmanaged"`
+	AutoNamed         bool         `json:"auto_named"`
 	Services          []serviceDTO `json:"services"`
 }
 
@@ -97,6 +98,7 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 			WorkingDir:        pr.WorkingDir,
 			AutoUpdateEnabled: pr.AutoUpdateEnabled,
 			Unmanaged:         pr.Unmanaged,
+			AutoNamed:         pr.AutoNamed,
 			Services:          sdtos,
 		})
 	}

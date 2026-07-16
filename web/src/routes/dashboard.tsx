@@ -6,6 +6,7 @@ import { DashboardStats } from "@/components/DashboardStats";
 import { DashboardTable } from "@/components/DashboardTable";
 import { ReviewDrawer } from "@/components/ReviewDrawer";
 import { ChangelogDrawer } from "@/components/ChangelogDrawer";
+import { LogsDrawer } from "@/components/LogsDrawer";
 import { ApplyPanel } from "@/components/ApplyPanel";
 import { AddProjectDialog } from "@/components/AddProjectDialog";
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,7 @@ export function DashboardRoute() {
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [selected, setSelected] = useState<Selected | null>(null);
   const [changelogFor, setChangelogFor] = useState<{ update: Update; service: Service } | null>(null);
+  const [logsFor, setLogsFor] = useState<Service | null>(null);
   // Set by ReviewDrawer's onApplied. Task 13 wires this job id into the live-log/health-gate panel.
   const [appliedJobId, setAppliedJobId] = useState<number | null>(null);
   const [addOpen, setAddOpen] = useState(false);
@@ -44,6 +46,8 @@ export function DashboardRoute() {
     projects.flatMap((p) => p.services).filter((s) => s.state === "gone").map((s) => s.id),
   );
   const applicableUpdates = updatesData.filter((u) => !goneServiceIds.has(u.service_id));
+
+  const looseDefaultOpen = filters.search !== "" || filters.status !== "" || filters.onlyUpdates;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -101,6 +105,8 @@ export function DashboardRoute() {
       {!isLoading && !isError && rows.length > 0 && (
         <DashboardTable
           rows={rows}
+          groupLoose
+          looseDefaultOpen={looseDefaultOpen}
           updatesByService={updatesByService}
           onApplied={setAppliedJobId}
           onReview={(update, service, project) => {
@@ -110,6 +116,7 @@ export function DashboardRoute() {
             setSelected({ update, service, project });
           }}
           onChangelog={(update, service) => setChangelogFor({ update, service })}
+          onLogs={setLogsFor}
         />
       )}
 
@@ -120,6 +127,14 @@ export function DashboardRoute() {
           onClose={() => setChangelogFor(null)}
         />
       )}
+
+      <LogsDrawer
+        service={logsFor}
+        open={logsFor != null}
+        onOpenChange={(o) => {
+          if (!o) setLogsFor(null);
+        }}
+      />
 
       {selected && (
         <ReviewDrawer

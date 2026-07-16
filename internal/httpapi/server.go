@@ -41,6 +41,12 @@ type DockerPinger interface {
 	Ping(ctx context.Context) error
 }
 
+// DockerLogsReader reads a bounded tail of a container's logs. *docker.Client
+// satisfies it. Read-only, so it may be called directly from an API handler.
+type DockerLogsReader interface {
+	ContainerLogsTail(ctx context.Context, id string, tail int) (string, error)
+}
+
 // LogConfig carries the static (bootstrap) log settings for the config endpoint.
 // The live level is read from the log_level DB setting, not here.
 type LogConfig struct {
@@ -68,8 +74,11 @@ type Deps struct {
 	Checker      Checker
 	HostID       int64
 	DockerPinger DockerPinger
-	Bus          *Bus
-	LogConfig    LogConfig
+	// DockerLogs is the read-only container-logs reader. Nil disables the logs
+	// endpoint (returns 503). Read-only: this is the sole API->docker read path.
+	DockerLogs DockerLogsReader
+	Bus        *Bus
+	LogConfig  LogConfig
 	// NextScan reports when the scheduler will next run a check-all. Zero time
 	// (or a nil func, as in tests) means "unknown" and is omitted from /status.
 	NextScan func() time.Time
@@ -148,6 +157,9 @@ func (s *Server) routes() {
 		r.Post("/api/updates/{id}/dismiss", s.handleDismiss)
 		r.Post("/api/updates/{id}/restore", s.handleRestore)
 		r.Post("/api/services/{id}/check", s.handleCheck)
+		r.Post("/api/services/{id}/lifecycle", s.handleLifecycle)
+		r.Post("/api/services/{id}/remove", s.handleRemove)
+		r.Get("/api/services/{id}/logs", s.handleLogs)
 		r.Post("/api/scan", s.handleScanAll)
 		r.Get("/api/services/{id}/events", s.handleServiceEvents)
 		r.Get("/api/jobs", s.handleListJobs)

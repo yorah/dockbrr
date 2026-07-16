@@ -1,5 +1,19 @@
 import { useState } from "react";
-import { CheckCircle2, Circle, Eye, EyeOff, Info, PlayCircle, RotateCcw, XCircle, type LucideIcon } from "lucide-react";
+import {
+  CheckCircle2,
+  Circle,
+  Eye,
+  EyeOff,
+  Info,
+  Play,
+  PlayCircle,
+  RotateCcw,
+  RotateCw,
+  Square,
+  Trash2,
+  XCircle,
+  type LucideIcon,
+} from "lucide-react";
 import { DigestShort } from "@/components/DigestShort";
 import { RelativeTime } from "@/components/RelativeTime";
 import { Changelog } from "@/components/Changelog";
@@ -22,6 +36,10 @@ const KIND_META: Record<string, EventKindMeta> = {
   rolled_back: { label: "Rolled back", icon: RotateCcw, className: "text-warning" },
   dismissed: { label: "Dismissed", icon: EyeOff, className: "text-muted-foreground" },
   restored: { label: "Restored", icon: Eye, className: "text-success" },
+  started: { label: "Started", icon: Play, className: "text-success" },
+  stopped: { label: "Stopped", icon: Square, className: "text-muted-foreground" },
+  restarted: { label: "Restarted", icon: RotateCw, className: "text-info" },
+  removed: { label: "Removed", icon: Trash2, className: "text-danger" },
 };
 
 const DEFAULT_META: EventKindMeta = { label: "Event", icon: Circle, className: "text-muted-foreground" };

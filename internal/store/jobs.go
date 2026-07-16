@@ -12,7 +12,7 @@ var ErrJobNotFound = errors.New("job not found")
 // Job is a persisted unit of work for the Job Engine.
 type Job struct {
 	ID          int64
-	Type        string // check|apply|rollback|sync
+	Type        string // check|apply|rollback|sync|start|stop|restart|remove
 	ProjectID   *int64
 	ServiceID   *int64
 	Status      string // queued|running|success|failed|canceled

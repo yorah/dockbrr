@@ -10,7 +10,7 @@ const svc = (id: number, over: Partial<Project["services"][number]> = {}) => ({
   ...over,
 });
 const projects: Project[] = [
-  { id: 1, name: "p", kind: "compose", working_dir: "/x", auto_update_enabled: false, unmanaged: false,
+  { id: 1, name: "p", kind: "compose", working_dir: "/x", auto_update_enabled: false, unmanaged: false, auto_named: false,
     services: [svc(1), svc(2, { pinned: true }), svc(3, { state: "exited" })] },
 ];
 const updates = [
@@ -75,19 +75,19 @@ test("services tile resets all filters", () => {
 test("gone service is not counted in the Stopped tile", () => {
   const onFilter = vi.fn();
   const goneProjects: Project[] = [
-    { id: 1, name: "p", kind: "compose", working_dir: "/x", auto_update_enabled: false, unmanaged: false,
+    { id: 1, name: "p", kind: "compose", working_dir: "/x", auto_update_enabled: false, unmanaged: false, auto_named: false,
       services: [svc(1), svc(2, { state: "exited" }), svc(3, { state: "gone" })] },
   ];
   render(<DashboardStats projects={goneProjects} updates={[]} onFilter={onFilter} />);
   const stoppedTile = screen.getByText(/stopped/i).closest("button") as HTMLButtonElement;
-  // Only the "exited" service counts; "gone" is excluded (STOPPED_STATES = {exited, dead}).
+  // Only the "exited" service counts; "gone" is excluded (STOPPED_STATES = {exited, dead, created}).
   expect(within(stoppedTile).getByText("1")).toBeInTheDocument();
 });
 
 test("Services tile shows a removed sub-count when gone services are hidden from the table", () => {
   const onFilter = vi.fn();
   const goneProjects: Project[] = [
-    { id: 1, name: "p", kind: "compose", working_dir: "/x", auto_update_enabled: false, unmanaged: false,
+    { id: 1, name: "p", kind: "compose", working_dir: "/x", auto_update_enabled: false, unmanaged: false, auto_named: false,
       services: [svc(1), svc(2, { state: "gone" })] },
   ];
   render(<DashboardStats projects={goneProjects} updates={[]} onFilter={onFilter} />);
@@ -114,7 +114,7 @@ test("shows docker unreachable tile when status reports it", () => {
 test("updates-available tile counts only currently-visible services, not services hidden by the filter", () => {
   const onFilter = vi.fn();
   const goneWithUpdate: Project[] = [
-    { id: 1, name: "p", kind: "compose", working_dir: "/x", auto_update_enabled: false, unmanaged: false,
+    { id: 1, name: "p", kind: "compose", working_dir: "/x", auto_update_enabled: false, unmanaged: false, auto_named: false,
       services: [svc(1, { state: "gone" }), svc(2)] },
   ];
   const goneUpdates: Update[] = [
@@ -133,7 +133,7 @@ test("updates-available tile counts only currently-visible services, not service
 test("pinned tile drops a removed (gone) service once the table hides it", () => {
   const onFilter = vi.fn();
   const goneProjects: Project[] = [
-    { id: 1, name: "p", kind: "compose", working_dir: "/x", auto_update_enabled: false, unmanaged: false,
+    { id: 1, name: "p", kind: "compose", working_dir: "/x", auto_update_enabled: false, unmanaged: false, auto_named: false,
       services: [svc(1, { pinned: true }), svc(2, { pinned: true, state: "gone" })] },
   ];
   // showRemoved: false hides the gone service; its pin must not linger in the

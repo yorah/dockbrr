@@ -588,3 +588,198 @@ test("changelog column shows the pending changelog (non-muted) when the pending 
 
   await waitFor(() => expect(screen.getByText("Pending notes")).toBeInTheDocument());
 });
+
+test("action menu is state-aware and wires Stop to the lifecycle endpoint", async () => {
+  const calls: Array<{ id: string; action: string }> = [];
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 1,
+          name: "app",
+          kind: "compose",
+          working_dir: "/srv",
+          auto_update_enabled: false,
+          services: [
+            {
+              id: 10,
+              name: "web",
+              image_ref: "nginx:1.27",
+              current_digest: "sha256:a",
+              state: "running",
+              pinned: false,
+              healthcheck: false,
+              auto_update_enabled: null,
+            },
+            {
+              id: 11,
+              name: "cache",
+              image_ref: "redis:8.8",
+              current_digest: "sha256:c",
+              state: "exited",
+              pinned: false,
+              healthcheck: false,
+              auto_update_enabled: null,
+            },
+          ],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () => HttpResponse.json([])),
+    http.post("/api/services/:id/lifecycle", async ({ request, params }) => {
+      const body = (await request.json()) as { action: string };
+      calls.push({ id: String(params.id), action: body.action });
+      return HttpResponse.json({ job_id: 555 });
+    }),
+  );
+  renderDashboardWithRouter();
+  await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
+
+  const webRow = screen.getByText("web").closest("tr")!;
+  const cacheRow = screen.getByText("cache").closest("tr")!;
+
+  // Running row: Stop + Restart, no Start.
+  expect(within(webRow).getByRole("button", { name: /^stop web$/i })).toBeInTheDocument();
+  expect(within(webRow).getByRole("button", { name: /^restart web$/i })).toBeInTheDocument();
+  expect(within(webRow).queryByRole("button", { name: /^start web$/i })).not.toBeInTheDocument();
+  expect(within(webRow).getByRole("button", { name: /^logs for web$/i })).toBeInTheDocument();
+
+  // Stopped row: Start, no Stop/Restart.
+  expect(within(cacheRow).getByRole("button", { name: /^start cache$/i })).toBeInTheDocument();
+  expect(within(cacheRow).queryByRole("button", { name: /^stop cache$/i })).not.toBeInTheDocument();
+  expect(within(cacheRow).queryByRole("button", { name: /^restart cache$/i })).not.toBeInTheDocument();
+  expect(within(cacheRow).getByRole("button", { name: /^logs for cache$/i })).toBeInTheDocument();
+
+  await userEvent.click(within(webRow).getByRole("button", { name: /^stop web$/i }));
+  await waitFor(() => expect(calls).toEqual([{ id: "10", action: "stop" }]));
+});
+
+test("a gone service's row offers only Logs, no lifecycle buttons", async () => {
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 1,
+          name: "app",
+          kind: "compose",
+          working_dir: "/srv",
+          auto_update_enabled: false,
+          services: [
+            {
+              id: 10,
+              name: "web",
+              image_ref: "nginx:1.27",
+              current_digest: "sha256:a",
+              state: "gone",
+              pinned: false,
+              healthcheck: false,
+              auto_update_enabled: null,
+            },
+          ],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () => HttpResponse.json([])),
+  );
+  renderDashboardWithRouter();
+  // "gone" rows are hidden by default; toggle "Show removed" to see it.
+  await userEvent.click(await screen.findByRole("switch", { name: /show removed/i }));
+  await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
+
+  const main = within(screen.getByRole("main"));
+  expect(main.getByRole("button", { name: /^logs for web$/i })).toBeInTheDocument();
+  expect(main.queryByRole("button", { name: /^start web$/i })).not.toBeInTheDocument();
+  expect(main.queryByRole("button", { name: /^stop web$/i })).not.toBeInTheDocument();
+  expect(main.queryByRole("button", { name: /^restart web$/i })).not.toBeInTheDocument();
+});
+
+test("hides auto-named projects behind a collapsed Loose group on the dashboard", async () => {
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 1, name: "app", kind: "compose", working_dir: "/srv",
+          auto_update_enabled: false, unmanaged: false, auto_named: false,
+          services: [{ id: 10, name: "web", image_ref: "nginx:1.27", current_digest: "sha256:a", state: "running", pinned: false, healthcheck: false, auto_update_enabled: null }],
+        },
+        {
+          id: 2, name: "adoring_saha", kind: "standalone", working_dir: "",
+          auto_update_enabled: false, unmanaged: false, auto_named: true,
+          services: [{ id: 20, name: "adoring_saha", image_ref: "busybox:latest", current_digest: "sha256:b", state: "exited", pinned: false, healthcheck: false, auto_update_enabled: null }],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () => HttpResponse.json([])),
+  );
+  renderDashboardWithRouter();
+
+  // Named project's service is visible; the loose service is hidden by default.
+  await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
+  expect(screen.queryByText("busybox:latest")).not.toBeInTheDocument();
+
+  // The Loose group header shows the count; expanding reveals the loose service.
+  // Scoped to <main>: the sidebar (Task 5) also renders its own "Loose (1)" toggle.
+  const toggle = within(screen.getByRole("main")).getByRole("button", { name: /loose \(1\)/i });
+  await userEvent.click(toggle);
+  await waitFor(() => expect(screen.getByText("busybox:latest")).toBeInTheDocument());
+});
+
+test("bulk-removes selected stopped loose containers after a confirm listing their names, and never offers a checkbox for a running one", async () => {
+  const removed: string[] = [];
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 2, name: "adoring_saha", kind: "standalone", working_dir: "",
+          auto_update_enabled: false, unmanaged: false, auto_named: true,
+          services: [{ id: 20, name: "adoring_saha", image_ref: "busybox:latest", current_digest: "sha256:b", state: "exited", pinned: false, healthcheck: false, auto_update_enabled: null }],
+        },
+        {
+          id: 3, name: "sleepy_lamarr", kind: "standalone", working_dir: "",
+          auto_update_enabled: false, unmanaged: false, auto_named: true,
+          services: [{ id: 21, name: "sleepy_lamarr", image_ref: "redis:8.8", current_digest: "sha256:c", state: "exited", pinned: false, healthcheck: false, auto_update_enabled: null }],
+        },
+        {
+          id: 4, name: "brave_turing", kind: "standalone", working_dir: "",
+          auto_update_enabled: false, unmanaged: false, auto_named: true,
+          services: [{ id: 22, name: "brave_turing", image_ref: "alpine:3.20", current_digest: "sha256:d", state: "running", pinned: false, healthcheck: false, auto_update_enabled: null }],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () => HttpResponse.json([])),
+    http.post("/api/services/:id/remove", ({ params }) => {
+      removed.push(String(params.id));
+      return HttpResponse.json({ job_id: 999 });
+    }),
+  );
+  renderDashboardWithRouter();
+
+  await waitFor(() => expect(screen.getByRole("main")).toBeInTheDocument());
+  const main = within(screen.getByRole("main"));
+  const toggle = await waitFor(() => main.getByRole("button", { name: /loose \(3\)/i }));
+  await userEvent.click(toggle);
+  await waitFor(() => expect(screen.getByText("busybox:latest")).toBeInTheDocument());
+
+  // Running loose service: no checkbox, nothing selectable/removable for it.
+  expect(main.queryByLabelText("Select brave_turing")).not.toBeInTheDocument();
+
+  const removeSelected = main.getByRole("button", { name: /remove selected/i });
+  expect(removeSelected).toBeDisabled();
+
+  await userEvent.click(main.getByLabelText("Select adoring_saha"));
+  await userEvent.click(main.getByLabelText("Select sleepy_lamarr"));
+  expect(removeSelected).not.toBeDisabled();
+
+  const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+  try {
+    await userEvent.click(removeSelected);
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    const message = confirmSpy.mock.calls[0][0] as string;
+    expect(message).toContain("adoring_saha");
+    expect(message).toContain("sleepy_lamarr");
+
+    await waitFor(() => expect(new Set(removed)).toEqual(new Set(["20", "21"])));
+  } finally {
+    confirmSpy.mockRestore();
+  }
+});

@@ -18,6 +18,7 @@ export interface Project {
   working_dir: string;
   auto_update_enabled: boolean;
   unmanaged: boolean;
+  auto_named: boolean;
   services: Service[];
 }
 export interface Update {

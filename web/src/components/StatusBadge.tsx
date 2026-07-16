@@ -18,7 +18,7 @@ export type Status =
 // workload. "gone" (discovery no longer sees the container at all) is
 // deliberately excluded: it gets its own Status so removed services can be
 // hidden/shown independently of the "Stopped" stats tile and filter.
-export const STOPPED_STATES = new Set(["exited", "dead"]);
+export const STOPPED_STATES = new Set(["exited", "dead", "created"]);
 
 export function isStopped(state: string): boolean {
   return STOPPED_STATES.has(state);

@@ -52,3 +52,8 @@ export const useJob = (id: number, enabled = true) =>
       return s && ["success", "failed", "canceled"].includes(s) ? false : 1500;
     },
   });
+// Plain fetch helper (not a query hook): the logs drawer (Task 8) fetches on
+// demand rather than subscribing, so there is no cache key to register here.
+export function fetchServiceLogs(serviceId: number, tail = 500): Promise<{ logs: string }> {
+  return apiFetch<{ logs: string }>(`/api/services/${serviceId}/logs?tail=${tail}`);
+}
