@@ -384,6 +384,36 @@ func TestStandaloneApplyHonorsCrossTagUpdate(t *testing.T) {
 	if got.CurrentDigest != "sha256:new" {
 		t.Fatalf("digest = %q, want sha256:new after cross-tag apply", got.CurrentDigest)
 	}
+	// The tracked image ref must be persisted immediately to the new tag
+	// (busybox:1.37), not left at the old tracked tag (busybox:1.36) until the
+	// next discovery reconcile.
+	if got.ImageRef != "busybox:1.37" {
+		t.Fatalf("image ref = %q, want busybox:1.37 after cross-tag apply", got.ImageRef)
+	}
+}
+
+// TestStandaloneApplySameTagDoesNotChangeImageRef proves a same-tag apply
+// (upd.Tag equal to the tracked tag, or empty for pre-cross-tag-feature
+// updates) leaves svc.ImageRef untouched: only a cross-tag apply needs the
+// eager persist, since same-tag applies never change the tracked ref.
+func TestStandaloneApplySameTagDoesNotChangeImageRef(t *testing.T) {
+	db := openJobDB(t)
+	pid, svc, _ := seedStandaloneUpdate(t, db)
+	r := &fakeRecreator{newID: "new-cid", status: "running"}
+	jobs := store.NewJobs(db)
+	jid, _ := jobs.Enqueue(store.Job{Type: "apply", ServiceID: &svc.ID, ProjectID: &pid, Scope: "service"})
+	j, _ := jobs.Get(jid)
+
+	newStandaloneApplier(db, r).Handle(context.Background(), j)
+
+	done, _ := jobs.Get(jid)
+	if done.Status != "success" {
+		t.Fatalf("status = %q, want success", done.Status)
+	}
+	got, _ := store.NewServices(db).Get(svc.ID)
+	if got.ImageRef != "busybox:latest" {
+		t.Fatalf("image ref = %q, want unchanged busybox:latest after same-tag apply", got.ImageRef)
+	}
 }
 
 // TestStandaloneApplyFailsBeforeMutationOnInspectError proves runApply
@@ -394,7 +424,7 @@ func TestStandaloneApplyHonorsCrossTagUpdate(t *testing.T) {
 // snapshot, and perform zero docker ops.
 func TestStandaloneApplyFailsBeforeMutationOnInspectError(t *testing.T) {
 	db := openJobDB(t)
-	pid, svc, _ := seedStandaloneUpdate(t, db)
+	pid, svc, upd := seedStandaloneUpdate(t, db)
 	r := &fakeRecreator{newID: "new-cid", inspectErr: errors.New("no such container")}
 	jobs := store.NewJobs(db)
 	jid, _ := jobs.Enqueue(store.Job{Type: "apply", ServiceID: &svc.ID, ProjectID: &pid, Scope: "service"})
@@ -415,6 +445,50 @@ func TestStandaloneApplyFailsBeforeMutationOnInspectError(t *testing.T) {
 	got, _ := store.NewServices(db).Get(svc.ID)
 	if got.CurrentDigest != "sha256:old" {
 		t.Fatalf("digest = %q, want unchanged sha256:old", got.CurrentDigest)
+	}
+	// Nothing was mutated, so the update must stay open for retry (plain fail,
+	// not failApply): it must NOT be marked "failed".
+	updRow, err := store.NewUpdates(db).Get(upd.ID)
+	if err != nil {
+		t.Fatalf("load update: %v", err)
+	}
+	if updRow.Status != "available" {
+		t.Fatalf("update status = %q, want available (pre-mutation failure must not close the update)", updRow.Status)
+	}
+}
+
+// TestStandaloneApplyFailsBeforeMutationOnSnapshotError proves a snapshot
+// Insert failure (still pre-mutation: nothing has been stopped/renamed/created
+// yet) uses plain fail, not failApply, leaving the update open for retry.
+// Renaming the state_snapshots table out from under Insert forces the
+// statement itself to fail, without disturbing the jobs/services/updates
+// rows the assertions below depend on.
+func TestStandaloneApplyFailsBeforeMutationOnSnapshotError(t *testing.T) {
+	db := openJobDB(t)
+	pid, svc, upd := seedStandaloneUpdate(t, db)
+	r := &fakeRecreator{newID: "new-cid", status: "running"}
+	jobs := store.NewJobs(db)
+	jid, _ := jobs.Enqueue(store.Job{Type: "apply", ServiceID: &svc.ID, ProjectID: &pid, Scope: "service"})
+	j, _ := jobs.Get(jid)
+	if _, err := db.Exec(`ALTER TABLE state_snapshots RENAME TO state_snapshots_gone`); err != nil {
+		t.Fatalf("rename snapshots table: %v", err)
+	}
+
+	newStandaloneApplier(db, r).Handle(context.Background(), j)
+
+	done, _ := jobs.Get(jid)
+	if done.Status != "failed" {
+		t.Fatalf("status = %q, want failed", done.Status)
+	}
+	if len(r.ops) != 0 {
+		t.Fatalf("no docker mutation should have happened, ops=%+v", r.ops)
+	}
+	updRow, err := store.NewUpdates(db).Get(upd.ID)
+	if err != nil {
+		t.Fatalf("load update: %v", err)
+	}
+	if updRow.Status != "available" {
+		t.Fatalf("update status = %q, want available (pre-mutation failure must not close the update)", updRow.Status)
 	}
 }
 

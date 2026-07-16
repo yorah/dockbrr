@@ -205,6 +205,14 @@ func (s *Services) UpdateRuntime(id int64, containerIDs []string, currentDigest 
 	return err
 }
 
+// UpdateImageRef persists a service's tracked image reference (e.g. after a
+// cross-tag apply moved it to a newer tag). Discovery would re-derive it on the
+// next reconcile; this makes the dashboard reflect it immediately.
+func (s *Services) UpdateImageRef(id int64, imageRef string) error {
+	_, err := s.db.Exec(`UPDATE services SET image_ref=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, imageRef, id)
+	return err
+}
+
 // List returns every service (used by the scheduler's CheckAll pass).
 func (s *Services) List() ([]Service, error) {
 	rows, err := s.db.Query(

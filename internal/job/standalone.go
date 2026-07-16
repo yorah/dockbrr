@@ -127,7 +127,7 @@ func (a *StandaloneApplier) runApply(ctx context.Context, job store.Job) {
 	// snapshot "{}" and proceed to stop/rename the live container.
 	st, ierr := a.docker.InspectStatus(ctx, oldID)
 	if ierr != nil || st.RawJSON == "" {
-		a.failApply(job, svc, upd, "precheck: inspect current container: "+inspectErrMsg(ierr))
+		a.fail(job, "precheck: inspect current container: "+inspectErrMsg(ierr))
 		return
 	}
 	inspect := st.RawJSON
@@ -138,7 +138,7 @@ func (a *StandaloneApplier) runApply(ctx context.Context, job store.Job) {
 		PrevRepo: repo, PrevDigest: svc.CurrentDigest, PrevImageID: svc.CurrentImageID,
 		PrevContainerInspect: inspect,
 	}); serr != nil {
-		a.failApply(job, svc, upd, "snapshot: "+serr.Error())
+		a.fail(job, "snapshot: "+serr.Error())
 		return
 	}
 
@@ -170,6 +170,11 @@ func (a *StandaloneApplier) runApply(ctx context.Context, job store.Job) {
 	}
 	if err := a.services.UpdateRuntime(svc.ID, []string{newID}, upd.ToDigest); err != nil {
 		logger.Warnf("standalone apply: runtime refresh: %v", err)
+	}
+	if targetRef != svc.ImageRef {
+		if err := a.services.UpdateImageRef(svc.ID, targetRef); err != nil {
+			logger.Warnf("standalone apply: image ref refresh: %v", err)
+		}
 	}
 	_ = a.updates.MarkApplied(upd.ID)
 	a.event(svc.ID, "succeeded", &job.ID, svc.CurrentDigest, upd.ToDigest, "update applied")
