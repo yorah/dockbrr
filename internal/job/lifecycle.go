@@ -14,7 +14,6 @@ import (
 type Mutator interface {
 	ContainerStart(ctx context.Context, id string) error
 	ContainerStop(ctx context.Context, id string) error
-	ContainerRestart(ctx context.Context, id string) error
 	ContainerRemove(ctx context.Context, id string) error
 }
 

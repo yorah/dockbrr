@@ -28,15 +28,6 @@ func (cl *Client) ContainerStop(ctx context.Context, id string) error {
 	return nil
 }
 
-// ContainerRestart restarts a container (stop then start) with the daemon
-// default timeout.
-func (cl *Client) ContainerRestart(ctx context.Context, id string) error {
-	if err := cl.c.ContainerRestart(ctx, id, dcontainer.StopOptions{}); err != nil {
-		return fmt.Errorf("docker: restart %s: %w", id, err)
-	}
-	return nil
-}
-
 // ContainerRemove removes a container. The caller guarantees it is stopped
 // (no force), so a running container is a caller bug surfaced as an error.
 func (cl *Client) ContainerRemove(ctx context.Context, id string) error {

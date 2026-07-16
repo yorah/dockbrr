@@ -32,13 +32,6 @@ func (f *fakeMutator) ContainerStop(_ context.Context, id string) error {
 	}
 	return nil
 }
-func (f *fakeMutator) ContainerRestart(_ context.Context, id string) error {
-	f.ops = append(f.ops, opRec{"restart", id})
-	if f.failOn == "restart" {
-		return fmt.Errorf("injected error for restart")
-	}
-	return nil
-}
 func (f *fakeMutator) ContainerRemove(_ context.Context, id string) error {
 	f.ops = append(f.ops, opRec{"remove", id})
 	if f.failOn == "remove" {

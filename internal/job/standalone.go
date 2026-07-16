@@ -121,11 +121,18 @@ func (a *StandaloneApplier) runApply(ctx context.Context, job store.Job) {
 		return
 	}
 
-	// Snapshot BEFORE any mutation (invariant 3).
-	inspect := "{}"
-	if st, ierr := a.docker.InspectStatus(ctx, oldID); ierr == nil && st.RawJSON != "" {
-		inspect = st.RawJSON
+	// Precheck: confirm the current container still exists BEFORE any mutation
+	// (design spec section 6, step 1). An inspect error or empty payload means
+	// the container is gone or the daemon hiccupped; fail cleanly rather than
+	// snapshot "{}" and proceed to stop/rename the live container.
+	st, ierr := a.docker.InspectStatus(ctx, oldID)
+	if ierr != nil || st.RawJSON == "" {
+		a.failApply(job, svc, upd, "precheck: inspect current container: "+inspectErrMsg(ierr))
+		return
 	}
+	inspect := st.RawJSON
+
+	// Snapshot BEFORE any mutation (invariant 3).
 	if _, serr := a.snapshots.Insert(store.Snapshot{
 		ServiceID: svc.ID, JobID: &job.ID,
 		PrevRepo: repo, PrevDigest: svc.CurrentDigest, PrevImageID: svc.CurrentImageID,
@@ -223,8 +230,13 @@ func (a *StandaloneApplier) healthGate(ctx context.Context, id string) error {
 	defer cancel()
 	for {
 		st, err := a.docker.InspectStatus(ctx, id)
-		if err == nil && st.State == "running" && (st.Health == "" || st.Health == "healthy") {
-			return nil
+		if err == nil {
+			if st.State == "exited" || st.Health == "unhealthy" {
+				return fmt.Errorf("container %s not healthy (state=%s health=%s)", id, st.State, st.Health)
+			}
+			if st.State == "running" && (st.Health == "" || st.Health == "healthy") {
+				return nil
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -232,6 +244,16 @@ func (a *StandaloneApplier) healthGate(ctx context.Context, id string) error {
 		case <-time.After(poll):
 		}
 	}
+}
+
+// inspectErrMsg renders the precheck inspect failure reason: the inspect
+// error if there was one, or "empty inspect" if the call succeeded but
+// returned no payload.
+func inspectErrMsg(err error) string {
+	if err != nil {
+		return err.Error()
+	}
+	return "empty inspect"
 }
 
 // --- rollback ------------------------------------------------------------

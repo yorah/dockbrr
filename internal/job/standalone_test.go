@@ -2,6 +2,7 @@ package job_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -13,10 +14,11 @@ import (
 type recOp struct{ kind, arg string }
 
 type fakeRecreator struct {
-	ops       []recOp
-	newID     string // id returned by ContainerCreateFromInspect
-	status    string // InspectStatus state to report (default "running")
-	createErr error
+	ops        []recOp
+	newID      string // id returned by ContainerCreateFromInspect
+	status     string // InspectStatus state to report (default "running")
+	createErr  error
+	inspectErr error // if set, InspectStatus returns this error for every id
 }
 
 func (f *fakeRecreator) ImagePull(_ context.Context, ref string) error {
@@ -58,6 +60,9 @@ func (f *fakeRecreator) pullRefs() []string {
 	return refs
 }
 func (f *fakeRecreator) InspectStatus(_ context.Context, id string) (job.ContainerStatus, error) {
+	if f.inspectErr != nil {
+		return job.ContainerStatus{}, f.inspectErr
+	}
 	st := f.status
 	if st == "" {
 		st = "running"
@@ -378,5 +383,87 @@ func TestStandaloneApplyHonorsCrossTagUpdate(t *testing.T) {
 	got, _ := store.NewServices(db).Get(svc.ID)
 	if got.CurrentDigest != "sha256:new" {
 		t.Fatalf("digest = %q, want sha256:new after cross-tag apply", got.CurrentDigest)
+	}
+}
+
+// TestStandaloneApplyFailsBeforeMutationOnInspectError proves runApply
+// prechecks the current container via InspectStatus BEFORE any mutation:
+// before the fix, an inspect error was swallowed with a fallback snapshot of
+// "{}", and apply proceeded to snapshot/pull/stop/rename the live container
+// before failing inside create. Now it must fail immediately, write no
+// snapshot, and perform zero docker ops.
+func TestStandaloneApplyFailsBeforeMutationOnInspectError(t *testing.T) {
+	db := openJobDB(t)
+	pid, svc, _ := seedStandaloneUpdate(t, db)
+	r := &fakeRecreator{newID: "new-cid", inspectErr: errors.New("no such container")}
+	jobs := store.NewJobs(db)
+	jid, _ := jobs.Enqueue(store.Job{Type: "apply", ServiceID: &svc.ID, ProjectID: &pid, Scope: "service"})
+	j, _ := jobs.Get(jid)
+
+	newStandaloneApplier(db, r).Handle(context.Background(), j)
+
+	done, _ := jobs.Get(jid)
+	if done.Status != "failed" {
+		t.Fatalf("status = %q, want failed", done.Status)
+	}
+	if len(r.ops) != 0 {
+		t.Fatalf("no docker mutation should have happened, ops=%+v", r.ops)
+	}
+	if _, err := store.NewSnapshots(db).GetLatestForService(svc.ID); err == nil {
+		t.Fatalf("no snapshot should have been written when the precheck inspect fails")
+	}
+	got, _ := store.NewServices(db).Get(svc.ID)
+	if got.CurrentDigest != "sha256:old" {
+		t.Fatalf("digest = %q, want unchanged sha256:old", got.CurrentDigest)
+	}
+}
+
+// TestStandaloneApplyHealthGateFailsFastOnExited proves healthGate returns
+// immediately when the recreated container reports state "exited", instead of
+// polling until the (short) timeout elapses. Before the fix, an
+// immediately-exited container (or one flapping exited/running under
+// restart:always) could be sampled mid-poll while transiently "running" and
+// pass the gate, marking a broken update applied. An always-exited fake is
+// sufficient to prove the fail-fast path; it also confirms the job does not
+// hang for the full timeout (the applier's health timeout is 20ms/1ms poll,
+// so a hang would still finish quickly, but fail-fast must trigger on the
+// FIRST poll, and the old container must be restored).
+func TestStandaloneApplyHealthGateFailsFastOnExited(t *testing.T) {
+	db := openJobDB(t)
+	pid, svc, _ := seedStandaloneUpdate(t, db)
+	r := &fakeRecreator{newID: "new-cid", status: "exited"}
+	jobs := store.NewJobs(db)
+	jid, _ := jobs.Enqueue(store.Job{Type: "apply", ServiceID: &svc.ID, ProjectID: &pid, Scope: "service"})
+	j, _ := jobs.Get(jid)
+
+	start := time.Now()
+	newStandaloneApplierShortHealth(db, r).Handle(context.Background(), j)
+	elapsed := time.Since(start)
+
+	done, _ := jobs.Get(jid)
+	if done.Status != "failed" {
+		t.Fatalf("status = %q, want failed", done.Status)
+	}
+	// Fail-fast: well under the 20ms health timeout, since the first poll
+	// already observes "exited" and returns an error instead of looping.
+	if elapsed >= 20*time.Millisecond {
+		t.Fatalf("healthGate took %s, want fail-fast well under the 20ms timeout", elapsed)
+	}
+
+	var renamedBack, startedOld bool
+	for _, o := range r.ops {
+		if o.kind == "rename" && o.arg == "old-cid->adoring_saha" {
+			renamedBack = true
+		}
+		if o.kind == "start" && o.arg == "old-cid" {
+			startedOld = true
+		}
+	}
+	if !renamedBack || !startedOld {
+		t.Fatalf("old container not restored (renamedBack=%v startedOld=%v): %+v", renamedBack, startedOld, r.ops)
+	}
+	got, _ := store.NewServices(db).Get(svc.ID)
+	if got.CurrentDigest != "sha256:old" {
+		t.Fatalf("digest = %q, want unchanged sha256:old after failed apply", got.CurrentDigest)
 	}
 }
