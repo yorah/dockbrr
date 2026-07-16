@@ -201,6 +201,45 @@ func TestStandaloneApplyRestoresOnHealthGateFailure(t *testing.T) {
 	}
 }
 
+func TestStandaloneRollbackRecreatesFromSnapshot(t *testing.T) {
+	db := openJobDB(t)
+	pid, svc, _ := seedStandaloneUpdate(t, db)
+	// Simulate a prior apply: a snapshot exists with the old image identity.
+	_, _ = store.NewSnapshots(db).Insert(store.Snapshot{
+		ServiceID: svc.ID, PrevRepo: "busybox", PrevDigest: "sha256:old", PrevImageID: "img-old",
+		PrevContainerInspect: `{"Config":{"Image":"busybox:latest"},"Name":"/adoring_saha"}`,
+	})
+	// The service is now running the new image (post-apply state).
+	_ = store.NewServices(db).UpdateRuntime(svc.ID, []string{"new-cid"}, "sha256:new")
+
+	r := &fakeRecreator{newID: "restored-cid", status: "running"}
+	jobs := store.NewJobs(db)
+	jid, _ := jobs.Enqueue(store.Job{Type: "rollback", ServiceID: &svc.ID, ProjectID: &pid, Scope: "service"})
+	j, _ := jobs.Get(jid)
+
+	newStandaloneApplier(db, r).Handle(context.Background(), j)
+
+	done, _ := jobs.Get(jid)
+	if done.Status != "success" {
+		t.Fatalf("status = %q, want success", done.Status)
+	}
+	// Recreated with the OLD image ref (busybox@sha256:old or busybox:latest);
+	// assert a create happened and the service digest returned to old.
+	var created bool
+	for _, o := range r.ops {
+		if o.kind == "create" {
+			created = true
+		}
+	}
+	if !created {
+		t.Fatalf("no recreate happened on rollback: %+v", r.ops)
+	}
+	got, _ := store.NewServices(db).Get(svc.ID)
+	if got.CurrentDigest != "sha256:old" {
+		t.Fatalf("digest = %q, want sha256:old after rollback", got.CurrentDigest)
+	}
+}
+
 func TestStandaloneApplyRestoresOnCreateFailure(t *testing.T) {
 	db := openJobDB(t)
 	pid, svc, _ := seedStandaloneUpdate(t, db)

@@ -227,10 +227,72 @@ func (a *StandaloneApplier) healthGate(ctx context.Context, id string) error {
 
 // --- rollback ------------------------------------------------------------
 
-// runRollback is filled in by Task 3. Until then, a rollback job for a
-// standalone service fails cleanly rather than panicking.
+// runRollback reverts a standalone service to the image identity recorded in
+// its latest snapshot: pulls the old (digest-pinned) ref, recreates the
+// current container from the snapshot's inspect JSON with that old image,
+// health-gates it, and on success drops the current container and refreshes
+// runtime + update bookkeeping to the old digest. On any failure the current
+// container is restored in place (mirrors runApply's recreate/restore shape).
 func (a *StandaloneApplier) runRollback(ctx context.Context, job store.Job) {
-	a.fail(job, "standalone: rollback not yet implemented")
+	if job.ServiceID == nil {
+		a.fail(job, "rollback job has no service")
+		return
+	}
+	svc, err := a.services.Get(*job.ServiceID)
+	if err != nil {
+		a.fail(job, "load service: "+err.Error())
+		return
+	}
+	snap, err := a.snapshots.GetLatestForService(svc.ID)
+	if err != nil {
+		a.fail(job, "no snapshot to roll back to: "+err.Error())
+		return
+	}
+	if snap.PrevDigest == "" || snap.PrevContainerInspect == "" || snap.PrevContainerInspect == "{}" {
+		a.fail(job, "snapshot lacks the previous container state")
+		return
+	}
+	if len(svc.ContainerIDs) == 0 {
+		a.fail(job, "standalone rollback: service has no current container")
+		return
+	}
+	currentID := svc.ContainerIDs[0]
+
+	// Recreate the snapshot's container with the OLD image. Prefer a
+	// digest-pinned ref so rollback is deterministic.
+	oldRef := snap.PrevRepo + "@" + snap.PrevDigest
+
+	if err := a.docker.ImagePull(ctx, oldRef); err != nil {
+		a.fail(job, "rollback pull: "+err.Error())
+		return
+	}
+	newID, rerr := a.recreate(ctx, currentID, snap.PrevContainerInspect, oldRef, svc.Name)
+	if rerr != nil {
+		a.restoreOld(ctx, currentID, svc.Name, newID)
+		a.fail(job, "rollback recreate: "+rerr.Error())
+		return
+	}
+	if err := a.healthGate(ctx, newID); err != nil {
+		a.restoreOld(ctx, currentID, svc.Name, newID)
+		a.fail(job, "rollback health gate: "+err.Error())
+		return
+	}
+	if err := a.docker.ContainerRemove(ctx, currentID); err != nil {
+		logger.Warnf("standalone rollback: remove current %s: %v", currentID, err)
+	}
+	if err := a.services.UpdateRuntime(svc.ID, []string{newID}, snap.PrevDigest); err != nil {
+		logger.Warnf("standalone rollback: runtime refresh: %v", err)
+	}
+	// Mark the reverted update "rolled_back", mirroring the compose rollback
+	// (worker.go runRollback/rollbackPullUp): svc.CurrentDigest is the
+	// pre-rollback digest, i.e. the to_digest of the applied update this
+	// rollback reverts. Warn-and-continue: must never flip a successful
+	// rollback to failed.
+	if err := a.updates.MarkRolledBack(svc.ID, svc.CurrentDigest); err != nil {
+		logger.Warnf("standalone rollback: mark rolled_back: %v", err)
+	}
+	a.event(svc.ID, "rolled_back", &job.ID, svc.CurrentDigest, snap.PrevDigest, "rolled back")
+	a.succeed(job)
 }
 
 // --- shared helpers --------------------------------------------------------
