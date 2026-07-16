@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useProjectHealth, type Dot } from "@/hooks/useProjectHealth";
 import { rowActiveClass, rowClass } from "@/components/layout/SidebarNav";
 import { AddProjectDialog } from "@/components/AddProjectDialog";
+import { ProjectHealthIndicator } from "@/components/ProjectHealthIndicator";
 import type { Project } from "@/api/types";
 
 const DOT_CLASS: Record<Dot, string> = {
@@ -45,20 +46,14 @@ export function SidebarProjects({ collapsed }: { collapsed: boolean }) {
         ) : (
           <span className="truncate">{p.name}</span>
         )}
-        {!collapsed && h.updates > 0 && (
-          <span className="ml-auto rounded-full bg-warning/15 px-1.5 py-0.5 text-xs font-medium text-warning tabular-nums">
-            {h.updates}
-          </span>
+        {collapsed ? (
+          <span
+            aria-hidden
+            className={cn("absolute top-1 right-1 h-2 w-2 shrink-0 rounded-full", DOT_CLASS[h.dot])}
+          />
+        ) : (
+          <ProjectHealthIndicator updates={h.updates} dot={h.dot} className="ml-auto" />
         )}
-        <span
-          aria-hidden
-          className={cn(
-            "h-2 w-2 shrink-0 rounded-full",
-            DOT_CLASS[h.dot],
-            !collapsed && h.updates === 0 && "ml-auto",
-            collapsed && "absolute top-1 right-1",
-          )}
-        />
       </Link>
     );
     if (!collapsed) return <div key={p.id}>{link}</div>;

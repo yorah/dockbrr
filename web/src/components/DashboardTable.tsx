@@ -38,6 +38,8 @@ import { StatusBadge, computeStatus, isStopped } from "@/components/StatusBadge"
 import { SeverityDelta } from "@/components/SeverityDelta";
 import { DigestShort } from "@/components/DigestShort";
 import { ComposeModal } from "@/components/ComposeModal";
+import { ProjectHealthIndicator } from "@/components/ProjectHealthIndicator";
+import { useProjectHealth } from "@/hooks/useProjectHealth";
 import {
   useApply,
   useCheck,
@@ -537,6 +539,9 @@ export function DashboardTable({
   const [composeProject, setComposeProject] = useState<Project | null>(null);
   const [looseOpen, setLooseOpen] = useState(looseDefaultOpen);
   const removeContainer = useRemoveContainer();
+  // Same per-project health (open-update count + status dot) the sidebar shows,
+  // so the project row carries the identical glyph.
+  const { health } = useProjectHealth();
   // Services with a remove job enqueued but not yet finished. The mutation's
   // isPending only covers the (sub-second) enqueue POST, not the async job, so
   // without this the button would re-enable immediately and let the user queue
@@ -728,20 +733,26 @@ export function DashboardTable({
                 >
                   <TableCell colSpan={row.getVisibleCells().length}>
                     <div className="flex items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        className="flex items-center gap-2 font-medium"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggle(original.project.id);
-                        }}
-                      >
-                        <ChevronRight className={cn("h-4 w-4 transition-transform", expanded && "rotate-90")} />
-                        {original.project.name}
-                        {original.project.unmanaged && (
-                          <Badge variant="danger" className="ml-2">Unmanaged</Badge>
-                        )}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          className="flex items-center gap-2 font-medium"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggle(original.project.id);
+                          }}
+                        >
+                          <ChevronRight className={cn("h-4 w-4 transition-transform", expanded && "rotate-90")} />
+                          {original.project.name}
+                          {original.project.unmanaged && (
+                            <Badge variant="danger" className="ml-2">Unmanaged</Badge>
+                          )}
+                        </button>
+                        {(() => {
+                          const h = health.get(original.project.id) ?? { updates: 0, dot: "green" as const };
+                          return <ProjectHealthIndicator updates={h.updates} dot={h.dot} />;
+                        })()}
+                      </div>
                       <div className="flex items-center gap-1">
                         <ProjectAutoToggle project={original.project} />
                         <ProjectBulkActions
