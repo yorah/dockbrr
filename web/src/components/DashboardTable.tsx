@@ -12,6 +12,7 @@ import {
   ChevronRight,
   Eye,
   FileText,
+  Loader2,
   Play,
   RefreshCw,
   RotateCw,
@@ -102,6 +103,8 @@ function ActionsCell({
   onChangelog,
   onLogs,
   canRemove,
+  removing,
+  onRemove,
 }: {
   service: Service;
   update: Update | undefined;
@@ -112,11 +115,13 @@ function ActionsCell({
   onLogs: (service: Service) => void;
   /** True only for stopped standalone containers (backend guard mirror). */
   canRemove: boolean;
+  /** A remove job for this container has been enqueued and not yet finished. */
+  removing: boolean;
+  onRemove: (serviceId: number) => void;
 }) {
   const check = useCheck();
   const apply = useApply();
   const lifecycle = useLifecycle();
-  const removeContainer = useRemoveContainer();
   // A gone service has no container to recreate. Applying would just create
   // a fresh one for something the user (or something else) removed.
   const canApply = update?.status === "available" && service.state !== "gone";
@@ -283,15 +288,16 @@ function ActionsCell({
                 size="sm"
                 variant="ghost"
                 className="h-7 w-7 p-0"
-                disabled={removeContainer.isPending}
+                disabled={removing}
                 aria-label={`Remove ${service.name}`}
                 onClick={(e) => {
                   e.stopPropagation();
+                  if (removing) return;
                   if (!window.confirm(`Remove stopped container "${service.name}"? This cannot be undone.`)) return;
-                  removeContainer.mutate(service.id);
+                  onRemove(service.id);
                 }}
               >
-                <Trash2 className="h-4 w-4" />
+                {removing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
               </Button>
             </TooltipTrigger>
             <TooltipContent>Remove</TooltipContent>
@@ -369,6 +375,8 @@ function buildColumns(
   onApplied: DashboardTableProps["onApplied"],
   onChangelog: DashboardTableProps["onChangelog"],
   onLogs: (service: Service) => void,
+  removingIds: Set<number>,
+  onRemove: (serviceId: number) => void,
 ): ColumnDef<Row>[] {
   return [
     {
@@ -397,9 +405,16 @@ function buildColumns(
       cell: ({ row }) => {
         const r = row.original;
         if (r.kind !== "service") return null;
+        // A floating tag (latest, stable) hides the actual running version. When
+        // detection reverse-resolved it (update.from_version), surface it here so
+        // the list matches the changelog's "v1.13.0 → v1.14.1", instead of just
+        // showing ":latest". Skipped when the ref tag already IS the version.
+        const from = r.update?.from_version;
+        const showFrom = !!from && !r.service.image_ref.endsWith(`:${from}`);
         return (
           <div className="flex flex-col gap-0.5">
             <ImageRefLabel imageRef={r.service.image_ref} />
+            {showFrom && <span className="text-xs text-muted-foreground">{from}</span>}
             <DigestShort digest={r.service.current_digest} />
           </div>
         );
@@ -412,9 +427,21 @@ function buildColumns(
         const r = row.original;
         if (r.kind !== "service") return null;
         if (!r.update) return EMPTY;
+        // Prefer the resolved target version over the raw tag. For a floating
+        // tag (latest) that reverse-resolves to a release, show "v1.14.1
+        // (latest)"; for a semver tag they coincide, so just the version.
+        const { to_version: to, tag } = r.update;
         return (
           <div className="flex flex-col gap-0.5">
-            <span>{r.update.tag}</span>
+            <span>
+              {to && to !== tag ? (
+                <>
+                  {to} <span className="opacity-50">({tag})</span>
+                </>
+              ) : (
+                tag
+              )}
+            </span>
             <DigestShort digest={r.update.to_digest} />
           </div>
         );
@@ -484,6 +511,8 @@ function buildColumns(
             update={r.update}
             changelog={changelogUpdate(r)}
             canRemove={r.project.kind === "standalone" && isStopped(r.service.state)}
+            removing={removingIds.has(r.service.id)}
+            onRemove={onRemove}
             onApplied={onApplied}
             onChangelog={onChangelog}
             onLogs={onLogs}
@@ -508,9 +537,49 @@ export function DashboardTable({
   const [composeProject, setComposeProject] = useState<Project | null>(null);
   const [looseOpen, setLooseOpen] = useState(looseDefaultOpen);
   const removeContainer = useRemoveContainer();
+  // Services with a remove job enqueued but not yet finished. The mutation's
+  // isPending only covers the (sub-second) enqueue POST, not the async job, so
+  // without this the button would re-enable immediately and let the user queue
+  // a second remove. We keep the id here until the container disappears from
+  // rows (job_finished SSE refetches projects → the gone service is filtered out).
+  const [removingIds, setRemovingIds] = useState<Set<number>>(() => new Set());
 
   // Auto-expand under an active filter, re-collapse when it clears.
   useEffect(() => setLooseOpen(looseDefaultOpen), [looseDefaultOpen]);
+
+  // Self-heal the removing set: drop any id whose service is no longer a
+  // removable (stopped) row. Success removes the container (row gone); a failed
+  // remove leaves it stopped-but-present, and the hook's error toast already
+  // fired, so clearing here re-enables the button rather than spinning forever.
+  const removableIds = useMemo(() => {
+    const s = new Set<number>();
+    for (const r of rows) {
+      if (r.kind === "service" && r.project.kind === "standalone" && isStopped(r.service.state)) {
+        s.add(r.service.id);
+      }
+    }
+    return s;
+  }, [rows]);
+  useEffect(() => {
+    setRemovingIds((prev) => {
+      const next = new Set([...prev].filter((id) => removableIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [removableIds]);
+
+  const handleRemove = (serviceId: number) => {
+    setRemovingIds((prev) => new Set(prev).add(serviceId));
+    // The hook already toasts on enqueue error; here we just clear the marker
+    // so the button recovers. Job-level failures self-heal via removableIds.
+    removeContainer.mutate(serviceId, {
+      onError: () =>
+        setRemovingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(serviceId);
+          return next;
+        }),
+    });
+  };
 
   // All loose (auto-named standalone) service rows, independent of the group's
   // open/closed state: the bulk-remove header needs every stopped service's
@@ -524,13 +593,14 @@ export function DashboardTable({
     () => looseServices.filter((r) => isStopped(r.service.state)),
     [looseServices],
   );
+  const looseRemoving = stoppedLooseServices.some((r) => removingIds.has(r.service.id));
 
   function removeStoppedLoose() {
     if (stoppedLooseServices.length === 0) return;
     const names = stoppedLooseServices.map((r) => r.service.name).join(", ");
     const n = stoppedLooseServices.length;
     if (!window.confirm(`Remove ${n} stopped container${n > 1 ? "s" : ""}: ${names}? This cannot be undone.`)) return;
-    for (const r of stoppedLooseServices) removeContainer.mutate(r.service.id);
+    for (const r of stoppedLooseServices) handleRemove(r.service.id);
   }
 
   const visibleRows = useMemo(() => {
@@ -550,8 +620,11 @@ export function DashboardTable({
   }, [rows, collapsed, groupLoose, looseOpen]);
 
   const columns = useMemo(
-    () => buildColumns(onApplied, onChangelog, onLogs),
-    [onApplied, onChangelog, onLogs],
+    () => buildColumns(onApplied, onChangelog, onLogs, removingIds, handleRemove),
+    // handleRemove is stable enough (only closes over setState + the mutation);
+    // removingIds is what actually needs to re-derive the cells.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [onApplied, onChangelog, onLogs, removingIds],
   );
 
   const table = useReactTable({
@@ -622,13 +695,17 @@ export function DashboardTable({
                         size="sm"
                         variant="ghost"
                         className="h-7 gap-1 px-2 text-xs"
-                        disabled={stoppedLooseServices.length === 0 || removeContainer.isPending}
+                        disabled={stoppedLooseServices.length === 0 || looseRemoving}
                         onClick={(e) => {
                           e.stopPropagation();
                           removeStoppedLoose();
                         }}
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
+                        {looseRemoving ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-3.5 w-3.5" />
+                        )}
                         Remove stopped containers
                       </Button>
                     </div>
@@ -672,18 +749,20 @@ export function DashboardTable({
                           updatesByService={updatesByService}
                           onApplied={onApplied}
                         />
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 gap-1 px-2 text-xs"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setComposeProject(original.project);
-                          }}
-                        >
-                          <FileText className="h-3.5 w-3.5" />
-                          Compose
-                        </Button>
+                        {original.project.kind === "compose" && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 gap-1 px-2 text-xs"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setComposeProject(original.project);
+                            }}
+                          >
+                            <FileText className="h-3.5 w-3.5" />
+                            Compose
+                          </Button>
+                        )}
                       </div>
                     </div>
                   </TableCell>
