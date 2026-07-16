@@ -18,7 +18,8 @@ type fakeRecreator struct {
 	newID      string // id returned by ContainerCreateFromInspect
 	status     string // InspectStatus state to report (default "running")
 	createErr  error
-	inspectErr error // if set, InspectStatus returns this error for every id
+	inspectErr error             // if set, InspectStatus returns this error for every id
+	byName     map[string]string // name -> id, for ContainerIDByName; nil means "nothing by that name"
 }
 
 func (f *fakeRecreator) ImagePull(_ context.Context, ref string) error {
@@ -47,6 +48,11 @@ func (f *fakeRecreator) ContainerCreateFromInspect(_ context.Context, _, newImag
 		return "", f.createErr
 	}
 	return f.newID, nil
+}
+
+func (f *fakeRecreator) ContainerIDByName(_ context.Context, name string) (string, bool, error) {
+	id, ok := f.byName[name]
+	return id, ok, nil
 }
 
 // pullRefs returns every ref passed to ImagePull, in order.
@@ -194,6 +200,64 @@ func TestStandaloneApplyRecreates(t *testing.T) {
 	got, _ := store.NewServices(db).Get(svc.ID)
 	if len(got.ContainerIDs) != 1 || got.ContainerIDs[0] != "new-cid" || got.CurrentDigest != "sha256:new" {
 		t.Fatalf("runtime = %+v, want new-cid @ sha256:new", got)
+	}
+}
+
+// TestStandaloneApplyClearsLeftoverOldContainer proves recreate cleans up a
+// leftover "<name>-dockbrr-old" container from a prior crashed attempt before
+// stopping/renaming the current one: without this, the resumed run's own
+// ContainerRename(oldID, name+oldSuffix) would fail because the name is
+// already taken by the stale container. The leftover must be stopped and
+// removed BEFORE the create call, and the apply must still succeed.
+func TestStandaloneApplyClearsLeftoverOldContainer(t *testing.T) {
+	db := openJobDB(t)
+	pid, svc, _ := seedStandaloneUpdate(t, db)
+	r := &fakeRecreator{
+		newID:  "new-cid",
+		status: "running",
+		byName: map[string]string{
+			"adoring_saha-dockbrr-old": "stale-old-cid", // leftover, id != current oldID ("old-cid")
+			"adoring_saha":             "old-cid",       // normal case: primary name held by the current container
+		},
+	}
+	jobs := store.NewJobs(db)
+	jid, _ := jobs.Enqueue(store.Job{Type: "apply", ServiceID: &svc.ID, ProjectID: &pid, Scope: "service"})
+	j, _ := jobs.Get(jid)
+
+	newStandaloneApplier(db, r).Handle(context.Background(), j)
+
+	done, _ := jobs.Get(jid)
+	if done.Status != "success" {
+		t.Fatalf("status = %q, want success", done.Status)
+	}
+
+	var stopStaleIdx, removeStaleIdx, createIdx = -1, -1, -1
+	for i, o := range r.ops {
+		switch {
+		case o.kind == "stop" && o.arg == "stale-old-cid":
+			stopStaleIdx = i
+		case o.kind == "remove" && o.arg == "stale-old-cid":
+			removeStaleIdx = i
+		case o.kind == "create":
+			createIdx = i
+		}
+	}
+	if stopStaleIdx == -1 {
+		t.Fatalf("leftover old container was never stopped: %+v", r.ops)
+	}
+	if removeStaleIdx == -1 {
+		t.Fatalf("leftover old container was never removed: %+v", r.ops)
+	}
+	if createIdx == -1 || stopStaleIdx >= createIdx || removeStaleIdx >= createIdx {
+		t.Fatalf("leftover cleanup must precede create: %+v", r.ops)
+	}
+	// The primary name (held by the current container "old-cid") must NOT be
+	// touched: no stop/remove op against "old-cid" before the normal
+	// stop(old)/rename(old) sequence removes it via the regular apply flow.
+	for _, o := range r.ops[:createIdx] {
+		if (o.kind == "remove") && o.arg == "old-cid" {
+			t.Fatalf("current container old-cid must not be removed as a leftover: %+v", r.ops)
+		}
 	}
 }
 

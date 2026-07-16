@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	dcontainer "github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/pkg/stdcopy"
 )
 
@@ -44,6 +45,23 @@ func (cl *Client) ContainerRename(ctx context.Context, id, newName string) error
 		return fmt.Errorf("docker: rename %s -> %s: %w", id, newName, err)
 	}
 	return nil
+}
+
+// ContainerIDByName returns the id of the container with exactly this name, or
+// ok=false if none. Read-only: used by the standalone recreate path to detect
+// leftovers from a prior interrupted attempt before mutating.
+func (cl *Client) ContainerIDByName(ctx context.Context, name string) (string, bool, error) {
+	list, err := cl.c.ContainerList(ctx, dcontainer.ListOptions{
+		All:     true,
+		Filters: filters.NewArgs(filters.Arg("name", "^/"+name+"$")),
+	})
+	if err != nil {
+		return "", false, fmt.Errorf("docker: list by name %s: %w", name, err)
+	}
+	if len(list) == 0 {
+		return "", false, nil
+	}
+	return list[0].ID, true, nil
 }
 
 // ContainerLogsTail returns the last tail lines of a container's combined

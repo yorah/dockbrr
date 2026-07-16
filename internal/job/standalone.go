@@ -29,6 +29,7 @@ type Recreator interface {
 	ContainerRemove(ctx context.Context, id string) error
 	ContainerCreateFromInspect(ctx context.Context, inspectJSON, newImage, name string) (string, error)
 	InspectStatus(ctx context.Context, id string) (ContainerStatus, error)
+	ContainerIDByName(ctx context.Context, name string) (string, bool, error)
 }
 
 // StandaloneApplier applies (and rolls back) image updates for standalone
@@ -185,6 +186,12 @@ func (a *StandaloneApplier) runApply(ctx context.Context, job store.Job) {
 // inspectJSON with newImage under name, and starts it. Returns the new id (or
 // "" if creation did not happen).
 func (a *StandaloneApplier) recreate(ctx context.Context, oldID, inspectJSON, newImage, name string) (string, error) {
+	// Idempotency: a prior crashed attempt may have left a renamed-aside old
+	// container or a half-created new one holding our names. Remove leftovers
+	// (never the current oldID) so a resumed recreate does not collide.
+	a.clearNameConflict(ctx, name+oldSuffix, oldID)
+	a.clearNameConflict(ctx, name, oldID)
+
 	if err := a.docker.ContainerStop(ctx, oldID); err != nil {
 		return "", fmt.Errorf("stop old: %w", err)
 	}
@@ -199,6 +206,23 @@ func (a *StandaloneApplier) recreate(ctx context.Context, oldID, inspectJSON, ne
 		return newID, fmt.Errorf("start new: %w", err)
 	}
 	return newID, nil
+}
+
+// clearNameConflict removes a container currently holding wantName, unless it is
+// keepID (the container we are about to operate on). Best-effort: a leftover is
+// stopped then removed; errors are logged, not fatal. On a normal (non-crash)
+// run, ContainerIDByName(name) returns keepID (the current container still
+// holds its primary name until this recreate renames it aside), so this is a
+// no-op; only a genuinely stale container from a prior interrupted attempt is
+// ever removed.
+func (a *StandaloneApplier) clearNameConflict(ctx context.Context, wantName, keepID string) {
+	id, ok, err := a.docker.ContainerIDByName(ctx, wantName)
+	if err != nil || !ok || id == keepID {
+		return
+	}
+	logger.Warnf("standalone: removing leftover container %q (id %s) from a prior interrupted recreate", wantName, id)
+	_ = a.docker.ContainerStop(ctx, id)
+	_ = a.docker.ContainerRemove(ctx, id)
 }
 
 // restoreOld undoes a failed recreate: remove the new container (if any), rename
