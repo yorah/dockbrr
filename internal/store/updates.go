@@ -9,18 +9,19 @@ import (
 // Update is a detected available (or dismissed/applied/...) image update for a
 // service.
 type Update struct {
-	ID            int64
-	ServiceID     int64
-	FromDigest    string
-	ToDigest      string
-	FromVersion   string
-	ToVersion     string
-	Tag           string
-	Severity      string // major|minor|patch|digest-only
-	ChangelogURL  string
-	ChangelogText string
-	Status        string // available|dismissed|applied|failed|superseded|rolled_back
-	DetectedAt    time.Time
+	ID              int64
+	ServiceID       int64
+	FromDigest      string
+	ToDigest        string
+	FromVersion     string
+	ToVersion       string
+	Tag             string
+	Severity        string // major|minor|patch|digest-only
+	ChangelogURL    string
+	ChangelogText   string
+	ChangelogStatus string // "" (resolved/absent) | "rate_limited"
+	Status          string // available|dismissed|applied|failed|superseded|rolled_back
+	DetectedAt      time.Time
 	// AppliedAt is set by MarkApplied when an update is applied. Nil for rows
 	// that predate the applied_at column (migration 0007) or that have never
 	// been applied. Callers that need "when was this applied" must treat nil
@@ -76,7 +77,7 @@ func (u *Updates) Upsert(up Update) (int64, error) {
 func (u *Updates) ListOpen() ([]Update, error) {
 	rows, err := u.db.Query(
 		`SELECT id, service_id, from_digest, to_digest, from_version, to_version,
-		        tag, severity, changelog_url, changelog_text, status, detected_at, applied_at
+		        tag, severity, changelog_url, changelog_text, changelog_status, status, detected_at, applied_at
 		   FROM updates WHERE status='available' ORDER BY detected_at DESC, id DESC`,
 	)
 	if err != nil {
@@ -90,7 +91,7 @@ func (u *Updates) ListOpen() ([]Update, error) {
 		if err := rows.Scan(
 			&up.ID, &up.ServiceID, &up.FromDigest, &up.ToDigest, &up.FromVersion,
 			&up.ToVersion, &up.Tag, &up.Severity, &up.ChangelogURL,
-			&up.ChangelogText, &up.Status, &up.DetectedAt, &appliedAt,
+			&up.ChangelogText, &up.ChangelogStatus, &up.Status, &up.DetectedAt, &appliedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -111,7 +112,7 @@ func (u *Updates) ListOpen() ([]Update, error) {
 func (u *Updates) ListVisible() ([]Update, error) {
 	rows, err := u.db.Query(
 		`SELECT id, service_id, from_digest, to_digest, from_version, to_version,
-		        tag, severity, changelog_url, changelog_text, status, detected_at, applied_at
+		        tag, severity, changelog_url, changelog_text, changelog_status, status, detected_at, applied_at
 		   FROM updates WHERE status IN ('available','dismissed','rolled_back') ORDER BY detected_at DESC, id DESC`,
 	)
 	if err != nil {
@@ -125,7 +126,7 @@ func (u *Updates) ListVisible() ([]Update, error) {
 		if err := rows.Scan(
 			&up.ID, &up.ServiceID, &up.FromDigest, &up.ToDigest, &up.FromVersion,
 			&up.ToVersion, &up.Tag, &up.Severity, &up.ChangelogURL,
-			&up.ChangelogText, &up.Status, &up.DetectedAt, &appliedAt,
+			&up.ChangelogText, &up.ChangelogStatus, &up.Status, &up.DetectedAt, &appliedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -268,11 +269,23 @@ func (u *Updates) MarkRolledBack(serviceID int64, toDigest string) error {
 	return err
 }
 
-// SetChangelog persists the resolved changelog url + text on the update row.
+// SetChangelog persists the resolved changelog url + text on the update row and
+// clears changelog_status (a successful resolve supersedes a prior rate-limit).
 func (u *Updates) SetChangelog(updateID int64, url, text string) error {
 	_, err := u.db.Exec(
-		`UPDATE updates SET changelog_url=?, changelog_text=? WHERE id=?`,
+		`UPDATE updates SET changelog_url=?, changelog_text=?, changelog_status='' WHERE id=?`,
 		url, text, updateID,
+	)
+	return err
+}
+
+// SetChangelogStatus records a non-content changelog outcome ("rate_limited")
+// on the update row, leaving changelog_url/text untouched. Used when the
+// resolve chain produced no content because GitHub throttled it.
+func (u *Updates) SetChangelogStatus(updateID int64, status string) error {
+	_, err := u.db.Exec(
+		`UPDATE updates SET changelog_status=? WHERE id=?`,
+		status, updateID,
 	)
 	return err
 }
@@ -288,14 +301,14 @@ func (u *Updates) GetLatestOpenByService(serviceID int64) (Update, error) {
 	var appliedAt sql.NullTime
 	err := u.db.QueryRow(
 		`SELECT id, service_id, from_digest, to_digest, from_version, to_version,
-		        tag, severity, changelog_url, changelog_text, status, detected_at, applied_at
+		        tag, severity, changelog_url, changelog_text, changelog_status, status, detected_at, applied_at
 		   FROM updates WHERE service_id=? AND status='available'
 		 ORDER BY detected_at DESC, id DESC LIMIT 1`,
 		serviceID,
 	).Scan(
 		&up.ID, &up.ServiceID, &up.FromDigest, &up.ToDigest, &up.FromVersion,
 		&up.ToVersion, &up.Tag, &up.Severity, &up.ChangelogURL, &up.ChangelogText,
-		&up.Status, &up.DetectedAt, &appliedAt,
+		&up.ChangelogStatus, &up.Status, &up.DetectedAt, &appliedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Update{}, ErrNoOpenUpdate
@@ -324,7 +337,7 @@ func (u *Updates) GetLatestOpenByService(serviceID int64) (Update, error) {
 func (u *Updates) ListLastAppliedByService() ([]Update, error) {
 	rows, err := u.db.Query(
 		`SELECT id, service_id, from_digest, to_digest, from_version, to_version,
-		        tag, severity, changelog_url, changelog_text, status, detected_at, applied_at
+		        tag, severity, changelog_url, changelog_text, changelog_status, status, detected_at, applied_at
 		   FROM updates
 		  WHERE status='applied'
 		    AND id = (SELECT id FROM updates u2
@@ -343,7 +356,7 @@ func (u *Updates) ListLastAppliedByService() ([]Update, error) {
 		if err := rows.Scan(
 			&up.ID, &up.ServiceID, &up.FromDigest, &up.ToDigest, &up.FromVersion,
 			&up.ToVersion, &up.Tag, &up.Severity, &up.ChangelogURL,
-			&up.ChangelogText, &up.Status, &up.DetectedAt, &appliedAt,
+			&up.ChangelogText, &up.ChangelogStatus, &up.Status, &up.DetectedAt, &appliedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -385,13 +398,13 @@ func (u *Updates) Get(id int64) (Update, error) {
 	var appliedAt sql.NullTime
 	err := u.db.QueryRow(
 		`SELECT id, service_id, from_digest, to_digest, from_version, to_version,
-		        tag, severity, changelog_url, changelog_text, status, detected_at, applied_at
+		        tag, severity, changelog_url, changelog_text, changelog_status, status, detected_at, applied_at
 		   FROM updates WHERE id=?`,
 		id,
 	).Scan(
 		&up.ID, &up.ServiceID, &up.FromDigest, &up.ToDigest, &up.FromVersion,
 		&up.ToVersion, &up.Tag, &up.Severity, &up.ChangelogURL, &up.ChangelogText,
-		&up.Status, &up.DetectedAt, &appliedAt,
+		&up.ChangelogStatus, &up.Status, &up.DetectedAt, &appliedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Update{}, ErrUpdateNotFound
