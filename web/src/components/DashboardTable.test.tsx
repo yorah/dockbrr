@@ -858,6 +858,41 @@ test("offers a per-row Remove button for a stopped standalone container and remo
   }
 });
 
+test("project row shows the health indicator: amber update-count badge, green dot when clean", async () => {
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 1, name: "app", kind: "compose", working_dir: "/srv",
+          auto_update_enabled: false, unmanaged: false, auto_named: false,
+          services: [{ id: 10, name: "web", image_ref: "nginx:1.27", current_digest: "sha256:a", state: "running", pinned: false, healthcheck: false, auto_update_enabled: null }],
+        },
+        {
+          id: 2, name: "db", kind: "compose", working_dir: "/srv/db",
+          auto_update_enabled: false, unmanaged: false, auto_named: false,
+          services: [{ id: 20, name: "postgres", image_ref: "postgres:16", current_digest: "sha256:c", state: "running", pinned: false, healthcheck: false, auto_update_enabled: null }],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () =>
+      HttpResponse.json([
+        { id: 100, service_id: 10, from_digest: "sha256:a", to_digest: "sha256:b", from_version: "1.27", to_version: "1.28", tag: "1.28", severity: "minor", changelog_url: "", changelog_text: "", status: "available", detected_at: "2026-07-16T00:00:00Z" },
+      ]),
+    ),
+  );
+  renderDashboardWithRouter();
+  await waitFor(() => expect(screen.getByRole("main")).toBeInTheDocument());
+  const main = within(screen.getByRole("main"));
+  const appHeader = within(await waitFor(() => main.getByText("app").closest("tr") as HTMLElement));
+  const dbHeader = within(main.getByText("db").closest("tr") as HTMLElement);
+  // Project with an open update: count badge + "updates available" dot.
+  expect(appHeader.getByText("1")).toBeInTheDocument();
+  expect(appHeader.getByRole("img", { name: /update.*updates available/i })).toBeInTheDocument();
+  // Clean project: no badge, healthy dot.
+  expect(dbHeader.queryByText("1")).not.toBeInTheDocument();
+  expect(dbHeader.getByRole("img", { name: /^healthy$/i })).toBeInTheDocument();
+});
+
 test("surfaces reverse-resolved versions for a floating tag, not just ':latest'", async () => {
   server.use(
     http.get("/api/projects", () =>
