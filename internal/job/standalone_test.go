@@ -136,6 +136,71 @@ func TestStandaloneApplyRecreates(t *testing.T) {
 	}
 }
 
+func newStandaloneApplierShortHealth(db *store.DB, r *fakeRecreator) *job.StandaloneApplier {
+	return job.NewStandaloneApplier(
+		store.NewJobs(db), store.NewUpdates(db), store.NewServices(db), store.NewProjects(db),
+		store.NewSnapshots(db), store.NewEvents(db),
+		fakeResolver2{digest: "sha256:new"}, r, registry.HostPlatform(),
+		func() time.Duration { return 20 * time.Millisecond }, func() time.Duration { return time.Millisecond },
+	)
+}
+
+func TestStandaloneApplyRestoresOnHealthGateFailure(t *testing.T) {
+	db := openJobDB(t)
+	pid, svc, _ := seedStandaloneUpdate(t, db)
+	// The new container is created and started successfully, but its inspected
+	// status is "exited" (not running), so healthGate times out and fails.
+	r := &fakeRecreator{newID: "new-cid", status: "exited"}
+	jobs := store.NewJobs(db)
+	jid, _ := jobs.Enqueue(store.Job{Type: "apply", ServiceID: &svc.ID, ProjectID: &pid, Scope: "service"})
+	j, _ := jobs.Get(jid)
+
+	newStandaloneApplierShortHealth(db, r).Handle(context.Background(), j)
+
+	done, _ := jobs.Get(jid)
+	if done.Status != "failed" {
+		t.Fatalf("status = %q, want failed", done.Status)
+	}
+
+	// The new container must be stopped BEFORE it is removed (ContainerRemove
+	// is no-force and errors on a running container), then the old container
+	// renamed back and restarted.
+	var stopNewIdx, removeNewIdx, renameBackIdx, startOldIdx = -1, -1, -1, -1
+	for i, o := range r.ops {
+		switch {
+		case o.kind == "stop" && o.arg == "new-cid":
+			stopNewIdx = i
+		case o.kind == "remove" && o.arg == "new-cid":
+			removeNewIdx = i
+		case o.kind == "rename" && o.arg == "old-cid->adoring_saha":
+			renameBackIdx = i
+		case o.kind == "start" && o.arg == "old-cid":
+			startOldIdx = i
+		}
+	}
+	if stopNewIdx == -1 {
+		t.Fatalf("new container was never stopped: %+v", r.ops)
+	}
+	if removeNewIdx == -1 {
+		t.Fatalf("new container was never removed: %+v", r.ops)
+	}
+	if stopNewIdx >= removeNewIdx {
+		t.Fatalf("stop(new) must precede remove(new): %+v", r.ops)
+	}
+	if renameBackIdx == -1 || renameBackIdx <= removeNewIdx {
+		t.Fatalf("rename(old back) must follow remove(new): %+v", r.ops)
+	}
+	if startOldIdx == -1 || startOldIdx <= renameBackIdx {
+		t.Fatalf("start(old) must follow rename(old back): %+v", r.ops)
+	}
+
+	// The service runtime/digest must NOT have moved.
+	got, _ := store.NewServices(db).Get(svc.ID)
+	if got.CurrentDigest != "sha256:old" {
+		t.Fatalf("digest = %q, want unchanged sha256:old after failed apply", got.CurrentDigest)
+	}
+}
+
 func TestStandaloneApplyRestoresOnCreateFailure(t *testing.T) {
 	db := openJobDB(t)
 	pid, svc, _ := seedStandaloneUpdate(t, db)

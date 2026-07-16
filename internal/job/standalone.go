@@ -184,6 +184,9 @@ func (a *StandaloneApplier) recreate(ctx context.Context, oldID, inspectJSON, ne
 // the old back to its original name, and start it. Best-effort.
 func (a *StandaloneApplier) restoreOld(ctx context.Context, oldID, name, newID string) {
 	if newID != "" {
+		if err := a.docker.ContainerStop(ctx, newID); err != nil {
+			logger.Warnf("standalone restore: stop new %s: %v", newID, err)
+		}
 		if err := a.docker.ContainerRemove(ctx, newID); err != nil {
 			logger.Warnf("standalone restore: remove new %s: %v", newID, err)
 		}
