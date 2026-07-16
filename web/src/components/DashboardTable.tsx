@@ -622,7 +622,7 @@ export function DashboardTable({
                         size="sm"
                         variant="ghost"
                         className="h-7 gap-1 px-2 text-xs"
-                        disabled={stoppedLooseServices.length === 0}
+                        disabled={stoppedLooseServices.length === 0 || removeContainer.isPending}
                         onClick={(e) => {
                           e.stopPropagation();
                           removeStoppedLoose();

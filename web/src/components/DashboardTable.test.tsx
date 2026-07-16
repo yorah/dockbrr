@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
-import { http, HttpResponse } from "msw";
+import { delay, http, HttpResponse } from "msw";
 import { server } from "@/test/msw";
 import { makeQueryClient } from "@/api/queryClient";
 import { router } from "@/router";
@@ -792,6 +792,39 @@ test("Loose header 'Remove stopped containers' is disabled when every loose cont
   const main = within(screen.getByRole("main"));
   const bulk = await waitFor(() => main.getByRole("button", { name: /remove stopped containers/i }));
   expect(bulk).toBeDisabled();
+});
+
+test("Loose header 'Remove stopped containers' disables while a removal is in flight", async () => {
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 2, name: "adoring_saha", kind: "standalone", working_dir: "",
+          auto_update_enabled: false, unmanaged: false, auto_named: true,
+          services: [{ id: 20, name: "adoring_saha", image_ref: "busybox:latest", current_digest: "sha256:b", state: "exited", pinned: false, healthcheck: false, auto_update_enabled: null }],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () => HttpResponse.json([])),
+    // Never resolves: the mutation stays pending so isPending holds true.
+    http.post("/api/services/:id/remove", async () => {
+      await delay("infinite");
+      return HttpResponse.json({ job_id: 1 });
+    }),
+  );
+  const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+  try {
+    renderDashboardWithRouter();
+    await waitFor(() => expect(screen.getByRole("main")).toBeInTheDocument());
+    const main = within(screen.getByRole("main"));
+    const bulk = await waitFor(() => main.getByRole("button", { name: /remove stopped containers/i }));
+    expect(bulk).not.toBeDisabled();
+    await userEvent.click(bulk);
+    // Second click must not re-enqueue: the button is disabled while pending.
+    await waitFor(() => expect(bulk).toBeDisabled());
+  } finally {
+    confirmSpy.mockRestore();
+  }
 });
 
 test("offers a per-row Remove button for a stopped standalone container and removes it on confirm", async () => {
