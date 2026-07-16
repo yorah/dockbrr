@@ -101,6 +101,7 @@ function ActionsCell({
   onApplied,
   onChangelog,
   onLogs,
+  canRemove,
 }: {
   service: Service;
   update: Update | undefined;
@@ -109,10 +110,13 @@ function ActionsCell({
   onApplied: DashboardTableProps["onApplied"];
   onChangelog: DashboardTableProps["onChangelog"];
   onLogs: (service: Service) => void;
+  /** True only for stopped standalone containers (backend guard mirror). */
+  canRemove: boolean;
 }) {
   const check = useCheck();
   const apply = useApply();
   const lifecycle = useLifecycle();
+  const removeContainer = useRemoveContainer();
   // A gone service has no container to recreate. Applying would just create
   // a fresh one for something the user (or something else) removed.
   const canApply = update?.status === "available" && service.state !== "gone";
@@ -272,6 +276,27 @@ function ActionsCell({
           </TooltipTrigger>
           <TooltipContent>Logs</TooltipContent>
         </Tooltip>
+        {canRemove && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 w-7 p-0"
+                disabled={removeContainer.isPending}
+                aria-label={`Remove ${service.name}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!window.confirm(`Remove stopped container "${service.name}"? This cannot be undone.`)) return;
+                  removeContainer.mutate(service.id);
+                }}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Remove</TooltipContent>
+          </Tooltip>
+        )}
       </div>
   );
 }
@@ -344,8 +369,6 @@ function buildColumns(
   onApplied: DashboardTableProps["onApplied"],
   onChangelog: DashboardTableProps["onChangelog"],
   onLogs: (service: Service) => void,
-  looseSelected: Set<number>,
-  onToggleLooseSelect: (serviceId: number) => void,
 ): ColumnDef<Row>[] {
   return [
     {
@@ -354,21 +377,8 @@ function buildColumns(
       cell: ({ row }) => {
         const r = row.original;
         if (r.kind !== "service") return null;
-        // Only stopped loose (Docker-auto-named standalone) containers are
-        // ever removable; the backend guards the same rule, so a checkbox
-        // never appears for a running one.
-        const selectable = r.project.auto_named && isStopped(r.service.state);
         return (
           <div className="flex items-center gap-2 pl-6">
-            {selectable && (
-              <input
-                type="checkbox"
-                aria-label={`Select ${r.service.name}`}
-                checked={looseSelected.has(r.service.id)}
-                onClick={(e) => e.stopPropagation()}
-                onChange={() => onToggleLooseSelect(r.service.id)}
-              />
-            )}
             <Link
               to="/service/$id"
               params={{ id: String(r.service.id) }}
@@ -473,6 +483,7 @@ function buildColumns(
             service={r.service}
             update={r.update}
             changelog={changelogUpdate(r)}
+            canRemove={r.project.kind === "standalone" && isStopped(r.service.state)}
             onApplied={onApplied}
             onChangelog={onChangelog}
             onLogs={onLogs}
@@ -496,37 +507,30 @@ export function DashboardTable({
   const [collapsed, setCollapsed] = useState<Set<number>>(() => new Set());
   const [composeProject, setComposeProject] = useState<Project | null>(null);
   const [looseOpen, setLooseOpen] = useState(looseDefaultOpen);
-  const [looseSelected, setLooseSelected] = useState<Set<number>>(() => new Set());
   const removeContainer = useRemoveContainer();
 
   // Auto-expand under an active filter, re-collapse when it clears.
   useEffect(() => setLooseOpen(looseDefaultOpen), [looseDefaultOpen]);
 
   // All loose (auto-named standalone) service rows, independent of the group's
-  // open/closed state: the bulk-remove header needs every selected service's
+  // open/closed state: the bulk-remove header needs every stopped service's
   // name for the confirm prompt even though only the open ones are on screen.
   const looseServices = useMemo(
     () => rows.filter((r): r is Extract<Row, { kind: "service" }> => r.kind === "service" && r.project.auto_named),
     [rows],
   );
 
-  function toggleLooseSelect(serviceId: number) {
-    setLooseSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(serviceId)) next.delete(serviceId);
-      else next.add(serviceId);
-      return next;
-    });
-  }
+  const stoppedLooseServices = useMemo(
+    () => looseServices.filter((r) => isStopped(r.service.state)),
+    [looseServices],
+  );
 
-  function removeSelectedLoose() {
-    const selected = looseServices.filter((r) => looseSelected.has(r.service.id));
-    if (selected.length === 0) return;
-    const names = selected.map((r) => r.service.name).join(", ");
-    const n = selected.length;
+  function removeStoppedLoose() {
+    if (stoppedLooseServices.length === 0) return;
+    const names = stoppedLooseServices.map((r) => r.service.name).join(", ");
+    const n = stoppedLooseServices.length;
     if (!window.confirm(`Remove ${n} stopped container${n > 1 ? "s" : ""}: ${names}? This cannot be undone.`)) return;
-    for (const r of selected) removeContainer.mutate(r.service.id);
-    setLooseSelected(new Set());
+    for (const r of stoppedLooseServices) removeContainer.mutate(r.service.id);
   }
 
   const visibleRows = useMemo(() => {
@@ -546,8 +550,8 @@ export function DashboardTable({
   }, [rows, collapsed, groupLoose, looseOpen]);
 
   const columns = useMemo(
-    () => buildColumns(onApplied, onChangelog, onLogs, looseSelected, toggleLooseSelect),
-    [onApplied, onChangelog, onLogs, looseSelected],
+    () => buildColumns(onApplied, onChangelog, onLogs),
+    [onApplied, onChangelog, onLogs],
   );
 
   const table = useReactTable({
@@ -618,14 +622,14 @@ export function DashboardTable({
                         size="sm"
                         variant="ghost"
                         className="h-7 gap-1 px-2 text-xs"
-                        disabled={looseSelected.size === 0}
+                        disabled={stoppedLooseServices.length === 0 || removeContainer.isPending}
                         onClick={(e) => {
                           e.stopPropagation();
-                          removeSelectedLoose();
+                          removeStoppedLoose();
                         }}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
-                        Remove selected
+                        Remove stopped containers
                       </Button>
                     </div>
                   </TableCell>

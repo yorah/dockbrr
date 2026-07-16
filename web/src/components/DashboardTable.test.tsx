@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
-import { http, HttpResponse } from "msw";
+import { delay, http, HttpResponse } from "msw";
 import { server } from "@/test/msw";
 import { makeQueryClient } from "@/api/queryClient";
 import { router } from "@/router";
@@ -724,7 +724,7 @@ test("hides auto-named projects behind a collapsed Loose group on the dashboard"
   await waitFor(() => expect(screen.getByText("busybox:latest")).toBeInTheDocument());
 });
 
-test("bulk-removes selected stopped loose containers after a confirm listing their names, and never offers a checkbox for a running one", async () => {
+test("Loose header 'Remove stopped containers' removes every stopped loose container on confirm, skipping running ones", async () => {
   const removed: string[] = [];
   server.use(
     http.get("/api/projects", () =>
@@ -756,30 +756,130 @@ test("bulk-removes selected stopped loose containers after a confirm listing the
 
   await waitFor(() => expect(screen.getByRole("main")).toBeInTheDocument());
   const main = within(screen.getByRole("main"));
-  const toggle = await waitFor(() => main.getByRole("button", { name: /loose \(3\)/i }));
-  await userEvent.click(toggle);
-  await waitFor(() => expect(screen.getByText("busybox:latest")).toBeInTheDocument());
-
-  // Running loose service: no checkbox, nothing selectable/removable for it.
-  expect(main.queryByLabelText("Select brave_turing")).not.toBeInTheDocument();
-
-  const removeSelected = main.getByRole("button", { name: /remove selected/i });
-  expect(removeSelected).toBeDisabled();
-
-  await userEvent.click(main.getByLabelText("Select adoring_saha"));
-  await userEvent.click(main.getByLabelText("Select sleepy_lamarr"));
-  expect(removeSelected).not.toBeDisabled();
+  const bulk = await waitFor(() => main.getByRole("button", { name: /remove stopped containers/i }));
+  expect(bulk).not.toBeDisabled(); // two stopped loose containers exist
 
   const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
   try {
-    await userEvent.click(removeSelected);
+    await userEvent.click(bulk);
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     const message = confirmSpy.mock.calls[0][0] as string;
     expect(message).toContain("adoring_saha");
     expect(message).toContain("sleepy_lamarr");
+    expect(message).not.toContain("brave_turing"); // running loose is skipped
 
     await waitFor(() => expect(new Set(removed)).toEqual(new Set(["20", "21"])));
   } finally {
     confirmSpy.mockRestore();
   }
+});
+
+test("Loose header 'Remove stopped containers' is disabled when every loose container is running", async () => {
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 4, name: "brave_turing", kind: "standalone", working_dir: "",
+          auto_update_enabled: false, unmanaged: false, auto_named: true,
+          services: [{ id: 22, name: "brave_turing", image_ref: "alpine:3.20", current_digest: "sha256:d", state: "running", pinned: false, healthcheck: false, auto_update_enabled: null }],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () => HttpResponse.json([])),
+  );
+  renderDashboardWithRouter();
+  await waitFor(() => expect(screen.getByRole("main")).toBeInTheDocument());
+  const main = within(screen.getByRole("main"));
+  const bulk = await waitFor(() => main.getByRole("button", { name: /remove stopped containers/i }));
+  expect(bulk).toBeDisabled();
+});
+
+test("Loose header 'Remove stopped containers' disables while a removal is in flight", async () => {
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 2, name: "adoring_saha", kind: "standalone", working_dir: "",
+          auto_update_enabled: false, unmanaged: false, auto_named: true,
+          services: [{ id: 20, name: "adoring_saha", image_ref: "busybox:latest", current_digest: "sha256:b", state: "exited", pinned: false, healthcheck: false, auto_update_enabled: null }],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () => HttpResponse.json([])),
+    // Never resolves: the mutation stays pending so isPending holds true.
+    http.post("/api/services/:id/remove", async () => {
+      await delay("infinite");
+      return HttpResponse.json({ job_id: 1 });
+    }),
+  );
+  const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+  try {
+    renderDashboardWithRouter();
+    await waitFor(() => expect(screen.getByRole("main")).toBeInTheDocument());
+    const main = within(screen.getByRole("main"));
+    const bulk = await waitFor(() => main.getByRole("button", { name: /remove stopped containers/i }));
+    expect(bulk).not.toBeDisabled();
+    await userEvent.click(bulk);
+    // Second click must not re-enqueue: the button is disabled while pending.
+    await waitFor(() => expect(bulk).toBeDisabled());
+  } finally {
+    confirmSpy.mockRestore();
+  }
+});
+
+test("offers a per-row Remove button for a stopped standalone container and removes it on confirm", async () => {
+  const removed: string[] = [];
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 5, name: "my-standalone", kind: "standalone", working_dir: "",
+          auto_update_enabled: false, unmanaged: false, auto_named: false,
+          services: [{ id: 30, name: "grafana", image_ref: "grafana:11", current_digest: "sha256:g", state: "exited", pinned: false, healthcheck: false, auto_update_enabled: null }],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () => HttpResponse.json([])),
+    http.post("/api/services/:id/remove", ({ params }) => {
+      removed.push(String(params.id));
+      return HttpResponse.json({ job_id: 999 });
+    }),
+  );
+  const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+  try {
+    renderDashboardWithRouter();
+    await waitFor(() => expect(screen.getByText("grafana")).toBeInTheDocument());
+    const row = screen.getByText("grafana").closest("tr")!;
+    await userEvent.click(within(row).getByRole("button", { name: /^remove grafana$/i }));
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(removed).toEqual(["30"]));
+  } finally {
+    confirmSpy.mockRestore();
+  }
+});
+
+test("no per-row Remove button for a running standalone or a stopped compose service", async () => {
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 5, name: "run-standalone", kind: "standalone", working_dir: "",
+          auto_update_enabled: false, unmanaged: false, auto_named: false,
+          services: [{ id: 30, name: "grafana", image_ref: "grafana:11", current_digest: "sha256:g", state: "running", pinned: false, healthcheck: false, auto_update_enabled: null }],
+        },
+        {
+          id: 1, name: "app", kind: "compose", working_dir: "/srv",
+          auto_update_enabled: false, unmanaged: false, auto_named: false,
+          services: [{ id: 10, name: "web", image_ref: "nginx:1.27", current_digest: "sha256:a", state: "exited", pinned: false, healthcheck: false, auto_update_enabled: null }],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () => HttpResponse.json([])),
+  );
+  renderDashboardWithRouter();
+  await waitFor(() => expect(screen.getByText("grafana")).toBeInTheDocument());
+  const runRow = screen.getByText("grafana").closest("tr")!;
+  const composeRow = screen.getByText("web").closest("tr")!;
+  expect(within(runRow).queryByRole("button", { name: /^remove grafana$/i })).not.toBeInTheDocument();
+  expect(within(composeRow).queryByRole("button", { name: /^remove web$/i })).not.toBeInTheDocument();
 });
