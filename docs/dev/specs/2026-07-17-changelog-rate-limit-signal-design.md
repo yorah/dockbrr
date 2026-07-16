@@ -71,8 +71,10 @@ a nil error; after this change the only non-nil error it can return is
   `ALTER TABLE updates ADD COLUMN changelog_status TEXT NOT NULL DEFAULT '';`
 - `Update` struct: add `ChangelogStatus string`.
 - Add `changelog_status` to every SELECT column list and its matching `rows.Scan`
-  in `updates.go` (ListOpen, ListVisible, and the other row-hydrating queries)
-  and to the changelog SELECT in `store/events.go`.
+  in `updates.go` (ListOpen, ListVisible, GetLatestOpenByService,
+  ListLastAppliedByService, Get). Place it right after `changelog_text`. The
+  history query in `store/events.go` is out of scope: it feeds the history
+  timeline, which does not surface the marker.
 - `SetChangelog(id, url, text)`: extend the UPDATE to also set
   `changelog_status=''`, so a later successful resolve clears a prior
   `rate_limited`.
@@ -107,9 +109,14 @@ written, `changelog_status` stays `''`.
 
 ### 5. API surface (internal/httpapi)
 
-- `updates.go` update DTO: add `changelog_status string` (`json:"changelog_status"`),
-  mapped from `store.Update.ChangelogStatus`.
-- `events.go` SSE update DTO: same field, same mapping.
+- `updates.go` `updateDTO`: add `ChangelogStatus string` (`json:"changelog_status"`),
+  mapped from `store.Update.ChangelogStatus` in both handlers that build it
+  (`handleListUpdates` and `handleListLastApplied`).
+
+No SSE change: the event bus only pushes `{Type:"detected"}` refresh hints, and
+the frontend refetches `/api/updates` on the hint. The history events endpoint
+(`httpapi/events.go` `eventDTO`) is out of scope for the same reason as the store
+history query.
 
 ### 6. Frontend (web/src)
 
@@ -157,9 +164,9 @@ written, `changelog_status` stays `''`.
 
 - `internal/changelog/github.go`, `resolver.go` (+ tests)
 - `internal/store/migrations/0010_updates_changelog_status.sql`,
-  `internal/store/updates.go`, `internal/store/events.go` (+ tests)
+  `internal/store/updates.go` (+ tests)
 - `internal/scan/scan.go` (+ tests)
-- `internal/httpapi/updates.go`, `internal/httpapi/events.go` (+ tests)
+- `internal/httpapi/updates.go` (+ tests)
 - `web/src/api/types.ts`, `web/src/components/Changelog.tsx`,
   `web/src/components/ReviewDrawer.tsx`, `web/src/components/ChangelogDrawer.tsx`,
   `web/src/components/settings/RegistriesSettings.tsx` (+ tests)
