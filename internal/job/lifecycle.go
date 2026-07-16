@@ -29,6 +29,7 @@ type Lifecycle struct {
 	mutator      Mutator
 	composer     Composer
 	rediscoverer Rediscoverer
+	emitter      Emitter
 }
 
 // NewLifecycle wires the lifecycle runner.
@@ -40,11 +41,21 @@ func NewLifecycle(
 	mutator Mutator,
 	composer Composer,
 	rediscoverer Rediscoverer,
+	emitter Emitter,
 ) *Lifecycle {
 	return &Lifecycle{
 		jobs: jobs, services: services, projects: projects, events: events,
-		mutator: mutator, composer: composer, rediscoverer: rediscoverer,
+		mutator: mutator, composer: composer, rediscoverer: rediscoverer, emitter: emitter,
 	}
+}
+
+// emit sends a best-effort progress line for the live-log panel. Nil-safe so
+// callers (and tests) may pass a nil emitter; never affects job outcome.
+func (l *Lifecycle) emit(job store.Job, stream, line string) {
+	if l.emitter == nil {
+		return
+	}
+	l.emitter.Emit(job.ID, stream, line)
 }
 
 // Handle dispatches a lifecycle job. It records a terminal job status and
@@ -64,6 +75,8 @@ func (l *Lifecycle) Handle(ctx context.Context, job store.Job) {
 		l.fail(job, "load project: "+err.Error())
 		return
 	}
+
+	l.emit(job, "system", job.Type+" "+svc.Name)
 
 	switch job.Type {
 	case "start":
@@ -85,6 +98,7 @@ func (l *Lifecycle) Handle(ctx context.Context, job store.Job) {
 		return
 	}
 	if err != nil {
+		l.emit(job, "system", job.Type+" failed: "+err.Error())
 		l.fail(job, err.Error())
 		return
 	}
@@ -92,6 +106,7 @@ func (l *Lifecycle) Handle(ctx context.Context, job store.Job) {
 		// A removed container has no runtime left to refresh.
 		l.rediscover(ctx, svc, proj)
 	}
+	l.emit(job, "system", job.Type+" complete")
 	l.succeed(job)
 	l.event(svc.ID, eventKind(job.Type), &job.ID)
 }

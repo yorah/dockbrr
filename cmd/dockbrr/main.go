@@ -219,10 +219,10 @@ func run(args []string, getenv func(string) string) error {
 			compose.NewExecRunner(), resolver, dc, locator, job.RealComposer{}, engine,
 			plat, healthTimeout, healthPoll,
 		)
-		lifecycle := job.NewLifecycle(jobs, services, projects, events, dc, job.RealComposer{}, locator)
+		lifecycle := job.NewLifecycle(jobs, services, projects, events, dc, job.RealComposer{}, locator, engine)
 		standalone := job.NewStandaloneApplier(
 			jobs, updates, services, projects, snapshots, events,
-			resolver, dc, plat, healthTimeout, healthPoll,
+			resolver, dc, plat, healthTimeout, healthPoll, engine,
 		)
 		engine.SetHandler(job.NewDispatcher(applier, lifecycle, standalone, projects))
 		if n, rerr := engine.ResumeInterrupted(); rerr != nil {

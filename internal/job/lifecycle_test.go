@@ -92,6 +92,7 @@ func newLifecycle(db *store.DB, m job.Mutator) *job.Lifecycle {
 	return job.NewLifecycle(
 		store.NewJobs(db), store.NewServices(db), store.NewProjects(db), store.NewEvents(db),
 		m, fakeComposer{}, nil, // nil rediscoverer: allowed, skipped when nil
+		nil, // nil emitter: allowed, emit() nil-guards
 	)
 }
 

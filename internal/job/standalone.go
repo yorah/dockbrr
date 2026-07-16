@@ -47,6 +47,7 @@ type StandaloneApplier struct {
 	plat       registry.Platform
 	healthTO   func() time.Duration
 	healthPoll func() time.Duration
+	emitter    Emitter
 }
 
 func NewStandaloneApplier(
@@ -54,12 +55,22 @@ func NewStandaloneApplier(
 	snapshots *store.Snapshots, events *store.Events,
 	resolver Resolver, docker Recreator, plat registry.Platform,
 	healthTimeout, healthPoll func() time.Duration,
+	emitter Emitter,
 ) *StandaloneApplier {
 	return &StandaloneApplier{
 		jobs: jobs, updates: updates, services: services, projects: projects,
 		snapshots: snapshots, events: events, resolver: resolver, docker: docker,
-		plat: plat, healthTO: healthTimeout, healthPoll: healthPoll,
+		plat: plat, healthTO: healthTimeout, healthPoll: healthPoll, emitter: emitter,
 	}
+}
+
+// emit sends a best-effort progress line for the live-log panel. Nil-safe so
+// callers (and tests) may pass a nil emitter; never affects job outcome.
+func (a *StandaloneApplier) emit(job store.Job, stream, line string) {
+	if a.emitter == nil {
+		return
+	}
+	a.emitter.Emit(job.ID, stream, line)
 }
 
 const oldSuffix = "-dockbrr-old"
@@ -96,6 +107,7 @@ func (a *StandaloneApplier) runApply(ctx context.Context, job store.Job) {
 		return
 	}
 	oldID := svc.ContainerIDs[0]
+	a.emit(job, "system", "resolving target")
 
 	// Precheck: re-resolve the tracked ref and confirm the target digest is
 	// still served; else the update was superseded. A cross-tag update (the
@@ -142,8 +154,10 @@ func (a *StandaloneApplier) runApply(ctx context.Context, job store.Job) {
 		a.fail(job, "snapshot: "+serr.Error())
 		return
 	}
+	a.emit(job, "system", "snapshot taken")
 
 	// Pull-before-create (invariant 4).
+	a.emit(job, "system", "pulling "+targetRef)
 	if err := a.docker.ImagePull(ctx, targetRef); err != nil {
 		a.failApply(job, svc, upd, "pull: "+err.Error())
 		return
@@ -151,6 +165,7 @@ func (a *StandaloneApplier) runApply(ctx context.Context, job store.Job) {
 
 	// Recreate: stop old, rename it aside, create the new from the snapshot
 	// inspect with the new image, start it. On any failure, restore old in place.
+	a.emit(job, "system", "recreating container")
 	newID, rerr := a.recreate(ctx, oldID, inspect, targetRef, svc.Name)
 	if rerr != nil {
 		a.restoreOld(ctx, oldID, svc.Name, newID)
@@ -159,6 +174,7 @@ func (a *StandaloneApplier) runApply(ctx context.Context, job store.Job) {
 	}
 
 	// Health-gate the NEW id (invariant 4).
+	a.emit(job, "system", "health-gating")
 	if err := a.healthGate(ctx, newID); err != nil {
 		a.restoreOld(ctx, oldID, svc.Name, newID)
 		a.failApply(job, svc, upd, "health gate: "+err.Error())
@@ -179,6 +195,7 @@ func (a *StandaloneApplier) runApply(ctx context.Context, job store.Job) {
 	}
 	_ = a.updates.MarkApplied(upd.ID)
 	a.event(svc.ID, "succeeded", &job.ID, svc.CurrentDigest, upd.ToDigest, "update applied")
+	a.emit(job, "system", "apply succeeded")
 	a.succeed(job)
 }
 
@@ -317,6 +334,7 @@ func (a *StandaloneApplier) runRollback(ctx context.Context, job store.Job) {
 		return
 	}
 	currentID := svc.ContainerIDs[0]
+	a.emit(job, "system", "rolling back")
 
 	// Recreate the snapshot's container with the OLD image. Prefer a
 	// digest-pinned ref so rollback is deterministic.
@@ -352,6 +370,7 @@ func (a *StandaloneApplier) runRollback(ctx context.Context, job store.Job) {
 		logger.Warnf("standalone rollback: mark rolled_back: %v", err)
 	}
 	a.event(svc.ID, "rolled_back", &job.ID, svc.CurrentDigest, snap.PrevDigest, "rolled back")
+	a.emit(job, "system", "rolled back")
 	a.succeed(job)
 }
 
@@ -370,6 +389,7 @@ func (a *StandaloneApplier) event(serviceID int64, kind string, jobID *int64, fr
 // fail records a failed job with a warning log line.
 func (a *StandaloneApplier) fail(job store.Job, msg string) {
 	logger.Warnf("job: %s failed (job %d): %s", job.Type, job.ID, msg)
+	a.emit(job, "system", job.Type+" failed: "+msg)
 	_ = a.jobs.Finish(job.ID, "failed", nil, msg)
 }
 

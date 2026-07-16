@@ -161,6 +161,7 @@ func newStandaloneApplierWithResolver(db *store.DB, r *fakeRecreator, resolver f
 		store.NewSnapshots(db), store.NewEvents(db),
 		resolver, r, registry.HostPlatform(),
 		func() time.Duration { return time.Minute }, func() time.Duration { return time.Millisecond },
+		nil, // nil emitter: allowed, emit() nil-guards
 	)
 }
 
@@ -267,6 +268,7 @@ func newStandaloneApplierShortHealth(db *store.DB, r *fakeRecreator) *job.Standa
 		store.NewSnapshots(db), store.NewEvents(db),
 		fakeResolver2{digest: "sha256:new"}, r, registry.HostPlatform(),
 		func() time.Duration { return 20 * time.Millisecond }, func() time.Duration { return time.Millisecond },
+		nil, // nil emitter: allowed, emit() nil-guards
 	)
 }
 
@@ -603,5 +605,61 @@ func TestStandaloneApplyHealthGateFailsFastOnExited(t *testing.T) {
 	got, _ := store.NewServices(db).Get(svc.ID)
 	if got.CurrentDigest != "sha256:old" {
 		t.Fatalf("digest = %q, want unchanged sha256:old after failed apply", got.CurrentDigest)
+	}
+}
+
+// recEmit is one captured (jobID, stream, line) tuple.
+type recEmit struct {
+	jobID  int64
+	stream string
+	line   string
+}
+
+// recordingEmitter captures every emitted line so a test can assert the
+// live-log panel would not open empty. Not safe for concurrent use; Handle
+// runs synchronously in these tests.
+type recordingEmitter struct {
+	lines []recEmit
+}
+
+func (r *recordingEmitter) Emit(jobID int64, stream, line string) {
+	r.lines = append(r.lines, recEmit{jobID, stream, line})
+}
+
+// TestStandaloneApplyEmitsProgressLines proves a successful standalone apply
+// emits at least one "system" progress line through the Emitter, so the
+// live-log panel (which streams a job's lines) is not empty (backlog wl-p2).
+func TestStandaloneApplyEmitsProgressLines(t *testing.T) {
+	db := openJobDB(t)
+	pid, svc, _ := seedStandaloneUpdate(t, db)
+	r := &fakeRecreator{newID: "new-cid", status: "running"}
+	emitter := &recordingEmitter{}
+	applier := job.NewStandaloneApplier(
+		store.NewJobs(db), store.NewUpdates(db), store.NewServices(db), store.NewProjects(db),
+		store.NewSnapshots(db), store.NewEvents(db),
+		fakeResolver2{digest: "sha256:new"}, r, registry.HostPlatform(),
+		func() time.Duration { return time.Minute }, func() time.Duration { return time.Millisecond },
+		emitter,
+	)
+	jobs := store.NewJobs(db)
+	jid, _ := jobs.Enqueue(store.Job{Type: "apply", ServiceID: &svc.ID, ProjectID: &pid, Scope: "service"})
+	j, _ := jobs.Get(jid)
+
+	applier.Handle(context.Background(), j)
+
+	done, _ := jobs.Get(jid)
+	if done.Status != "success" {
+		t.Fatalf("status = %q, want success", done.Status)
+	}
+	if len(emitter.lines) == 0 {
+		t.Fatalf("no progress lines emitted; live-log panel would be empty")
+	}
+	for _, l := range emitter.lines {
+		if l.jobID != jid {
+			t.Fatalf("emitted line for wrong job id %d, want %d: %+v", l.jobID, jid, l)
+		}
+		if l.stream != "system" {
+			t.Fatalf("emitted line on unexpected stream %q: %+v", l.stream, l)
+		}
 	}
 }
