@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/yorah/dockbrr/compare/v0.2.0...v0.3.0) (2026-07-16)
+
+
+### Features
+
+* **web:** container remove UX — per-row button + Loose bulk action ([#21](https://github.com/yorah/dockbrr/issues/21)) ([31a0948](https://github.com/yorah/dockbrr/commit/31a094801d80856f27308b4496d0b6552c8f5a05))
+
+
+### Bug Fixes
+
+* **store:** preserve resolved versions on digest-only re-detect ([#19](https://github.com/yorah/dockbrr/issues/19)) ([b360ff7](https://github.com/yorah/dockbrr/commit/b360ff720e8738b79287aa70c2eb6049e68b8250))
+
 ## [0.2.0](https://github.com/yorah/dockbrr/compare/v0.1.0...v0.2.0) (2026-07-16)
 
 
