@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -166,6 +167,14 @@ func (s *GitHubSource) Resolve(ctx context.Context, in Input) (Result, error) {
 		fromTag = fromRel.TagName
 	}
 	span := releasesInSpan(rels, fromCore, toCore)
+	// releasesInSpan drops pre-release/build-suffixed tags ("-"/"+"). When every
+	// release in the span carries such a suffix (LinuxServer.io's "-lsNNN" build
+	// tags are the whole stream), the span is empty even though the target
+	// release has real notes. Fall back to the target's own body rather than
+	// returning nothing.
+	if len(span) == 0 {
+		return Result{Text: target.Body, URL: target.HTMLURL}, nil
+	}
 	link := spanLink(owner, name, fromTag, target.TagName, reachedFrom)
 	return Result{Text: renderSpan(span, link, reachedFrom), URL: target.HTMLURL}, nil
 }
@@ -213,9 +222,10 @@ func findRelease(rels []ghRelease, want []string, version string) (ghRelease, bo
 // version order: a project maintaining several lines at once (redis backporting
 // 8.6.4 after shipping 8.8.0) publishes older versions later, which would bury
 // the target release mid-page and make the size cap drop sections by recency
-// instead of by version. Pre-release and build-metadata tags are dropped: they
-// are never what an image tag resolves to, and their notes duplicate the stable
-// release that follows.
+// instead of by version. Pre-releases are dropped (they are never what an image
+// tag resolves to, and their notes duplicate the stable release that follows),
+// but downstream build suffixes such as LinuxServer.io's "-lsNNN" are kept: they
+// tag stable releases and are exactly what those images resolve to.
 func releasesInSpan(rels []ghRelease, fromCore, toCore [3]int) []ghRelease {
 	type scored struct {
 		rel  ghRelease
@@ -224,7 +234,7 @@ func releasesInSpan(rels []ghRelease, fromCore, toCore [3]int) []ghRelease {
 	var keep []scored
 	for _, rel := range rels {
 		norm := normalizeTag(rel.TagName)
-		if strings.ContainsAny(norm, "-+") {
+		if isPrerelease(norm) {
 			continue
 		}
 		c, ok := detect.ParseCore(norm)
@@ -301,6 +311,24 @@ func spanLink(owner, name, fromTag, toTag string, reachedFrom bool) string {
 // ("release-1.31.2", "v1.31.2" -> "1.31.2") so a tag can be parsed as semver.
 func normalizeTag(tag string) string {
 	return strings.TrimPrefix(strings.TrimPrefix(tag, "release-"), "v")
+}
+
+// prereleaseRe matches the common pre-release identifiers that follow a "-" right
+// after a version's numeric core ("-rc1", "-beta.2", "-alpha", "-snapshot"). It
+// deliberately does NOT match downstream build suffixes like LinuxServer.io's
+// "-ls311", which tag stable releases and must survive span aggregation.
+var prereleaseRe = regexp.MustCompile(`(?i)^(rc|alpha|beta|pre|preview|dev|snapshot|nightly|canary|milestone|ea|m\d|b\d)`)
+
+// isPrerelease reports whether a normalized tag names a pre-release. Build
+// metadata ("+meta") and downstream build suffixes ("-lsNNN") are stable and
+// return false; only a "-" segment opening with a recognized pre-release marker
+// returns true.
+func isPrerelease(norm string) bool {
+	i := strings.IndexByte(norm, '-')
+	if i < 0 {
+		return false
+	}
+	return prereleaseRe.MatchString(norm[i+1:])
 }
 
 type ghRelease struct {

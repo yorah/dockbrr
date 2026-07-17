@@ -452,6 +452,63 @@ func TestGitHubRangeSkipsPrereleases(t *testing.T) {
 	}
 }
 
+func TestGitHubRangeBuildSuffixTagsKeepNotes(t *testing.T) {
+	// LinuxServer.io tags every stable release with a "-lsNNN" build suffix
+	// (6.3.0.10514-ls311). A from->to span across such tags must still surface
+	// the target release's notes; the "-"/"+" pre-release filter must not empty
+	// the span and discard the body.
+	srv := ghServer(t, map[string][]ghRel{
+		"linuxserver/docker-radarr": {
+			{TagName: "6.3.0.10514-ls311", HTMLURL: "https://github.com/linuxserver/docker-radarr/releases/tag/6.3.0.10514-ls311", Body: "radarr six three notes"},
+			{TagName: "6.2.1.10461-ls309", HTMLURL: "u621", Body: "already running notes"},
+		},
+	}, nil, "")
+	s := changelog.NewGitHubSource(srv.Client(), srv.URL, srv.URL, func() string { return "" }, nil, time.Hour)
+	res, err := s.Resolve(context.Background(), ghRangeInput("linuxserver/docker-radarr:6.3.0.10514-ls311", "6.2.1.10461-ls309", "6.3.0.10514-ls311"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "radarr six three notes") {
+		t.Fatalf("Text missing target notes:\n%q", res.Text)
+	}
+	if res.URL != "https://github.com/linuxserver/docker-radarr/releases/tag/6.3.0.10514-ls311" {
+		t.Fatalf("URL = %q, want the target release", res.URL)
+	}
+}
+
+func TestGitHubRangeAggregatesBuildSuffixReleases(t *testing.T) {
+	// A multi-version LinuxServer.io jump must aggregate the intermediate
+	// "-lsNNN" stable releases, not just the target: the build suffix is not a
+	// pre-release and must survive span filtering. Any real pre-release in the
+	// same window (an "-rc1" build) still drops out.
+	srv := ghServer(t, map[string][]ghRel{
+		"linuxserver/docker-radarr": {
+			{TagName: "6.3.0.10514-ls311", HTMLURL: "https://github.com/linuxserver/docker-radarr/releases/tag/6.3.0.10514-ls311", Body: "six three notes"},
+			{TagName: "6.3.0.10500-rc1", HTMLURL: "urc", Body: "candidate notes"},
+			{TagName: "6.2.0.10200-ls305", HTMLURL: "u620", Body: "six two notes"},
+			{TagName: "6.1.0.10000-ls300", HTMLURL: "u610", Body: "already running notes"},
+		},
+	}, nil, "")
+	s := changelog.NewGitHubSource(srv.Client(), srv.URL, srv.URL, func() string { return "" }, nil, time.Hour)
+	res, err := s.Resolve(context.Background(), ghRangeInput("linuxserver/docker-radarr:6.3.0.10514-ls311", "6.1.0.10000-ls300", "6.3.0.10514-ls311"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"## 6.3.0.10514-ls311", "six three notes", "## 6.2.0.10200-ls305", "six two notes"} {
+		if !strings.Contains(res.Text, want) {
+			t.Fatalf("Text missing %q:\n%s", want, res.Text)
+		}
+	}
+	for _, unwanted := range []string{"already running notes", "candidate notes"} {
+		if strings.Contains(res.Text, unwanted) {
+			t.Fatalf("Text must not contain %q:\n%s", unwanted, res.Text)
+		}
+	}
+	if i, j := strings.Index(res.Text, "## 6.3"), strings.Index(res.Text, "## 6.2"); i > j {
+		t.Fatalf("sections must be newest-first:\n%s", res.Text)
+	}
+}
+
 func TestGitHubNoFromVersionKeepsSingleRelease(t *testing.T) {
 	// A digest-only update (no parseable from-version) still gets exactly the
 	// target release body, with no aggregation heading.
