@@ -262,7 +262,10 @@ func TestCheckServiceCreatesCurrentRowWhenUpToDateNoHistory(t *testing.T) {
 	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
 	sid, _ := store.NewServices(db).Upsert(store.Service{
 		ProjectID: pid, Name: "app", ImageRef: "ghcr.io/acme/web:1.2.3",
-		CurrentDigest: "sha256:cur", ImageVersion: "1.2.3",
+		// ImageVersion (the running image's version label) is deliberately
+		// DIFFERENT from the reverse-looked ResolvedVersion below, so the row's
+		// version asserted at the end proves ResolvedVersion wins the precedence.
+		CurrentDigest: "sha256:cur", ImageVersion: "0.0.0-label",
 	})
 	// The reverse-looked release version the UI shows for the running digest.
 	_, _ = store.NewImages(db).Upsert(store.Image{
@@ -295,7 +298,7 @@ func TestCheckServiceCreatesCurrentRowWhenUpToDateNoHistory(t *testing.T) {
 		t.Fatalf("digests = (%q,%q), want both sha256:cur", r.FromDigest, r.ToDigest)
 	}
 	if r.ToVersion != "1.2.3" || r.FromVersion != "1.2.3" {
-		t.Fatalf("versions = (%q,%q), want 1.2.3", r.FromVersion, r.ToVersion)
+		t.Fatalf("versions = (%q,%q), want 1.2.3 (ResolvedVersion must win over ImageVersion 0.0.0-label)", r.FromVersion, r.ToVersion)
 	}
 	if r.ChangelogText != "# 1.2.3 notes" || r.ChangelogURL == "" {
 		t.Fatalf("changelog not persisted on current row: %+v", r)

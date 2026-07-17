@@ -995,6 +995,49 @@ func TestListLastAppliedPrefersAppliedOverCurrent(t *testing.T) {
 	}
 }
 
+// TestListLastAppliedTieBreakIgnoresIDAndTimestamp isolates the status sort key
+// from the id/timestamp fallback: the applied row is inserted FIRST, then the
+// current row SECOND, so the current row has the higher id and an equal-or-later
+// detected_at. If applied still wins, it can only be the primary
+// ORDER BY (status='current') key doing it, not the id/timestamp tie-break. This
+// is the reversed-insert counterpart to TestListLastAppliedPrefersAppliedOverCurrent
+// (where applied was also the newest row, so that test alone could not tell the
+// two orderings apart).
+func TestListLastAppliedTieBreakIgnoresIDAndTimestamp(t *testing.T) {
+	db := openImagesStore(t)
+	sid := seedService(t, db)
+	u := store.NewUpdates(db)
+
+	// Applied first (lower id), current second (higher id, equal-or-later ts).
+	appliedID, err := u.Upsert(store.Update{
+		ServiceID: sid, FromDigest: "sha256:cur", ToDigest: "sha256:new",
+		Tag: "1.1", Severity: "minor", Status: "applied",
+		ChangelogURL: "https://x/1.1", ChangelogText: "# 1.1 applied",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	curID, err := u.Upsert(store.Update{
+		ServiceID: sid, FromDigest: "sha256:cur", ToDigest: "sha256:cur",
+		FromVersion: "1.0", ToVersion: "1.0", Tag: "1.0", Severity: "current", Status: "current",
+		ChangelogURL: "https://x/1.0", ChangelogText: "# 1.0 current",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if curID <= appliedID {
+		t.Fatalf("test precondition broken: current id %d should exceed applied id %d", curID, appliedID)
+	}
+
+	got, err := u.ListLastAppliedByService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != appliedID {
+		t.Fatalf("got %+v, want applied id %d to win over newer current id %d (status key must dominate id/timestamp)", got, appliedID, curID)
+	}
+}
+
 func TestListLastAppliedReturnsCurrentWhenOnly(t *testing.T) {
 	db := openImagesStore(t)
 	sid := seedService(t, db)
