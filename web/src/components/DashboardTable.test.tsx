@@ -17,6 +17,14 @@ function renderDashboardWithRouter() {
   );
 }
 
+// Top-level projects load collapsed on the dashboard now. Waits for the project
+// header button to appear (data loaded), then clicks it to reveal the services.
+// The accessible name is the bare project name - distinct from "Apply all
+// updates in <name>" and "Check all services in <name>".
+async function expandProject(name: string) {
+  await userEvent.click(await screen.findByRole("button", { name }));
+}
+
 test("lists services and toggles a project group", async () => {
   server.use(
     http.get("/api/projects", () =>
@@ -45,8 +53,14 @@ test("lists services and toggles a project group", async () => {
     http.get("/api/updates", () => HttpResponse.json([])),
   );
   renderDashboardWithRouter();
+  // Collapsed by default: the header is present, the service is not.
+  await waitFor(() => expect(screen.getByRole("button", { name: "app" })).toBeInTheDocument());
+  expect(screen.queryByText("web")).not.toBeInTheDocument();
+  // Expand -> service visible.
+  await userEvent.click(screen.getByRole("button", { name: "app" }));
   await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
-  await userEvent.click(screen.getByRole("button", { name: "app" })); // collapse (exact: avoids the "Apply all updates in app" button)
+  // Collapse again -> service hidden.
+  await userEvent.click(screen.getByRole("button", { name: "app" }));
   await waitFor(() => expect(screen.queryByText("web")).not.toBeInTheDocument());
 });
 
@@ -78,6 +92,7 @@ test("service name links to the service detail page", async () => {
     http.get("/api/updates", () => HttpResponse.json([])),
   );
   renderDashboardWithRouter();
+  await expandProject("app");
   await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
   const link = screen.getByRole("link", { name: "web" });
   expect(link).toHaveAttribute("href", "/service/10");
@@ -113,6 +128,7 @@ test("shows last-checked time and a warning for rate-limited services", async ()
     http.get("/api/updates", () => HttpResponse.json([])),
   );
   renderDashboardWithRouter();
+  await expandProject("app");
   await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
   expect(screen.getByText(/2m ago/i)).toBeInTheDocument();
   expect(screen.getByLabelText(/rate.?limited/i)).toBeInTheDocument();
@@ -148,6 +164,7 @@ test("a pinned service's digest-pinned image ref renders short, not the full sha
     http.get("/api/updates", () => HttpResponse.json([])),
   );
   renderDashboardWithRouter();
+  await expandProject("app");
   await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
   expect(screen.queryByText(`nginx@${refDigest}`)).not.toBeInTheDocument();
   expect(screen.queryByText(refDigest)).not.toBeInTheDocument();
@@ -183,6 +200,12 @@ test("shows an Unmanaged badge on the project header when the project is flagged
     http.get("/api/updates", () => HttpResponse.json([])),
   );
   renderDashboardWithRouter();
+  // The header button's accessible name concatenates the project name and the
+  // "Unmanaged" badge text with no separator ("appUnmanaged"), so
+  // expandProject's exact-name match won't find it here. Case-sensitive
+  // prefix match: an /i regex would also catch "Apply all updates in app"
+  // (starts with "App").
+  await userEvent.click(await screen.findByRole("button", { name: /^app/ }));
   await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
   expect(screen.getByText("Unmanaged")).toBeInTheDocument();
 });
@@ -238,6 +261,7 @@ test("Apply all enqueues one service-scope apply per pending update, never a pro
   const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
   try {
     renderDashboardWithRouter();
+    await expandProject("app");
     await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
     await userEvent.click(screen.getByRole("button", { name: /apply all updates in app/i }));
     await waitFor(() => expect(applied).toHaveLength(2));
@@ -283,6 +307,7 @@ test("Apply all excludes a gone service's pending update, even with Show removed
   const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
   try {
     renderDashboardWithRouter();
+    await expandProject("app");
     // Toggle "Show removed" so the gone row (and its otherwise-hidden Apply
     // button) is actually on screen. The guard must hold even then.
     await userEvent.click(await screen.findByRole("switch", { name: /show removed/i }));
@@ -328,6 +353,7 @@ test("project Check all fans out a check for every service in the project", asyn
     }),
   );
   renderDashboardWithRouter();
+  await expandProject("app");
   await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
   await userEvent.click(screen.getByRole("button", { name: /check all services in app/i }));
   await waitFor(() => expect(new Set(checked)).toEqual(new Set(["10", "11"])));
@@ -358,6 +384,7 @@ test("global Check all runs a full scan; global Apply all applies each available
   const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
   try {
     renderDashboardWithRouter();
+    await expandProject("app");
     await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
     await userEvent.click(screen.getByRole("button", { name: /^check all services$/i }));
     await waitFor(() => expect(scanCalls).toBe(1));
@@ -381,6 +408,7 @@ test("project row auto-update switch reflects the flag, toggles it, and does not
     }),
   );
   renderDashboardWithRouter();
+  await expandProject("app");
   await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
 
   const auto = screen.getByRole("switch", { name: /auto-update app/i });
@@ -438,6 +466,7 @@ test("changelog column falls back to the last applied update once nothing is pen
     ),
   );
   renderDashboardWithRouter();
+  await expandProject("app");
 
   const button = await screen.findByRole("button", { name: /last applied changelog for web/i });
   await userEvent.click(button);
@@ -512,6 +541,7 @@ test("changelog column falls back to the last applied changelog when the PENDING
     ),
   );
   renderDashboardWithRouter();
+  await expandProject("app");
 
   const button = await screen.findByRole("button", { name: /last applied changelog for web/i });
   await userEvent.click(button);
@@ -581,6 +611,7 @@ test("changelog column shows the pending changelog (non-muted) when the pending 
     ),
   );
   renderDashboardWithRouter();
+  await expandProject("app");
 
   const button = await screen.findByRole("button", { name: /^changelog for web$/i });
   expect(screen.queryByRole("button", { name: /last applied changelog for web/i })).not.toBeInTheDocument();
@@ -636,6 +667,7 @@ test("changelog eye is enabled for a rate-limited pending update with no changel
     http.get("/api/updates/last-applied", () => HttpResponse.json([])),
   );
   renderDashboardWithRouter();
+  await expandProject("app");
 
   const button = await screen.findByRole("button", { name: /^changelog for web$/i });
   expect(button).not.toBeDisabled();
@@ -690,6 +722,7 @@ test("changelog eye stays disabled for a pending update with no changelog and no
     http.get("/api/updates/last-applied", () => HttpResponse.json([])),
   );
   renderDashboardWithRouter();
+  await expandProject("app");
 
   const button = await screen.findByRole("button", { name: /^changelog for web$/i });
   expect(button).toBeDisabled();
@@ -739,6 +772,7 @@ test("action menu is state-aware and wires Stop to the lifecycle endpoint", asyn
     }),
   );
   renderDashboardWithRouter();
+  await expandProject("app");
   await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
 
   const webRow = screen.getByText("web").closest("tr")!;
@@ -788,8 +822,10 @@ test("a gone service's row offers only Logs, no lifecycle buttons", async () => 
     http.get("/api/updates", () => HttpResponse.json([])),
   );
   renderDashboardWithRouter();
-  // "gone" rows are hidden by default; toggle "Show removed" to see it.
+  // "gone" rows (and their project header) are hidden entirely by default;
+  // toggle "Show removed" first so the project row exists to expand.
   await userEvent.click(await screen.findByRole("switch", { name: /show removed/i }));
+  await expandProject("app");
   await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
 
   const main = within(screen.getByRole("main"));
@@ -818,6 +854,7 @@ test("hides auto-named projects behind a collapsed Loose group on the dashboard"
     http.get("/api/updates", () => HttpResponse.json([])),
   );
   renderDashboardWithRouter();
+  await expandProject("app");
 
   // Named project's service is visible; the loose service is hidden by default.
   await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
@@ -954,6 +991,7 @@ test("offers a per-row Remove button for a stopped standalone container and remo
   const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
   try {
     renderDashboardWithRouter();
+    await expandProject("my-standalone");
     await waitFor(() => expect(screen.getByText("grafana")).toBeInTheDocument());
     const row = screen.getByText("grafana").closest("tr")!;
     await userEvent.click(within(row).getByRole("button", { name: /^remove grafana$/i }));
@@ -1021,6 +1059,7 @@ test("surfaces reverse-resolved versions for a floating tag, not just ':latest'"
     ),
   );
   renderDashboardWithRouter();
+  await expandProject("app");
   await waitFor(() => expect(screen.getByRole("main")).toBeInTheDocument());
   const main = within(screen.getByRole("main"));
   // Running version (from_version) shows under the floating ref.
@@ -1052,6 +1091,7 @@ test("per-row Remove button disables while its removal is in flight, so it can't
   const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
   try {
     renderDashboardWithRouter();
+    await expandProject("my-standalone");
     await waitFor(() => expect(screen.getByText("grafana")).toBeInTheDocument());
     // Re-query each time: TanStack re-renders the cell, replacing the DOM node.
     const btn = () => screen.getByRole("button", { name: /^remove grafana$/i });
@@ -1082,6 +1122,7 @@ test("shows the Compose button only on compose project headers, not standalone o
     http.get("/api/updates", () => HttpResponse.json([])),
   );
   renderDashboardWithRouter();
+  await expandProject("app");
   await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
   // Scope to <main>: the sidebar project list also renders "app"/"my-standalone".
   const main = within(screen.getByRole("main"));
@@ -1110,9 +1151,196 @@ test("no per-row Remove button for a running standalone or a stopped compose ser
     http.get("/api/updates", () => HttpResponse.json([])),
   );
   renderDashboardWithRouter();
+  await expandProject("run-standalone");
+  await expandProject("app");
   await waitFor(() => expect(screen.getByText("grafana")).toBeInTheDocument());
   const runRow = screen.getByText("grafana").closest("tr")!;
   const composeRow = screen.getByText("web").closest("tr")!;
   expect(within(runRow).queryByRole("button", { name: /^remove grafana$/i })).not.toBeInTheDocument();
   expect(within(composeRow).queryByRole("button", { name: /^remove web$/i })).not.toBeInTheDocument();
+});
+
+test("dashboard loads every top-level project collapsed", async () => {
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 1, name: "app", kind: "compose", working_dir: "/srv",
+          auto_update_enabled: false, auto_named: false,
+          services: [{
+            id: 10, name: "web", image_ref: "nginx:1.27", current_digest: "sha256:a",
+            state: "running", pinned: false, healthcheck: false, auto_update_enabled: null,
+          }],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () => HttpResponse.json([])),
+  );
+  renderDashboardWithRouter();
+  // Header present (data loaded) but the service row is hidden.
+  await waitFor(() => expect(screen.getByRole("button", { name: "app" })).toBeInTheDocument());
+  expect(screen.queryByText("web")).not.toBeInTheDocument();
+});
+
+test("an active search reveals a service under an otherwise-collapsed project", async () => {
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 1, name: "app", kind: "compose", working_dir: "/srv",
+          auto_update_enabled: false, auto_named: false,
+          services: [{
+            id: 10, name: "web", image_ref: "nginx:1.27", current_digest: "sha256:a",
+            state: "running", pinned: false, healthcheck: false, auto_update_enabled: null,
+          }],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () => HttpResponse.json([])),
+  );
+  renderDashboardWithRouter();
+  await waitFor(() => expect(screen.getByRole("button", { name: "app" })).toBeInTheDocument());
+  expect(screen.queryByText("web")).not.toBeInTheDocument();
+  // Filter on -> service visible without expanding the header.
+  await userEvent.type(screen.getByLabelText("Search"), "web");
+  await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
+});
+
+test("a manually-expanded project stays expanded across a refetch", async () => {
+  // The projects payload must actually CHANGE between the first fetch and the
+  // refetch triggered below. If it comes back byte-identical, React Query's
+  // default structural sharing (see web/src/api/queryClient.ts) returns the
+  // SAME `projects.data` reference, `rows` (memoized on `[projects.data, ...]`
+  // in useDashboardRows) keeps a stable identity, and the seed effect (dep
+  // `[rows, defaultCollapsed]`) never re-runs - the test would pass even if the
+  // seenProjects guard were deleted. A second top-level project ("db") is added
+  // on the refetch so the effect has something new to seed, which lets this
+  // test assert BOTH invariants: the guard holds for the already-expanded
+  // project, and the effect genuinely re-ran and collapsed the newcomer.
+  let fetchCount = 0;
+  server.use(
+    http.get("/api/projects", () => {
+      fetchCount += 1;
+      const app = {
+        id: 1, name: "app", kind: "compose", working_dir: "/srv",
+        auto_update_enabled: false, auto_named: false,
+        services: [{
+          id: 10, name: "web", image_ref: "nginx:1.27", current_digest: "sha256:a",
+          state: "running", pinned: false, healthcheck: false, auto_update_enabled: null,
+        }],
+      };
+      if (fetchCount === 1) return HttpResponse.json([app]);
+      const db = {
+        id: 2, name: "db", kind: "compose", working_dir: "/srv/db",
+        auto_update_enabled: false, auto_named: false,
+        services: [{
+          id: 20, name: "postgres", image_ref: "postgres:16", current_digest: "sha256:c",
+          state: "running", pinned: false, healthcheck: false, auto_update_enabled: null,
+        }],
+      };
+      return HttpResponse.json([app, db]);
+    }),
+    http.get("/api/updates", () => HttpResponse.json([])),
+    // Backs the global "Check all services" button: its mutation invalidates
+    // the projects query on success (see useScanAll), the same mechanism the
+    // "global Check all" test above uses to prove a scan ran.
+    http.post("/api/scan", () => HttpResponse.json({ status: "checked" })),
+  );
+  renderDashboardWithRouter();
+  await expandProject("app");
+  await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
+  // Force a projects refetch (mirror the mechanism used by the "Check all"
+  // tests): the global button is named exactly "Check all services", distinct
+  // from the per-project "Check all services in app" button.
+  await userEvent.click(screen.getByRole("button", { name: /^check all services$/i }));
+  // The new project's header must appear before asserting on its collapsed
+  // state, otherwise a false negative could just mean the refetch hasn't
+  // landed yet.
+  await waitFor(() => expect(screen.getByRole("button", { name: "db" })).toBeInTheDocument());
+  // Invariant 1: the seed effect must NOT re-collapse a project the user
+  // manually expanded (the seenProjects guard holds).
+  expect(screen.getByText("web")).toBeInTheDocument();
+  // Invariant 2: the newly-appeared top-level project IS seeded collapsed,
+  // proving the seed effect actually re-ran rather than the test passing
+  // vacuously because nothing re-triggered it.
+  expect(screen.queryByText("postgres")).not.toBeInTheDocument();
+});
+
+test("a header click while a filter is active does not change the post-filter collapse state", async () => {
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 1, name: "app", kind: "compose", working_dir: "/srv",
+          auto_update_enabled: false, auto_named: false,
+          services: [{
+            id: 10, name: "web", image_ref: "nginx:1.27", current_digest: "sha256:a",
+            state: "running", pinned: false, healthcheck: false, auto_update_enabled: null,
+          }],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () => HttpResponse.json([])),
+  );
+  renderDashboardWithRouter();
+  await waitFor(() => expect(screen.getByRole("button", { name: "app" })).toBeInTheDocument());
+  expect(screen.queryByText("web")).not.toBeInTheDocument();
+  // Filter on: the service is force-shown regardless of collapse state.
+  const search = screen.getByLabelText("Search");
+  await userEvent.type(search, "web");
+  await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
+  // Click the header while filtering. This must be a no-op: without the guard
+  // it would silently drop "app" from `collapsed`, changing the state the user
+  // returns to once the filter clears.
+  await userEvent.click(screen.getByRole("button", { name: "app" }));
+  // Clear the filter: the project must return to its pre-filter collapsed state,
+  // so the service is hidden again. (Fails if the header click mutated collapsed.)
+  await userEvent.clear(search);
+  await waitFor(() => expect(screen.queryByText("web")).not.toBeInTheDocument());
+});
+
+test("a project that disappears and reappears re-collapses at the default", async () => {
+  // A second project ("keep") is always present so the dashboard never empties
+  // and the global "Check all services" button stays available to drive
+  // refetches. "app" is absent from the SECOND fetch (deleted) and back on the
+  // third. Without pruning `seenProjects`, the reappeared "app" would stay in
+  // the seen set and resurface EXPANDED (the user had expanded it); the prune
+  // makes it fresh again so it re-collapses at the default.
+  let fetchCount = 0;
+  const app = {
+    id: 1, name: "app", kind: "compose", working_dir: "/srv",
+    auto_update_enabled: false, auto_named: false,
+    services: [{
+      id: 10, name: "web", image_ref: "nginx:1.27", current_digest: "sha256:a",
+      state: "running", pinned: false, healthcheck: false, auto_update_enabled: null,
+    }],
+  };
+  const keep = {
+    id: 2, name: "keep", kind: "compose", working_dir: "/srv/keep",
+    auto_update_enabled: false, auto_named: false,
+    services: [{
+      id: 20, name: "keepsvc", image_ref: "redis:7", current_digest: "sha256:d",
+      state: "running", pinned: false, healthcheck: false, auto_update_enabled: null,
+    }],
+  };
+  server.use(
+    http.get("/api/projects", () => {
+      fetchCount += 1;
+      if (fetchCount === 2) return HttpResponse.json([keep]); // "app" deleted
+      return HttpResponse.json([app, keep]);                  // present otherwise
+    }),
+    http.get("/api/updates", () => HttpResponse.json([])),
+    http.post("/api/scan", () => HttpResponse.json({ status: "checked" })),
+  );
+  renderDashboardWithRouter();
+  await expandProject("app");
+  await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
+  // Refetch #2: "app" disappears from the payload (no filter active, so the
+  // seed effect prunes its id from `seenProjects`).
+  await userEvent.click(screen.getByRole("button", { name: /^check all services$/i }));
+  await waitFor(() => expect(screen.queryByRole("button", { name: "app" })).not.toBeInTheDocument());
+  // Refetch #3: "app" comes back. It must return COLLAPSED, not expanded.
+  await userEvent.click(screen.getByRole("button", { name: /^check all services$/i }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "app" })).toBeInTheDocument());
+  expect(screen.queryByText("web")).not.toBeInTheDocument();
 });
