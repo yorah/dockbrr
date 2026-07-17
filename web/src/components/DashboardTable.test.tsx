@@ -476,6 +476,61 @@ test("changelog column falls back to the last applied update once nothing is pen
   expect(screen.queryByRole("button", { name: /^apply$/i })).not.toBeInTheDocument();
 });
 
+test("changelog eye reads 'Current version' for an up-to-date service's current row", async () => {
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 1,
+          name: "app",
+          kind: "compose",
+          working_dir: "/srv",
+          auto_update_enabled: false,
+          services: [
+            {
+              id: 10,
+              name: "web",
+              image_ref: "ghcr.io/acme/web:1.2.3",
+              current_digest: "sha256:cur",
+              state: "running",
+              pinned: false,
+              healthcheck: false,
+              auto_update_enabled: null,
+            },
+          ],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () => HttpResponse.json([])),
+    http.get("/api/updates/last-applied", () =>
+      HttpResponse.json([
+        {
+          id: 77,
+          service_id: 10,
+          from_digest: "sha256:cur",
+          to_digest: "sha256:cur",
+          from_version: "1.2.3",
+          to_version: "1.2.3",
+          tag: "1.2.3",
+          severity: "current",
+          changelog_url: "https://github.com/acme/web/releases/tag/1.2.3",
+          changelog_text: "## 1.2.3\n\n- shipped",
+          status: "current",
+          detected_at: "2026-07-01T00:00:00Z",
+        },
+      ]),
+    ),
+  );
+  renderDashboardWithRouter();
+
+  const button = await screen.findByRole("button", {
+    name: /current version changelog for web/i,
+  });
+  await userEvent.click(button);
+  await waitFor(() => expect(screen.getByText("1.2.3")).toBeInTheDocument());
+  expect(screen.queryByRole("button", { name: /^apply$/i })).not.toBeInTheDocument();
+});
+
 test("changelog column falls back to the last applied changelog when the PENDING update has no changelog of its own", async () => {
   // Reproduces the real bug: a service was applied at 1.28 with a cached
   // changelog, then drifted to 1.29 but the new update's changelog could not
