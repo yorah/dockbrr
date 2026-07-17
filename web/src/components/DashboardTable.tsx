@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   flexRender,
@@ -85,6 +85,10 @@ export interface DashboardTableProps {
   groupLoose?: boolean;
   /** Initial + synced open-state for the Loose group (dashboard passes filters-active). */
   looseDefaultOpen?: boolean;
+  /** When true (dashboard only), every top-level project loads collapsed. */
+  defaultCollapsed?: boolean;
+  /** When true, an active filter reveals services regardless of collapse state. */
+  filtersActive?: boolean;
 }
 
 // Resolve to whichever candidate the eye opens, preferring the pending update.
@@ -536,8 +540,13 @@ export function DashboardTable({
   onLogs = () => {},
   groupLoose = false,
   looseDefaultOpen = false,
+  defaultCollapsed = false,
+  filtersActive = false,
 }: DashboardTableProps) {
   const [collapsed, setCollapsed] = useState<Set<number>>(() => new Set());
+  // Ids we've already applied the collapse default to. Lets a user-expanded
+  // project survive a rows refetch: once seen, the effect never re-collapses it.
+  const seenProjects = useRef<Set<number>>(new Set());
   const [composeProject, setComposeProject] = useState<Project | null>(null);
   const [looseOpen, setLooseOpen] = useState(looseDefaultOpen);
   const removeContainer = useRemoveContainer();
@@ -573,6 +582,28 @@ export function DashboardTable({
       return next.size === prev.size ? prev : next;
     });
   }, [removableIds]);
+
+  // Collapse-by-default: seed each newly-seen TOP-LEVEL project into `collapsed`
+  // exactly once. Auto-named (Loose) projects are skipped — their visibility is
+  // gated by looseOpen, not collapsed, so seeding them would keep their services
+  // hidden even after the Loose group is opened.
+  useEffect(() => {
+    if (!defaultCollapsed) return;
+    const fresh: number[] = [];
+    for (const r of rows) {
+      if (r.kind !== "project") continue;
+      if (r.project.auto_named) continue;
+      if (seenProjects.current.has(r.project.id)) continue;
+      fresh.push(r.project.id);
+    }
+    if (fresh.length === 0) return;
+    for (const id of fresh) seenProjects.current.add(id);
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      for (const id of fresh) next.add(id);
+      return next;
+    });
+  }, [rows, defaultCollapsed]);
 
   const handleRemove = (serviceId: number) => {
     setRemovingIds((prev) => new Set(prev).add(serviceId));
@@ -611,7 +642,7 @@ export function DashboardTable({
   }
 
   const visibleRows = useMemo(() => {
-    const shown = (r: Row) => r.kind !== "service" || !collapsed.has(r.project.id);
+    const shown = (r: Row) => r.kind !== "service" || filtersActive || !collapsed.has(r.project.id);
     if (!groupLoose) {
       return rows.filter(shown);
     }
@@ -624,7 +655,7 @@ export function DashboardTable({
       if (looseOpen) out.push(...loose.filter(shown));
     }
     return out;
-  }, [rows, collapsed, groupLoose, looseOpen]);
+  }, [rows, collapsed, filtersActive, groupLoose, looseOpen]);
 
   const columns = useMemo(
     () => buildColumns(onApplied, onChangelog, onLogs, removingIds, handleRemove),
@@ -722,7 +753,7 @@ export function DashboardTable({
             }
 
             if (original.kind === "project") {
-              const expanded = !collapsed.has(original.project.id);
+              const expanded = filtersActive || !collapsed.has(original.project.id);
               return (
                 <TableRow
                   key={row.id}
