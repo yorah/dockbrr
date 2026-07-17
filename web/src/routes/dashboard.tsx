@@ -106,7 +106,9 @@ export function DashboardRoute() {
         <DashboardTable
           rows={rows}
           groupLoose
+          defaultCollapsed
           looseDefaultOpen={looseDefaultOpen}
+          filtersActive={looseDefaultOpen}
           updatesByService={updatesByService}
           onApplied={setAppliedJobId}
           onReview={(update, service, project) => {
