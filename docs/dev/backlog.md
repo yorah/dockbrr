@@ -213,3 +213,9 @@ Known-accepted:
 Non-blocking Minors deferred from the whole-branch review (behavior correct, gaps are test-only):
 - [x] [crl-M1] FIXED: changelog/github_test now covers both a positive 429+remaining:0 case (TestGitHubRateLimitedYieldsErrRateLimited table over 403/429) and an explicit "403 header-absent" negative case (403-header-absent subtest).
 - [x] [crl-M2] FIXED: scan_test TestCheckServiceClearsRateLimitedStatusOnSuccess drives the full round-trip through CheckService (seed rate_limited -> resolve returns content -> changelog_status back to '' + content persisted).
+
+## Current-version changelog for up-to-date services (2026-07-17, feat/current-version-changelog)
+
+Non-blocking Minors deferred from the whole-branch review (behavior correct, gaps are test-only):
+- [ ] [cvc-M1] updates_test.go TestListLastAppliedPrefersAppliedOverCurrent: the applied row is Upserted second, so it also has the higher id and later detected_at; the test can't isolate the (status='current') tie-break from an id/timestamp win. The tie-break is structurally guaranteed by the query's primary sort key ORDER BY (u2.status='current') (updates.go). Add a reversed-insert case (applied first, current second with newer ts/id) to lock the "regardless of timestamp" property.
+- [ ] [cvc-M2] scan_test.go current-row creation test sets ImageVersion == ResolvedVersion == "1.2.3", so the ResolvedVersion-over-ImageVersion precedence in ensureCurrentChangelog isn't exercised (verified by code read only). Give them distinct values to lock the priority.
