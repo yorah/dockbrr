@@ -20,14 +20,17 @@ Underlying commands (what the tasks run):
 CGO_ENABLED=0 go build ./...   # must stay CGO-free (static binary invariant)
 go vet ./... && go test ./...
 cd web && npm test             # vitest
-cd web && ./node_modules/.bin/tsc -b --noEmit && npm run build   # dist/ embedded by internal/httpapi/spa.go
+cd web && npm run typecheck && npm run build   # dist/ embedded by internal/httpapi/spa.go
 ```
 
 Go 1.26 via mise. `rtk` proxy wraps common CLI commands (hook rewrites automatically).
 
-⚠️ TS typecheck: call `./node_modules/.bin/tsc` directly (as above), NOT `npx tsc`, the
-rtk hook proxies `npx tsc` and reports a false "No errors found" even when real type
-errors exist. `npm run build` also fails on type errors, so it's a reliable backstop.
+⚠️ TS typecheck: use `npm run typecheck` (as above), NOT `npx tsc`, the rtk hook proxies
+`npx tsc` and reports a false "No errors found" even when real type errors exist.
+`npm run typecheck` invokes the TS 7 compiler (typescript-native) by explicit path;
+`node_modules/.bin/tsc` is ambiguous since two TS versions are aliased in devDependencies
+(classic TS 6 for typescript-eslint, real TS 7 for everything else). `npm run build` also
+fails on type errors, so it's a reliable backstop.
 
 ## Architecture (internal/)
 

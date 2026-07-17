@@ -28,7 +28,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci
       - name: Typecheck
-        run: ./node_modules/.bin/tsc -b --noEmit
+        run: node ./node_modules/typescript-native/bin/tsc -b --noEmit
       - name: Lint
         run: npm run lint
       - name: Test
