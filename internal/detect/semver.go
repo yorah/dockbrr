@@ -3,6 +3,7 @@
 package detect
 
 import (
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -34,28 +35,52 @@ func Severity(from, to string) string {
 }
 
 // NewerSemverTag returns the highest semver tag in tags that is strictly newer
-// than current, preserving the tag's original spelling (v-prefix kept).
-// Pre-release tags (1.2.3-rc1) are excluded: dockbrr only auto-suggests stable
-// releases. Returns ok=false when current is not semver or nothing is newer.
+// than current, preserving the tag's original spelling (v-prefix kept). Only
+// tags in the SAME stream as current are considered: a stream is the tag's
+// numeric core plus its surrounding "flavor" (leading "v" and any suffix such
+// as "-alpine"). Comparing only within a stream keeps an image's app-version
+// tags from being "upgraded" to an unrelated tag that a registry happens to
+// co-host and that merely sorts higher, e.g. some images ship legacy Ubuntu
+// base-image tags (18.04.1, 20.04.1) alongside application tags like
+// 1.2.3-alpine. A differing flavor also excludes true
+// pre-releases (1.2.3-rc1) from a plain-core current, so stable pins keep only
+// auto-suggesting stable releases. Returns ok=false when current is not semver
+// or nothing newer shares its stream.
 func NewerSemverTag(current string, tags []string) (string, bool) {
-	cur, ok := parseCore(current)
+	curCore, curFlavor, ok := tagStream(current)
 	if !ok {
 		return "", false
 	}
-	best, bestCore := "", cur
+	best, bestCore := "", curCore
 	for _, t := range tags {
-		if strings.ContainsAny(t, "-+") {
-			continue // pre-release / build-metadata tags are never auto-suggested
-		}
-		c, ok := parseCore(t)
-		if !ok {
-			continue
+		c, flavor, ok := tagStream(t)
+		if !ok || flavor != curFlavor {
+			continue // unparseable, or a different version stream
 		}
 		if coreLess(bestCore, c) {
 			best, bestCore = t, c
 		}
 	}
 	return best, best != ""
+}
+
+// streamRe splits a tag into a leading "v", its numeric core (1-3 dot-separated
+// integer components), and everything after it.
+var streamRe = regexp.MustCompile(`^(v?)(\d+(?:\.\d+){0,2})(.*)$`)
+
+// tagStream splits tag into its numeric core and its "flavor" (the leading "v"
+// plus any trailing suffix). Two tags belong to the same version stream iff
+// their flavors are identical. ok is false when tag has no leading numeric core.
+func tagStream(tag string) (core [3]int, flavor string, ok bool) {
+	m := streamRe.FindStringSubmatch(strings.TrimSpace(tag))
+	if m == nil {
+		return core, "", false
+	}
+	c, ok := parseCore(m[2])
+	if !ok {
+		return core, "", false
+	}
+	return c, m[1] + m[3], true
 }
 
 // semverTagsDesc returns the stable, fully-specified semver tags (X.Y.Z, with an

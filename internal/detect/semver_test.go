@@ -43,6 +43,14 @@ func TestNewerSemverTag(t *testing.T) {
 		{"1.2.3", []string{"1.2.3", "1.2.2"}, "", false},           // nothing newer
 		{"latest", []string{"1.0.0"}, "", false},                   // moving tag: not semver-tracked
 		{"1.2.3", []string{"2.0.0-beta1"}, "", false},              // pre-releases excluded from auto-suggest
+		// Stream awareness: a flavored app-version tag (a "-alpine" build) must
+		// only be compared against tags sharing the same flavor. Co-hosted
+		// base-image tags (20.04.1, 18.04.1) sort higher numerically but belong
+		// to a different stream and must be ignored.
+		{"1.2.3-alpine", []string{"1.2.4-alpine", "20.04.1", "18.04.1", "1.2.3-alpine"}, "1.2.4-alpine", true},
+		{"1.2.3-alpine", []string{"20.04.1", "18.04.1"}, "", false}, // only foreign-stream tags -> nothing newer
+		{"1.2.3-alpine", []string{"1.3.0-glibc"}, "", false},        // different build flavor -> different stream
+		{"20.04.1", []string{"20.04.1", "1.2.3-alpine"}, "", false}, // bare current never matches flavored tags
 	} {
 		got, ok := detect.NewerSemverTag(tc.current, tc.tags)
 		if got != tc.want || ok != tc.ok {
