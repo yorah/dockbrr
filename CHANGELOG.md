@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1](https://github.com/yorah/dockbrr/compare/v0.4.0...v0.4.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **detect:** scope semver update scan to the same tag stream ([#30](https://github.com/yorah/dockbrr/issues/30)) ([98eaa96](https://github.com/yorah/dockbrr/commit/98eaa96108f0af0bf619560a4e2b23c62c4bccd9))
+* **web:** grey the reverse-resolved Current-image version again ([#29](https://github.com/yorah/dockbrr/issues/29)) ([09c8b9c](https://github.com/yorah/dockbrr/commit/09c8b9c48fa67e4acc39d9f3d2e6cf1f33ea38b5))
+
 ## [0.4.0](https://github.com/yorah/dockbrr/compare/v0.3.1...v0.4.0) (2026-07-17)
 
 
