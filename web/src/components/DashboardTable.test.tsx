@@ -522,6 +522,7 @@ test("changelog eye reads 'Current version' for an up-to-date service's current 
     ),
   );
   renderDashboardWithRouter();
+  await expandProject("app");
 
   const button = await screen.findByRole("button", {
     name: /current version changelog for web/i,
