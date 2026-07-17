@@ -219,3 +219,23 @@ Non-blocking Minors deferred from the whole-branch review (behavior correct, gap
 Non-blocking Minors deferred from the whole-branch review (behavior correct, gaps are test-only):
 - [x] [cvc-M1] FIXED: added TestListLastAppliedTieBreakIgnoresIDAndTimestamp (updates_test.go) inserting applied first, current second (higher id, equal-or-later ts) and asserting applied still wins, isolating the ORDER BY (status='current') key from the id/timestamp fallback.
 - [x] [cvc-M2] FIXED: scan create-row test now sets ImageVersion="0.0.0-label" distinct from ResolvedVersion="1.2.3" and asserts the row version is "1.2.3", proving ResolvedVersion wins the precedence.
+
+## Self-update notification (2026-07-17, branch `feat/self-update-notification`, all-tasks review clean)
+
+Two review minors were addressed in-branch (commit 50d2f32): the silently-swallowed GitHub
+failure now logs at debug in both the handler and the startup-warm path, and `readCache`
+gained a `url==""` guard against a partial 3-key cache write. Remaining are test-only gaps
+(behavior correct) plus one accepted design point.
+
+- [ ] [su-M1] No test exercises the `tokenFn`/`Authorization: Bearer` header path in the checker
+      (`internal/selfupdate/checker.go`); token wiring is currently unverified.
+- [ ] [su-M2] `writeCache` sets 3 settings keys non-atomically; a `Set` error mid-write leaves a
+      partial cache. Low risk (in-proc SQLite) and the `readCache` `url==""` guard now masks the
+      common partial, but a genuine atomic write / single-row encoding would be cleaner.
+- [ ] [su-M3] No test covers context cancellation propagating into the outbound GitHub HTTP request.
+- [ ] [su-M4] The nil-dep handler test asserts only `update_available:false`, not that `checked_at`
+      is absent from the response.
+
+Known-accepted:
+- [su-A1] `UpdateNotice` reads the per-version dismissal from localStorage once at mount, so a
+  dismissal doesn't re-sync across browser tabs. Acceptable for a single-user local app.
