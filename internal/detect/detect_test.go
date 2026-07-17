@@ -561,6 +561,40 @@ func TestDetectFloatingTagNamesVersionsViaReverseLookup(t *testing.T) {
 	}
 }
 
+// TestDetectUpToDateFloatingTagResolvesCurrentVersion covers the homepage case:
+// a floating tag whose running digest already equals the remote latest (no
+// update pending) still gets its running version named and cached on the image
+// row, so the dashboard can show "v1.13.2" instead of just ":latest".
+func TestDetectUpToDateFloatingTagResolvesCurrentVersion(t *testing.T) {
+	db := newDB(t)
+	svc := seedSvc(t, db, "ghcr.io/gethomepage/homepage:latest", "sha256:v1132", false)
+	r := fakeResolver{
+		// latest resolves to the SAME digest the container runs (up to date),
+		// with no version label (homepage ships none).
+		img:  registry.RemoteImage{Digest: "sha256:v1132", PlatformDigest: "sha256:v1132"},
+		tags: []string{"v1.13.0", "v1.13.1", "v1.13.2", "latest"},
+		head: map[string]string{
+			"ghcr.io/gethomepage/homepage:v1.13.0": "sha256:v1130",
+			"ghcr.io/gethomepage/homepage:v1.13.1": "sha256:v1131",
+			"ghcr.io/gethomepage/homepage:v1.13.2": "sha256:v1132",
+		},
+	}
+	u, err := newDetector(db, r).Detect(context.Background(), svc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u != nil {
+		t.Fatalf("up-to-date service must yield no update, got %+v", u)
+	}
+	img, err := store.NewImages(db).GetByDigest("ghcr.io/gethomepage/homepage", "sha256:v1132")
+	if err != nil {
+		t.Fatalf("image row: %v", err)
+	}
+	if img.ResolvedVersion != "v1.13.2" {
+		t.Fatalf("resolved_version = %q, want v1.13.2", img.ResolvedVersion)
+	}
+}
+
 // TestDetectFloatingTagNamesFromViaRunningImageLabel proves a floating tag names
 // its "from" version from the running image's own OCI version label (captured at
 // discovery), without any reverse HEAD scan. This is the linuxserver case: the

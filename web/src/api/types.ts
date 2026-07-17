@@ -10,6 +10,9 @@ export interface Service {
   auto_update_enabled: boolean | null;
   check_status: string;
   last_checked: string;
+  /** Reverse-resolved running release for a floating tag with no pending
+   * update; "" or absent when unknown. Always emitted by the API. */
+  current_version?: string;
 }
 export interface Project {
   id: number;

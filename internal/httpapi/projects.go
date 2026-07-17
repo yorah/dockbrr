@@ -26,6 +26,9 @@ type serviceDTO struct {
 	AutoUpdateEnabled *bool  `json:"auto_update_enabled"`
 	CheckStatus       string `json:"check_status"`
 	LastChecked       string `json:"last_checked"`
+	// CurrentVersion is the reverse-resolved release of the running image for a
+	// floating tag (latest) with no pending update; "" when unknown.
+	CurrentVersion string `json:"current_version"`
 }
 
 type projectDTO struct {
@@ -42,6 +45,7 @@ type projectDTO struct {
 func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 	projects := store.NewProjects(s.db)
 	services := store.NewServices(s.db)
+	images := store.NewImages(s.db)
 
 	prs, err := projects.List()
 	if err != nil {
@@ -67,14 +71,19 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 		}
 		sdtos := make([]serviceDTO, 0, len(svcs))
 		for _, sv := range svcs {
-			var checkStatus, lastChecked string
+			var checkStatus, lastChecked, currentVersion string
+			repo, tag := detect.SplitRef(sv.ImageRef)
 			if remote != nil {
-				repo, tag := detect.SplitRef(sv.ImageRef)
 				if st, ok := remote[[2]string{repo, tag}]; ok {
 					checkStatus = st.Status
 					if st.ResolvedAt != nil {
 						lastChecked = st.ResolvedAt.UTC().Format(time.RFC3339)
 					}
+				}
+			}
+			if sv.CurrentDigest != "" {
+				if img, err := images.GetByDigest(repo, sv.CurrentDigest); err == nil {
+					currentVersion = img.ResolvedVersion
 				}
 			}
 			sdtos = append(sdtos, serviceDTO{
@@ -89,6 +98,7 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 				AutoUpdateEnabled: sv.AutoUpdateEnabled,
 				CheckStatus:       checkStatus,
 				LastChecked:       lastChecked,
+				CurrentVersion:    currentVersion,
 			})
 		}
 		out = append(out, projectDTO{

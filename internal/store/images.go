@@ -26,6 +26,10 @@ type Image struct {
 	Labels    string // raw JSON object
 	SourceURL string
 	Revision  string
+	// ResolvedVersion is the release version reverse-looked from this image's
+	// digest for a floating tag (latest) that carries no semver. Empty until
+	// detection resolves it; owned by SetResolvedVersion, never by Upsert.
+	ResolvedVersion string
 }
 
 // Images is the repository for the images table.
@@ -71,12 +75,13 @@ func (i *Images) GetByDigest(repo, digest string) (Image, error) {
 	)
 	err := i.db.QueryRow(
 		`SELECT id, repo, tag, digest, media_type, os, arch, size, built_at,
-		        labels, source_url, revision
+		        labels, source_url, revision, resolved_version
 		   FROM images WHERE repo=? AND digest=?`,
 		repo, digest,
 	).Scan(
 		&img.ID, &img.Repo, &img.Tag, &img.Digest, &img.MediaType, &img.OS,
 		&img.Arch, &img.Size, &builtAt, &img.Labels, &img.SourceURL, &img.Revision,
+		&img.ResolvedVersion,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Image{}, ErrImageNotFound
@@ -89,6 +94,18 @@ func (i *Images) GetByDigest(repo, digest string) (Image, error) {
 		img.BuiltAt = &t
 	}
 	return img, nil
+}
+
+// SetResolvedVersion records the reverse-looked release version for (repo,
+// digest). A no-op when no image row matches (best effort; the row is written
+// by Upsert first). Owns the resolved_version column so Upsert can leave it
+// untouched and never clobber a resolved value on a metadata refresh.
+func (i *Images) SetResolvedVersion(repo, digest, version string) error {
+	_, err := i.db.Exec(
+		`UPDATE images SET resolved_version=? WHERE repo=? AND digest=?`,
+		version, repo, digest,
+	)
+	return err
 }
 
 // RemoteState caches the last remote-resolution outcome for a (repo, tag).

@@ -410,10 +410,12 @@ function buildColumns(
         const r = row.original;
         if (r.kind !== "service") return null;
         // A floating tag (latest, stable) hides the actual running version. When
-        // detection reverse-resolved it (update.from_version), surface it here so
-        // the list matches the changelog's "v1.13.0 → v1.14.1", instead of just
-        // showing ":latest". Skipped when the ref tag already IS the version.
-        const from = r.update?.from_version;
+        // detection reverse-resolved it, surface it here so the list matches the
+        // changelog's "v1.13.0 → v1.14.1", instead of just showing ":latest".
+        // Prefer the update's from_version (drift pending); fall back to the
+        // service's resolved current version (up to date, nothing pending).
+        // Skipped when the ref tag already IS the version.
+        const from = r.update?.from_version || r.service.current_version;
         const showFrom = !!from && !r.service.image_ref.endsWith(`:${from}`);
         return (
           <div className="flex flex-col gap-0.5">
