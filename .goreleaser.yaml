@@ -61,6 +61,10 @@ dockers_v2:
       - ghcr.io/yorah/dockbrr
     tags:
       - "{{ .Version }}"
+      # Rolling lines so users can pin a major (dockbrr:1) or minor (dockbrr:1.2)
+      # and still receive patch updates. Pre-1.0 these render as 0 / 0.x.
+      - "{{ .Major }}"
+      - "{{ .Major }}.{{ .Minor }}"
       - latest
     platforms:
       - linux/amd64
