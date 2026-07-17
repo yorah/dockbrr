@@ -96,16 +96,17 @@ type Deps struct {
 }
 
 type Server struct {
-	cfg  config.Config
-	db   *store.DB
-	deps Deps
-	mux  *chi.Mux
+	cfg     config.Config
+	db      *store.DB
+	deps    Deps
+	mux     *chi.Mux
+	limiter *loginLimiter
 }
 
 // New builds the API server. deps carries the wired repos + engine/checker;
 // pass Deps{} in tests that exercise only /healthz or /api/projects.
 func New(cfg config.Config, db *store.DB, deps Deps) *Server {
-	s := &Server{cfg: cfg, db: db, deps: deps, mux: chi.NewRouter()}
+	s := &Server{cfg: cfg, db: db, deps: deps, mux: chi.NewRouter(), limiter: newLoginLimiter(time.Now)}
 	s.routes()
 	return s
 }

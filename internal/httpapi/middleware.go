@@ -20,11 +20,12 @@ const (
 )
 
 var (
-	errUnauthorized   = errors.New("unauthorized")
-	errForbidden      = errors.New("forbidden")
-	errSetupDone      = errors.New("setup already completed")
-	errBadCredentials = errors.New("invalid username or password")
-	errInternal       = errors.New("internal server error")
+	errUnauthorized    = errors.New("unauthorized")
+	errForbidden       = errors.New("forbidden")
+	errSetupDone       = errors.New("setup already completed")
+	errBadCredentials  = errors.New("invalid username or password")
+	errInternal        = errors.New("internal server error")
+	errTooManyAttempts = errors.New("too many failed login attempts; try again later")
 )
 
 type ctxKey int
