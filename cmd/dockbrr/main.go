@@ -28,6 +28,7 @@ import (
 	"dockbrr/internal/registry"
 	"dockbrr/internal/scan"
 	"dockbrr/internal/secret"
+	"dockbrr/internal/selfupdate"
 	"dockbrr/internal/store"
 	"dockbrr/internal/version"
 )
@@ -173,6 +174,9 @@ func run(args []string, getenv func(string) string) error {
 		}
 		return v
 	}
+	// Self-update check: latest stable dockbrr release from GitHub, cached 6h.
+	// Reuses tokenFn (the changelog GitHub token) to lift the anonymous rate limit.
+	selfUpdateChecker := selfupdate.NewChecker(httpClient, settings, version.Version, "https://api.github.com", 6*time.Hour, tokenFn)
 	clResolver := changelog.NewResolver([]changelog.Source{
 		changelog.NewGitHubSource(httpClient, "https://api.github.com", "https://raw.githubusercontent.com", tokenFn, changelogRepos, 24*time.Hour),
 		changelog.NewRegistrySource(httpClient, "https://hub.docker.com"),
@@ -318,7 +322,8 @@ func run(args []string, getenv func(string) string) error {
 		Settings: settings, Services: services, Projects: projects, Updates: updates,
 		Events: events, Jobs: jobs, JobLogs: jobLogs, RemoteStates: states,
 		Engine: engine, Checker: scanner, HostID: 1, Bus: bus,
-		StartedAt: time.Now(),
+		SelfUpdate: selfUpdateChecker,
+		StartedAt:  time.Now(),
 		NextScan: func() time.Time {
 			sec := nextScan.Load()
 			if sec == 0 {
@@ -363,6 +368,9 @@ func run(args []string, getenv func(string) string) error {
 			errCh <- err
 		}
 	}()
+
+	// Warm the self-update cache off the request path (best-effort).
+	go func() { _, _ = selfUpdateChecker.Check(ctx) }()
 
 	// closeDocker runs only after wg.Wait: the supervisor owns dc until then.
 	closeDocker := func() {
@@ -655,4 +663,3 @@ func settingDuration(s *store.Settings, key string, def time.Duration) time.Dura
 	}
 	return time.Duration(secs) * time.Second
 }
-

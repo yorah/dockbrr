@@ -6,6 +6,7 @@ export const keys = {
   // Nested under the ["updates"] prefix on purpose: every existing
   // invalidateQueries({ queryKey: keys.updates }) call then refreshes this too.
   lastApplied: ["updates", "last-applied"] as const,
+  selfUpdate: ["updates", "self"] as const,
   settings: ["settings"] as const,
   registries: ["registries"] as const,
   me: ["me"] as const,

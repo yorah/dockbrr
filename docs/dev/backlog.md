@@ -219,3 +219,25 @@ Non-blocking Minors deferred from the whole-branch review (behavior correct, gap
 Non-blocking Minors deferred from the whole-branch review (behavior correct, gaps are test-only):
 - [x] [cvc-M1] FIXED: added TestListLastAppliedTieBreakIgnoresIDAndTimestamp (updates_test.go) inserting applied first, current second (higher id, equal-or-later ts) and asserting applied still wins, isolating the ORDER BY (status='current') key from the id/timestamp fallback.
 - [x] [cvc-M2] FIXED: scan create-row test now sets ImageVersion="0.0.0-label" distinct from ResolvedVersion="1.2.3" and asserts the row version is "1.2.3", proving ResolvedVersion wins the precedence.
+
+## Self-update notification (2026-07-17, branch `feat/self-update-notification`, all-tasks review clean)
+
+All four deferred minors were subsequently fixed in-branch (M1/M3/M4 test-only, M2 a code
+change to single-row atomic cache). Two earlier minors were addressed in commit 50d2f32:
+the silently-swallowed GitHub failure now logs at debug in both the handler and the
+startup-warm path. One accepted design point remains.
+
+- [x] [su-M1] FIXED: `TestFetchSendsBearerToken` (table over with-token/empty-token) asserts the
+      outbound request carries `Authorization: Bearer <tok>` when a token is present and no header
+      when the token is empty.
+- [x] [su-M2] FIXED: cache is now a single JSON row under `selfupdate_cache` (`cacheEntry`), so
+      `writeCache` is one atomic `Set` with no partial-key window; `readCache` decodes and validates
+      it. Dropped the 3 old keys and the `url==""` guard they needed.
+- [x] [su-M3] FIXED: `TestCheckCancelledContext` cancels the context before `Check`, asserting the
+      call errors, claims no update, and never reaches the server.
+- [x] [su-M4] FIXED: `TestSelfUpdateEndpointNilDep` now also asserts `checked_at` is absent from the
+      nil-dep response.
+
+Known-accepted:
+- [su-A1] `UpdateNotice` reads the per-version dismissal from localStorage once at mount, so a
+  dismissal doesn't re-sync across browser tabs. Acceptable for a single-user local app.

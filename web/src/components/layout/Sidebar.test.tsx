@@ -92,4 +92,20 @@ describe("Sidebar", () => {
 
     expect(await screen.findByRole("link", { name: /^adoring_saha,/ })).toBeInTheDocument();
   });
+
+  test("shows the update notice above logout when an update is available", async () => {
+    localStorage.clear();
+    server.use(http.get("/api/updates/self", () => HttpResponse.json({
+      current: "0.4.2", latest: "v0.5.0",
+      html_url: "https://github.com/yorah/dockbrr/releases/tag/v0.5.0",
+      update_available: true,
+    })));
+    renderApp("/");
+
+    expect(await screen.findByText(/update available/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /view release/i })).toHaveAttribute(
+      "href",
+      "https://github.com/yorah/dockbrr/releases/tag/v0.5.0",
+    );
+  });
 });

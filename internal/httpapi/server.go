@@ -12,6 +12,7 @@ import (
 	"dockbrr/internal/config"
 	"dockbrr/internal/job"
 	"dockbrr/internal/secret"
+	"dockbrr/internal/selfupdate"
 	"dockbrr/internal/store"
 	"dockbrr/internal/version"
 )
@@ -89,6 +90,9 @@ type Deps struct {
 	// Optional: nil (tests, Docker never came up) degrades to no version, not
 	// an error, mirrors the NextScan idiom.
 	DockerVersion func(ctx context.Context) (version, apiVersion string, err error)
+	// SelfUpdate reports whether a newer dockbrr release is available. Optional:
+	// nil (as in tests) degrades /api/updates/self to update_available:false.
+	SelfUpdate *selfupdate.Checker
 }
 
 type Server struct {
@@ -137,6 +141,7 @@ func (s *Server) routes() {
 		r.Get("/api/auth/me", s.handleMe)
 		r.Post("/api/auth/password", s.handleChangePassword)
 		r.Get("/api/status", s.handleStatus)
+		r.Get("/api/updates/self", s.handleSelfUpdate)
 		r.Get("/api/system/info", s.handleSystemInfo)
 		r.Get("/api/projects", s.handleProjects)
 		r.Get("/api/projects/{id}/compose", s.handleProjectCompose)
