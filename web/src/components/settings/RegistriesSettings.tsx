@@ -29,12 +29,14 @@ export function RegistriesSettings() {
   const [githubToken, setGithubToken] = useState("");
 
   return (
-    <div className="max-w-2xl space-y-4">
+    <div className="space-y-4">
       <SettingsCard
         title="Registry credentials"
         description="Credentials dockbrr uses to query private registries."
       >
-        <div className="space-y-6">
+        {/* Cards span the full settings column like every other page; only the
+            inner content is width-capped (same pattern as Logs/Auto-update). */}
+        <div className="max-w-2xl space-y-6">
           <div className="flex items-center gap-1.5">
             <p className="text-sm text-muted-foreground">
               Credentials for private registries.

@@ -47,7 +47,8 @@ export function SettingsLayout() {
           </Link>
         ))}
       </nav>
-      <div className="min-w-0 flex-1">
+      {/* md:pr-8 keeps full-width cards from butting against the viewport edge. */}
+      <div className="min-w-0 flex-1 md:pr-8">
         <Outlet />
       </div>
     </div>
