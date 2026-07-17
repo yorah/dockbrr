@@ -15,10 +15,14 @@ set -eu
 ALLOW="GO-2026-5746 GO-2026-5668 GO-2026-5617 GO-2026-4887 GO-2026-4883 GO-2026-5932"
 
 out=$(mktemp)
-trap 'rm -f "$out"' EXIT
+ids=$(mktemp)
+trap 'rm -f "$out" "$ids"' EXIT
 go run golang.org/x/vuln/cmd/govulncheck@latest -format json ./... > "$out"
 
-found=$(jq -r 'select(.finding != null) | .finding.osv' "$out" | sort -u)
+# jq runs alone (not in a pipeline) so a parse failure fails the gate closed
+# instead of being masked by sort's exit status (POSIX sh has no pipefail).
+jq -r 'select(.finding != null) | .finding.osv' "$out" > "$ids"
+found=$(sort -u "$ids")
 
 new=""
 for id in $found; do
@@ -33,4 +37,4 @@ if [ -n "$new" ]; then
   echo "Details: go run golang.org/x/vuln/cmd/govulncheck@latest ./..." >&2
   exit 1
 fi
-echo "govulncheck: ok (allowlisted, unfixable: $(echo $found | tr '\n' ' '))"
+echo "govulncheck: ok (allowlisted, unfixable: $(echo $found))"
