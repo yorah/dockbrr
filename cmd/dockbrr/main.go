@@ -359,6 +359,12 @@ func run(args []string, getenv func(string) string) error {
 		Addr:        cfg.BindAddr,
 		Handler:     srv.Handler(),
 		BaseContext: func(net.Listener) context.Context { return ctx },
+		// Slowloris guard. No ReadTimeout/WriteTimeout: SSE streams
+		// (/api/events/stream, job logs) are long-lived responses and a
+		// blanket deadline would sever them; per-request cancellation comes
+		// from BaseContext instead.
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       2 * time.Minute,
 	}
 
 	errCh := make(chan error, 1)
