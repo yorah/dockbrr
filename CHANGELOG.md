@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.5.0](https://github.com/yorah/dockbrr/compare/v0.4.2...v0.5.0) (2026-07-17)
+
+
+### Features
+
+* current-version changelog for up-to-date services ([#39](https://github.com/yorah/dockbrr/issues/39)) ([46edee3](https://github.com/yorah/dockbrr/commit/46edee32902f8362e9a8363976a193ca54c32098))
+* self-update notification in sidebar ([#40](https://github.com/yorah/dockbrr/issues/40)) ([ef708c9](https://github.com/yorah/dockbrr/commit/ef708c9eb43c5ba7757effc4a64e1972d2f87e4b))
+* **web:** collapse dashboard projects by default ([#38](https://github.com/yorah/dockbrr/issues/38)) ([0d100e0](https://github.com/yorah/dockbrr/commit/0d100e0dc0749f29bb69731ab9e407ec05e33c68))
+
+
+### Bug Fixes
+
+* **changelog:** keep release notes for build-suffixed tags ([#37](https://github.com/yorah/dockbrr/issues/37)) ([f6aa0da](https://github.com/yorah/dockbrr/commit/f6aa0da115c43b54ac767c85262f68e290b5309c))
+* **detect:** supersede stale open update when service is up to date ([#35](https://github.com/yorah/dockbrr/issues/35)) ([032e8bf](https://github.com/yorah/dockbrr/commit/032e8bf7ad641f3657ef3bf5a0890abca73b098a))
+
 ## [0.4.2](https://github.com/yorah/dockbrr/compare/v0.4.1...v0.4.2) (2026-07-17)
 
 
