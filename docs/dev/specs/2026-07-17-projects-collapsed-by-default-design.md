@@ -11,8 +11,11 @@ only the ones they care about.
 
 - `web/src/components/DashboardTable.tsx` (state + render logic)
 - `web/src/routes/dashboard.tsx` (call site: opt in)
-- `web/src/routes/project.$id.tsx` (call site: pass filter signal)
-- `web/src/components/DashboardTable.test.tsx` (new cases)
+- `web/src/components/DashboardTable.test.tsx` (migrate existing + new cases)
+
+The project detail route (`project.$id.tsx`) needs **no change**: it never opts
+into `defaultCollapsed`, so its single project's services stay visible on load.
+See "Detail route" below.
 
 No Go / API changes. No persistence: collapse state stays client-side
 `useState`, resets on remount. "Load up collapsed" means a new default, not a
@@ -40,11 +43,17 @@ expanded-by-default behavior with no changes.
 
 ## Seed effect
 
-Track a `seenProjects` ref (`useRef<Set<number>>`). On each rows change, for
-every project id in `rows` not already in `seenProjects`:
+Track a `seenProjects` ref (`useRef<Set<number>>`). When `defaultCollapsed`, on
+each rows change, for every **top-level** project row (`kind === "project"` and
+NOT `auto_named`) whose id is not already in `seenProjects`:
 
-- if `defaultCollapsed`, add the id to `collapsed`;
-- mark the id seen (regardless of `defaultCollapsed`).
+- add the id to `collapsed`;
+- mark the id seen.
+
+Auto-named projects (the Loose group) are skipped: their service visibility is
+gated by `looseOpen`, not by `collapsed`, so seeding them would leave their
+services hidden even after the user opens the Loose group. They keep today's
+group-gated behavior.
 
 Consequences:
 
@@ -79,19 +88,40 @@ collapsed.
 - `dashboard.tsx`: pass `defaultCollapsed` and
   `filtersActive={filters.search !== "" || filters.status !== "" || filters.onlyUpdates}`
   (the same expression already computed for `looseDefaultOpen`).
-- `project.$id.tsx`: pass `filtersActive` from its own filter state; do NOT pass
-  `defaultCollapsed`, so services stay visible on load while in-project search
-  still reveals matches.
 
 `looseDefaultOpen` and the Loose-group logic are unchanged.
 
+### Detail route
+
+`project.$id.tsx` is left untouched. It never passes `defaultCollapsed`, so
+`collapsed` stays empty and every service is visible on load; upstream row
+filtering already narrows search results. `filtersActive` would only matter if
+the single project were manually collapsed AND then searched — out of scope
+(YAGNI). The `filtersActive` prop is therefore dashboard-only.
+
 ## Testing
 
-Existing tests render `DashboardTable` without `defaultCollapsed`, so they keep
-passing unchanged. Add cases:
+The dashboard tests in `DashboardTable.test.tsx` render the full dashboard route
+(via the router), which now opts into `defaultCollapsed`. Every test that
+asserts a service row under a **top-level** project must first expand that
+project. Add a helper and apply it to the affected tests:
 
-1. `defaultCollapsed` — all projects render collapsed on load (service rows
-   absent, header rows present).
+```ts
+async function expandProject(name: string) {
+  await userEvent.click(await screen.findByRole("button", { name }));
+}
+```
+
+Loose-group tests (auto-named projects) are unaffected — those services are
+never seeded into `collapsed`.
+
+Rewrite the existing "toggles a project group" test for the new default
+(collapsed on load → expand shows the service → collapse hides it again), and
+add new cases:
+
+1. `defaultCollapsed` — a top-level project renders collapsed on load (its
+   service row absent, its header button present).
 2. A project added on a rows refetch renders collapsed.
-3. `filtersActive` — a service under a collapsed project is visible.
+3. `filtersActive` (an active search) — a service under an otherwise-collapsed
+   project is visible.
 4. A manually-expanded project stays expanded across a rows refetch.
