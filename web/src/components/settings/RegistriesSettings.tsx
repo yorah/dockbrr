@@ -129,7 +129,7 @@ export function RegistriesSettings() {
         <div className="max-w-lg space-y-1">
           <div className="flex items-center gap-1.5">
             <Label htmlFor="github_token">GitHub token</Label>
-            <HelpTooltip text="Personal access token used to fetch changelog and release notes from GitHub at a higher rate limit. Write-only, never displayed." />
+            <HelpTooltip text="Lifts the GitHub changelog rate limit from 60 to 5000 requests/hour (unauthenticated requests are throttled to 60/hour, which hides changelogs). Create one at github.com/settings/tokens as a classic token with no scopes checked (public release notes need none), then paste it here. Write-only, never displayed." />
           </div>
           <Input
             id="github_token"

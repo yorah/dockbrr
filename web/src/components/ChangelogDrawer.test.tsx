@@ -64,3 +64,14 @@ test("labels an available update as Pending update", () => {
   render(<ChangelogDrawer update={{ ...update, status: "available" }} service={service} onClose={() => {}} />);
   expect(screen.getByText(/^Pending update/)).toBeInTheDocument();
 });
+
+test("shows the rate-limit hint for a rate_limited update with no changelog", () => {
+  render(
+    <ChangelogDrawer
+      update={{ ...update, changelog_text: "", changelog_url: "", changelog_status: "rate_limited" }}
+      service={service}
+      onClose={() => {}}
+    />,
+  );
+  expect(screen.getByRole("link", { name: /token in settings/i })).toHaveAttribute("href", "/settings/registries");
+});

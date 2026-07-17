@@ -87,13 +87,15 @@ export interface DashboardTableProps {
   looseDefaultOpen?: boolean;
 }
 
-// Resolve to whichever candidate actually HAS changelog content, preferring the
-// pending update. A pending update can exist with no changelog (non-GitHub image,
-// missing token, rate limit), in which case fall back to the last applied update's
+// Resolve to whichever candidate the eye opens, preferring the pending update.
+// A pending update can lack changelog content (non-GitHub image, missing token,
+// rate limit). When it was rate-limited we still open it, so ChangelogDrawer can
+// show the "add a token" hint; otherwise fall back to the last applied update's
 // cached changelog rather than showing nothing.
 function changelogUpdate(row: Row): Update | undefined {
   if (row.kind !== "service") return undefined;
-  const has = (u?: Update) => !!u && (!!u.changelog_text || !!u.changelog_url);
+  const has = (u?: Update) =>
+    !!u && (!!u.changelog_text || !!u.changelog_url || u.changelog_status === "rate_limited");
   return has(row.update) ? row.update : has(row.lastApplied) ? row.lastApplied : undefined;
 }
 

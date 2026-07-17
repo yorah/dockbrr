@@ -2,6 +2,7 @@ package changelog
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"regexp"
 	"strings"
@@ -37,16 +38,22 @@ func NewResolver(sources []Source) *Resolver {
 }
 
 // Resolve enriches an update with changelog text and/or a link. It returns
-// ("","",nil) when no source hits (the caller marks the update unavailable). A
-// source error is logged and treated as a miss; the chain never aborts.
+// ("","",nil) when no source hits (the caller marks the update unavailable),
+// or ("","",ErrRateLimited) when no source hits and at least one of them
+// failed with a rate limit. A source error is logged and treated as a miss;
+// the chain never aborts.
 func (r *Resolver) Resolve(ctx context.Context, u store.Update, img registry.RemoteImage) (text, url string, err error) {
 	in := buildInput(u, img)
 	// First non-empty (sanitized) pair wins. "Always keep a link" is structural:
 	// each text-bearing source pairs its text with its own URL, and the offline
 	// OCI label source runs last to supply a link when network sources miss.
+	sawRateLimit := false
 	for _, s := range r.sources {
 		res, rerr := s.Resolve(ctx, in)
 		if rerr != nil {
+			if errors.Is(rerr, ErrRateLimited) {
+				sawRateLimit = true
+			}
 			logger.Errorf("changelog: source %s: %v", s.Name(), rerr)
 			continue
 		}
@@ -55,6 +62,9 @@ func (r *Resolver) Resolve(ctx context.Context, u store.Update, img registry.Rem
 		if t != "" || l != "" {
 			return t, l, nil
 		}
+	}
+	if sawRateLimit {
+		return "", "", ErrRateLimited
 	}
 	return "", "", nil
 }

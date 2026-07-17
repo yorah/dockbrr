@@ -11,18 +11,19 @@ import (
 )
 
 type updateDTO struct {
-	ID            int64  `json:"id"`
-	ServiceID     int64  `json:"service_id"`
-	FromDigest    string `json:"from_digest"`
-	ToDigest      string `json:"to_digest"`
-	FromVersion   string `json:"from_version"`
-	ToVersion     string `json:"to_version"`
-	Tag           string `json:"tag"`
-	Severity      string `json:"severity"`
-	ChangelogURL  string `json:"changelog_url"`
-	ChangelogText string `json:"changelog_text"`
-	Status        string `json:"status"`
-	DetectedAt    string `json:"detected_at"`
+	ID              int64  `json:"id"`
+	ServiceID       int64  `json:"service_id"`
+	FromDigest      string `json:"from_digest"`
+	ToDigest        string `json:"to_digest"`
+	FromVersion     string `json:"from_version"`
+	ToVersion       string `json:"to_version"`
+	Tag             string `json:"tag"`
+	Severity        string `json:"severity"`
+	ChangelogURL    string `json:"changelog_url"`
+	ChangelogText   string `json:"changelog_text"`
+	ChangelogStatus string `json:"changelog_status"`
+	Status          string `json:"status"`
+	DetectedAt      string `json:"detected_at"`
 }
 
 func (s *Server) handleListUpdates(w http.ResponseWriter, r *http.Request) {
@@ -37,7 +38,7 @@ func (s *Server) handleListUpdates(w http.ResponseWriter, r *http.Request) {
 			ID: u.ID, ServiceID: u.ServiceID, FromDigest: u.FromDigest, ToDigest: u.ToDigest,
 			FromVersion: u.FromVersion, ToVersion: u.ToVersion,
 			Tag: u.Tag, Severity: u.Severity,
-			ChangelogURL: u.ChangelogURL, ChangelogText: u.ChangelogText,
+			ChangelogURL: u.ChangelogURL, ChangelogText: u.ChangelogText, ChangelogStatus: u.ChangelogStatus,
 			Status: u.Status, DetectedAt: u.DetectedAt.UTC().Format(time.RFC3339),
 		})
 	}
@@ -60,7 +61,7 @@ func (s *Server) handleListLastApplied(w http.ResponseWriter, r *http.Request) {
 			ID: u.ID, ServiceID: u.ServiceID, FromDigest: u.FromDigest, ToDigest: u.ToDigest,
 			FromVersion: u.FromVersion, ToVersion: u.ToVersion,
 			Tag: u.Tag, Severity: u.Severity,
-			ChangelogURL: u.ChangelogURL, ChangelogText: u.ChangelogText,
+			ChangelogURL: u.ChangelogURL, ChangelogText: u.ChangelogText, ChangelogStatus: u.ChangelogStatus,
 			Status: u.Status, DetectedAt: u.DetectedAt.UTC().Format(time.RFC3339),
 		})
 	}

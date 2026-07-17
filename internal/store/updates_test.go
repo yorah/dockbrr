@@ -881,3 +881,54 @@ func TestUpdatesListLastAppliedByServiceLegacyRowFallsBackToDetectedAt(t *testin
 		t.Fatalf("changelog = %q, want # legacy", got[0].ChangelogText)
 	}
 }
+
+func TestUpdatesSetChangelogStatus(t *testing.T) {
+	db := openImagesStore(t)
+	sid := seedService(t, db)
+	u := store.NewUpdates(db)
+	id, err := u.Upsert(store.Update{ServiceID: sid, ToDigest: "sha256:new", Tag: "1.3.0", Status: "available"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := u.SetChangelogStatus(id, "rate_limited"); err != nil {
+		t.Fatal(err)
+	}
+	open, err := u.ListOpen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 1 || open[0].ChangelogStatus != "rate_limited" {
+		t.Fatalf("ChangelogStatus = %q (rows=%d), want rate_limited", func() string {
+			if len(open) == 0 {
+				return ""
+			}
+			return open[0].ChangelogStatus
+		}(), len(open))
+	}
+}
+
+func TestUpdatesSetChangelogClearsStatus(t *testing.T) {
+	db := openImagesStore(t)
+	sid := seedService(t, db)
+	u := store.NewUpdates(db)
+	id, err := u.Upsert(store.Update{ServiceID: sid, ToDigest: "sha256:new", Tag: "1.3.0", Status: "available"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := u.SetChangelogStatus(id, "rate_limited"); err != nil {
+		t.Fatal(err)
+	}
+	if err := u.SetChangelog(id, "https://example.com/notes", "notes body"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := u.Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ChangelogStatus != "" {
+		t.Fatalf("ChangelogStatus = %q, want cleared", got.ChangelogStatus)
+	}
+	if got.ChangelogText != "notes body" || got.ChangelogURL != "https://example.com/notes" {
+		t.Fatalf("changelog content = (%q,%q)", got.ChangelogURL, got.ChangelogText)
+	}
+}

@@ -86,6 +86,32 @@ func TestListUpdatesIncludesChangelogAndVersions(t *testing.T) {
 	}
 }
 
+func TestListUpdatesCarriesChangelogStatus(t *testing.T) {
+	srv, db, tok, csrf := authedServer(t, Deps{})
+	srv.deps = mergeDeps(srv.deps, updatesDeps(db))
+	svcID := seedProjectAndService(t, srv)
+
+	id, err := srv.deps.Updates.Upsert(store.Update{
+		ServiceID: svcID, FromDigest: "sha256:aaa", ToDigest: "sha256:bbb",
+		Tag: "1.3.0", Severity: "minor",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.deps.Updates.SetChangelogStatus(id, "rate_limited"); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := authedGet(t, srv, "/api/updates", tok, csrf)
+	var got []updateDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ChangelogStatus != "rate_limited" {
+		t.Fatalf("dto = %+v, want changelog_status=rate_limited", got)
+	}
+}
+
 func TestListLastAppliedUpdates(t *testing.T) {
 	srv, db, tok, csrf := authedServer(t, Deps{})
 	srv.deps = mergeDeps(srv.deps, updatesDeps(db))

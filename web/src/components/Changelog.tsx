@@ -8,8 +8,21 @@ import type { ComponentPropsWithoutRef } from "react";
 // schema): it drops <script>, on* event-handler attributes, and non-http(s)/mailto URL
 // schemes (e.g. `javascript:`). This is defense-in-depth over the Phase-4 server-side
 // text sanitize, so treat the markdown as hostile input regardless of what the API sends.
-export function Changelog({ markdown }: { markdown: string }) {
-  if (!markdown) return <p className="text-sm opacity-60">No changelog available.</p>;
+export function Changelog({ markdown, status }: { markdown: string; status?: string }) {
+  if (!markdown) {
+    if (status === "rate_limited") {
+      return (
+        <p className="text-sm opacity-60">
+          GitHub rate limit reached. Changelog unavailable until the limit resets.{" "}
+          <a href="/settings/registries" className="text-primary hover:underline">
+            Add a GitHub token in Settings
+          </a>{" "}
+          to raise the limit.
+        </p>
+      );
+    }
+    return <p className="text-sm opacity-60">No changelog available.</p>;
+  }
   return (
     <div className="changelog-body max-w-none text-sm">
       <ReactMarkdown

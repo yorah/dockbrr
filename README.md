@@ -146,6 +146,24 @@ handful of values needed before a database exists:
 | `--log-max-size` | `DOCKBRR_LOG_MAX_SIZE` | `50` | Log file rotation size, in MB |
 | `--log-max-backups` | `DOCKBRR_LOG_MAX_BACKUPS` | `3` | Number of rotated log files to keep |
 
+## GitHub token and changelogs
+
+dockbrr fetches changelogs and release notes from the GitHub Releases API. Without
+a token those requests are anonymous and GitHub throttles them to 60 per hour, so
+on a busy dashboard changelogs start showing "GitHub rate limit reached" instead of
+release notes. Setting a token raises the limit to 5000 per hour.
+
+To create one:
+
+1. Go to https://github.com/settings/tokens and choose "Generate new token (classic)".
+2. Name it (e.g. `dockbrr-changelog`) and pick an expiry.
+3. Leave every scope unchecked. Reading public release notes needs no scopes.
+4. Generate the token and copy it.
+5. In dockbrr, open Settings, Registries, and paste it into "GitHub token", then Save.
+
+The token is stored write-only and is never shown again. It is used only for
+changelog and release-note reads.
+
 ## Development
 
 ```bash

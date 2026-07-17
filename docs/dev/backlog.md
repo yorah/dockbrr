@@ -207,3 +207,9 @@ Known-accepted:
 - The dashboard column and the service-detail history timeline cannot disagree: the timeline
   LEFT JOINs `updates` on `(service_id, to_digest)` per event and is untouched; the dashboard
   shows one row per service. Both are views of the same retained row.
+
+## Changelog rate-limit signal (2026-07-17, merged from feat/changelog-rate-limit-signal)
+
+Non-blocking Minors deferred from the whole-branch review (behavior correct, gaps are test-only):
+- [x] [crl-M1] FIXED: changelog/github_test now covers both a positive 429+remaining:0 case (TestGitHubRateLimitedYieldsErrRateLimited table over 403/429) and an explicit "403 header-absent" negative case (403-header-absent subtest).
+- [x] [crl-M2] FIXED: scan_test TestCheckServiceClearsRateLimitedStatusOnSuccess drives the full round-trip through CheckService (seed rate_limited -> resolve returns content -> changelog_status back to '' + content persisted).
