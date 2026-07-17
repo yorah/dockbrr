@@ -4,12 +4,22 @@ watchexec = "latest"   # dev-only: Go auto-reload in dev-api
 
 # Tasks: run with `mise run <name>` (or `mise <name>`). List: `mise tasks`.
 
+[tasks.web-deps]
+description = "Install web deps (cached on lockfile)"
+dir = "web"
+sources = ["package-lock.json"]
+outputs = ["node_modules/.package-lock.json"]
+run = "npm ci"
+
+# No sources/outputs cache here, deliberately: the build task below restores the
+# tracked placeholder index.html after embedding, so a cache skip would make
+# `go build` silently embed the placeholder (real assets, "UI not built" page).
+# The vite build is cheap; npm ci is the slow part and stays cached above.
 [tasks.build-web]
 description = "Build SPA into internal/httpapi/dist for embedding"
 dir = "web"
-sources = ["src/**/*", "index.html", "package.json", "vite.config.ts"]
-outputs = ["../internal/httpapi/dist/assets/**/*"]
-run = "npm ci && npm run build"
+depends = ["web-deps"]
+run = "npm run build"
 
 [tasks.build]
 description = "Build static dockbrr binary (embeds SPA)"
