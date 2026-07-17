@@ -9,6 +9,18 @@ Format: `- [ ] [source-tag] short description, why deferred / what it needs`
 
 ## Open
 
+### v1 readiness P0+P1 (branch `worktree-v1-readiness`, 2026-07-18, whole-branch review READY TO MERGE)
+
+Deferred Minors from per-task reviews, triaged backlog-grade by the final review. Plus two
+standing follow-ups from the govulncheck work.
+
+- [ ] [v1r T1-M1] `middleware_test.go` TestSecureHeaders asserts 7/9 CSP directives; `script-src`, `connect-src`, `form-action` unasserted, so a regression to `script-src 'unsafe-inline'` would pass. Add the three missing directive assertions.
+- [ ] [v1r T2-M2] `ratelimit.go` `evictLocked` expired-entry branch and oldest-selection ordering untested (cap test inserts all IPs at the same instant). Correct by inspection; add a time-staggered eviction test.
+- [ ] [v1r T2-M3] No handler-level test that a locked-out IP's failure counter stops incrementing (429 path returns before `fail()`); limiter unit tests cover the mechanics. e2e-coverage gap only.
+- [ ] [v1r T7-M1] `web/node_modules/.bin/tsc` symlink dangles onto TS 6.0.3 after install (bin-name collision from the `@typescript/typescript6` aliasing). Inert: nothing invokes `.bin/tsc`; all callers use the explicit `typescript-native` path. Goes away when typescript-eslint supports TS 7 natively.
+- [ ] [v1r vuln-allowlist] `scripts/govulncheck-gate.sh` allowlists 5 daemon-side moby advisories in docker/docker v28.5.2 (no fixed module version exists) + GO-2026-5932 (x/crypto/openpgp, unmaintained-by-design, module-level only). Revisit when the Docker SDK moves to the maintained moby v29 client module; then shrink ALLOW.
+- [ ] [v1r ts-eslint] Drop the `@typescript/typescript6` / `typescript-native` aliasing in web/package.json (and restore plain `typescript`) once typescript-eslint ships TS 7 support.
+
 ### Workload lifecycle Phase 1 (start/stop/restart, remove, logs; branch `feat/loose-container-grouping`, 2026-07-15, whole-phase review GO)
 
 Genuine defers from the whole-phase review. The other 5 review minors were fixed in-branch

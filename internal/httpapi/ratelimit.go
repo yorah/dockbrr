@@ -10,7 +10,7 @@ import (
 // Login brute-force lockout: an IP accumulating failLimit failed logins inside
 // failWindow is rejected with 429 until the window (measured from the FIRST
 // failure) expires. A successful login clears the counter. In-memory only:
-// a restart forgets history, which is fine — the goal is slowing online
+// a restart forgets history, which is fine; the goal is slowing online
 // guessing, not durable audit.
 const (
 	failLimit  = 5
@@ -105,7 +105,7 @@ func (l *loginLimiter) evictLocked(now time.Time) {
 // clientIP extracts the peer address from RemoteAddr. Deliberately NOT
 // X-Forwarded-For: that header is attacker-controlled and would let a client
 // dodge the lockout by rotating it. Behind a reverse proxy every request
-// shares the proxy's address, so the lockout degrades to a global one —
+// shares the proxy's address, so the lockout degrades to a global one,
 // acceptable for a single-user app, and documented in the README.
 func clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
