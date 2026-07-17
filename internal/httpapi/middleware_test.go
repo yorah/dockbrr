@@ -132,6 +132,32 @@ func TestSecureHeaders(t *testing.T) {
 	}
 }
 
+// TestSecureHeadersExactDirectives pins the exact value of the CSP directives
+// a regression would most plausibly weaken. The substring checks above cannot
+// catch "script-src 'self' 'unsafe-inline'" (it still contains
+// "script-src 'self'"); exact directive matching can.
+func TestSecureHeadersExactDirectives(t *testing.T) {
+	srv, _, _, _ := authedServer(t, Deps{})
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	got := map[string]string{}
+	for _, d := range strings.Split(rec.Header().Get("Content-Security-Policy"), "; ") {
+		name, val, _ := strings.Cut(d, " ")
+		got[name] = val
+	}
+	for name, want := range map[string]string{
+		"script-src":  "'self'",
+		"connect-src": "'self'",
+		"form-action": "'self'",
+	} {
+		if got[name] != want {
+			t.Errorf("CSP %s = %q, want %q", name, got[name], want)
+		}
+	}
+}
+
 func TestRequireAuthRejectsExpiredSession(t *testing.T) {
 	s, db := newMiddlewareServer(t)
 	uid, _ := store.NewUsers(db).Create("admin", "h")
