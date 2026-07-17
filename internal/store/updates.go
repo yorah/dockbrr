@@ -153,6 +153,26 @@ func (u *Updates) SupersedePriorOpen(serviceID int64, keepToDigest string) (int6
 	return res.RowsAffected()
 }
 
+// SupersedeAllOpen marks every still-available update for serviceID as
+// superseded. Called when detection finds the service up to date: the running
+// image matches the tracked tag's remote, so no available update is actionable.
+// This closes a row left open when the container reached its target outside
+// RecordDrift/MarkApplied, e.g. dockbrr updating its OWN container (the recreate
+// kills the process before MarkApplied runs) or an image updated outside
+// dockbrr. dismissed and rolled_back rows (both user intent) are left untouched.
+// Returns rows affected.
+func (u *Updates) SupersedeAllOpen(serviceID int64) (int64, error) {
+	res, err := u.db.Exec(
+		`UPDATE updates SET status='superseded'
+		   WHERE service_id=? AND status='available'`,
+		serviceID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // RecordDrift upserts the (service_id, to_digest) update and supersedes the
 // service's other still-open updates, all in ONE transaction, and reports
 // whether the update row was newly created. On an existing row it refreshes the
