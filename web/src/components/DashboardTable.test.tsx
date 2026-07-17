@@ -1265,3 +1265,82 @@ test("a manually-expanded project stays expanded across a refetch", async () => 
   // vacuously because nothing re-triggered it.
   expect(screen.queryByText("postgres")).not.toBeInTheDocument();
 });
+
+test("a header click while a filter is active does not change the post-filter collapse state", async () => {
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 1, name: "app", kind: "compose", working_dir: "/srv",
+          auto_update_enabled: false, auto_named: false,
+          services: [{
+            id: 10, name: "web", image_ref: "nginx:1.27", current_digest: "sha256:a",
+            state: "running", pinned: false, healthcheck: false, auto_update_enabled: null,
+          }],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () => HttpResponse.json([])),
+  );
+  renderDashboardWithRouter();
+  await waitFor(() => expect(screen.getByRole("button", { name: "app" })).toBeInTheDocument());
+  expect(screen.queryByText("web")).not.toBeInTheDocument();
+  // Filter on: the service is force-shown regardless of collapse state.
+  const search = screen.getByLabelText("Search");
+  await userEvent.type(search, "web");
+  await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
+  // Click the header while filtering. This must be a no-op: without the guard
+  // it would silently drop "app" from `collapsed`, changing the state the user
+  // returns to once the filter clears.
+  await userEvent.click(screen.getByRole("button", { name: "app" }));
+  // Clear the filter: the project must return to its pre-filter collapsed state,
+  // so the service is hidden again. (Fails if the header click mutated collapsed.)
+  await userEvent.clear(search);
+  await waitFor(() => expect(screen.queryByText("web")).not.toBeInTheDocument());
+});
+
+test("a project that disappears and reappears re-collapses at the default", async () => {
+  // A second project ("keep") is always present so the dashboard never empties
+  // and the global "Check all services" button stays available to drive
+  // refetches. "app" is absent from the SECOND fetch (deleted) and back on the
+  // third. Without pruning `seenProjects`, the reappeared "app" would stay in
+  // the seen set and resurface EXPANDED (the user had expanded it); the prune
+  // makes it fresh again so it re-collapses at the default.
+  let fetchCount = 0;
+  const app = {
+    id: 1, name: "app", kind: "compose", working_dir: "/srv",
+    auto_update_enabled: false, auto_named: false,
+    services: [{
+      id: 10, name: "web", image_ref: "nginx:1.27", current_digest: "sha256:a",
+      state: "running", pinned: false, healthcheck: false, auto_update_enabled: null,
+    }],
+  };
+  const keep = {
+    id: 2, name: "keep", kind: "compose", working_dir: "/srv/keep",
+    auto_update_enabled: false, auto_named: false,
+    services: [{
+      id: 20, name: "keepsvc", image_ref: "redis:7", current_digest: "sha256:d",
+      state: "running", pinned: false, healthcheck: false, auto_update_enabled: null,
+    }],
+  };
+  server.use(
+    http.get("/api/projects", () => {
+      fetchCount += 1;
+      if (fetchCount === 2) return HttpResponse.json([keep]); // "app" deleted
+      return HttpResponse.json([app, keep]);                  // present otherwise
+    }),
+    http.get("/api/updates", () => HttpResponse.json([])),
+    http.post("/api/scan", () => HttpResponse.json({ status: "checked" })),
+  );
+  renderDashboardWithRouter();
+  await expandProject("app");
+  await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
+  // Refetch #2: "app" disappears from the payload (no filter active, so the
+  // seed effect prunes its id from `seenProjects`).
+  await userEvent.click(screen.getByRole("button", { name: /^check all services$/i }));
+  await waitFor(() => expect(screen.queryByRole("button", { name: "app" })).not.toBeInTheDocument());
+  // Refetch #3: "app" comes back. It must return COLLAPSED, not expanded.
+  await userEvent.click(screen.getByRole("button", { name: /^check all services$/i }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "app" })).toBeInTheDocument());
+  expect(screen.queryByText("web")).not.toBeInTheDocument();
+});

@@ -589,12 +589,24 @@ export function DashboardTable({
   // hidden even after the Loose group is opened.
   useEffect(() => {
     if (!defaultCollapsed) return;
+    const present = new Set<number>();
     const fresh: number[] = [];
     for (const r of rows) {
       if (r.kind !== "project") continue;
       if (r.project.auto_named) continue;
+      present.add(r.project.id);
       if (seenProjects.current.has(r.project.id)) continue;
       fresh.push(r.project.id);
+    }
+    // Forget projects that have gone away, but only when no filter is active:
+    // under a filter `rows` is narrowed to matches, so an absent project may
+    // just be filtered out, not deleted. With no filter `rows` is the full set,
+    // so a genuine deletion drops the id — letting it re-collapse at the default
+    // if it ever reappears, and keeping `seenProjects` from growing unbounded.
+    if (!filtersActive) {
+      for (const id of seenProjects.current) {
+        if (!present.has(id)) seenProjects.current.delete(id);
+      }
     }
     if (fresh.length === 0) return;
     for (const id of fresh) seenProjects.current.add(id);
@@ -603,7 +615,7 @@ export function DashboardTable({
       for (const id of fresh) next.add(id);
       return next;
     });
-  }, [rows, defaultCollapsed]);
+  }, [rows, defaultCollapsed, filtersActive]);
 
   const handleRemove = (serviceId: number) => {
     setRemovingIds((prev) => new Set(prev).add(serviceId));
@@ -678,6 +690,10 @@ export function DashboardTable({
   });
 
   function toggle(projectId: number) {
+    // Under an active filter every service is force-shown, so a header click
+    // would silently mutate `collapsed` and change the collapse state the user
+    // returns to once the filter clears. Ignore toggles while filtering.
+    if (filtersActive) return;
     setCollapsed((prev) => {
       const next = new Set(prev);
       if (next.has(projectId)) next.delete(projectId);
