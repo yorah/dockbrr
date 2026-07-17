@@ -340,6 +340,23 @@ func (u *Updates) GetLatestOpenByService(serviceID int64) (Update, error) {
 	return up, err
 }
 
+// HasAnyByService reports whether the service has any update row at all,
+// regardless of status. scan uses it to gate synthetic current-version row
+// creation: a current row is written only for a service with no history.
+func (u *Updates) HasAnyByService(serviceID int64) (bool, error) {
+	var one int
+	err := u.db.QueryRow(
+		`SELECT 1 FROM updates WHERE service_id=? LIMIT 1`, serviceID,
+	).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // ListLastAppliedByService returns, for each service, the newest
 // changelog-bearing non-open row among status IN ('applied', 'current'),
 // changelog columns included, with 'applied' outranking 'current' for the

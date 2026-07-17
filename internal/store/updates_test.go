@@ -211,6 +211,34 @@ func TestUpdatesGetLatestOpenByService(t *testing.T) {
 	}
 }
 
+func TestHasAnyByService(t *testing.T) {
+	db := openImagesStore(t)
+	sid := seedService(t, db)
+	u := store.NewUpdates(db)
+
+	has, err := u.HasAnyByService(sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if has {
+		t.Fatal("HasAnyByService = true for a service with no update rows, want false")
+	}
+
+	if _, err := u.Upsert(store.Update{
+		ServiceID: sid, FromDigest: "sha256:a", ToDigest: "sha256:b",
+		Tag: "1.0", Status: "dismissed",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	has, err = u.HasAnyByService(sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !has {
+		t.Fatal("HasAnyByService = false after inserting a row, want true")
+	}
+}
+
 func TestUpdatesRecordDriftNewThenIdempotent(t *testing.T) {
 	db := openImagesStore(t)
 	sid := seedService(t, db)
