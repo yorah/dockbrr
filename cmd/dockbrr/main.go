@@ -316,6 +316,13 @@ func run(args []string, getenv func(string) string) error {
 		pruneLoop(ctx, settings, jobs)
 	}()
 
+	// Session GC: ages out expired session rows. Store-only, no Docker.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		sessionGCLoop(ctx, sessions)
+	}()
+
 	// HTTP server.
 	deps := httpapi.Deps{
 		Sealer: sealer, Users: users, Sessions: sessions, Credentials: creds,
@@ -600,6 +607,36 @@ func pruneLoop(ctx context.Context, settings *store.Settings, jobs *store.Jobs) 
 	}
 	run()
 	ticker := time.NewTicker(pruneInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			run()
+		}
+	}
+}
+
+// sessionGCInterval: how often expired session rows are swept. Expiry is
+// enforced authoritatively on read (Sessions.Get); this loop only stops dead
+// rows accumulating in the DB, so precision doesn't matter.
+const sessionGCInterval = time.Hour
+
+// sessionGCLoop ages out expired sessions. Store-only, no Docker.
+func sessionGCLoop(ctx context.Context, sessions *store.Sessions) {
+	run := func() {
+		n, err := sessions.DeleteExpired(time.Now().UTC())
+		if err != nil {
+			logger.Errorf("session gc: delete expired: %v", err)
+			return
+		}
+		if n > 0 {
+			logger.Infof("session gc: removed %d expired session(s)", n)
+		}
+	}
+	run()
+	ticker := time.NewTicker(sessionGCInterval)
 	defer ticker.Stop()
 	for {
 		select {
