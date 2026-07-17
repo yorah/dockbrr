@@ -139,6 +139,13 @@ func (d *Detector) Detect(ctx context.Context, svc store.Service) (*store.Update
 
 	// 4. Compare (match on either the served or platform digest).
 	if targetRemote.Digest == svc.CurrentDigest || targetRemote.PlatformDigest == svc.CurrentDigest {
+		// Up to date. A floating tag (latest) with no version label would show
+		// only ":latest" on the dashboard, since version enrichment otherwise
+		// lives only on the update path below. Reverse-resolve the running
+		// digest to a release tag once (cached on the image row, keyed by
+		// digest) so the list can surface "v1.13.2" for a pending-nothing
+		// service. Best-effort: any failure just leaves the version blank.
+		d.resolveCurrentVersion(ctx, repo, tag, svc.CurrentDigest, remote)
 		return nil, nil
 	}
 
@@ -287,6 +294,36 @@ func (d *Detector) reverseVersions(ctx context.Context, repo, fromDigest string,
 		}
 	}
 	return fromVer, toVer
+}
+
+// resolveCurrentVersion names the running version of an up-to-date service and
+// caches it on the image row (keyed by digest) so the dashboard can show a
+// release for a floating tag that has no pending update. It only acts for a
+// fully-floating tag (latest, stable, named) whose tag carries no semver: an
+// exact or partial-semver tag already reads as its own version. The name comes
+// from the OCI version label when present, else a digest reverse-lookup. Cached
+// per digest: once resolved, later scans short-circuit before any network call.
+// Best-effort throughout; any miss leaves the version blank.
+func (d *Detector) resolveCurrentVersion(ctx context.Context, repo, tag, digest string, remote registry.RemoteImage) {
+	if d.images == nil || digest == "" {
+		return
+	}
+	if semverOrEmpty(tag) != "" || ClassifyTag(repo+":"+tag) != TagFloating {
+		return
+	}
+	if img, err := d.images.GetByDigest(repo, digest); err == nil && img.ResolvedVersion != "" {
+		return // already resolved for this digest
+	}
+	ver := remote.Labels["org.opencontainers.image.version"]
+	if ver == "" {
+		ver, _ = d.reverseVersions(ctx, repo, digest, remote)
+	}
+	if ver == "" {
+		return
+	}
+	if err := d.images.SetResolvedVersion(repo, digest, ver); err != nil {
+		logger.Warnf("detect: set resolved version %s@%s: %v", repo, shortDigest(digest), err)
+	}
 }
 
 // tagDigest returns the served digest for repo:tag, preferring the permanent
