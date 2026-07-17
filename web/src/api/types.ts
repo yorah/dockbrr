@@ -102,6 +102,13 @@ export interface SystemStatus {
   docker_reachable: boolean;
   version: string;
 }
+export interface SelfUpdate {
+  current: string;
+  latest: string;
+  html_url: string;
+  update_available: boolean;
+  checked_at?: string;
+}
 export interface CommandPreview { pull: string; up: string }
 export interface Me { username: string }
 export interface SetupStatus { needs_setup: boolean }

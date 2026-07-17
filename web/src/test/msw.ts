@@ -10,6 +10,13 @@ export const handlers = [
   http.get("/api/projects", () => HttpResponse.json([])),
   http.get("/api/updates", () => HttpResponse.json([])),
   http.get("/api/updates/last-applied", () => HttpResponse.json([])),
+  http.get("/api/updates/self", () =>
+    HttpResponse.json({
+      current: "0.0.0-test",
+      latest: "0.0.0-test",
+      html_url: "https://github.com/yorah/dockbrr/releases/latest",
+      update_available: false,
+    })),
   http.get("/api/jobs", () => HttpResponse.json([])),
   http.get("/api/status", () =>
     HttpResponse.json({

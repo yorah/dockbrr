@@ -3,7 +3,7 @@ import { apiFetch } from "@/api/client";
 import { keys } from "@/api/keys";
 import type {
   Project, Update, Settings, Registry, Me, SetupStatus,
-  ServiceEvent, CommandPreview, Job, JobRow, Scope, SystemStatus, ComposeFiles, SystemInfo,
+  ServiceEvent, CommandPreview, Job, JobRow, Scope, SystemStatus, SelfUpdate, ComposeFiles, SystemInfo,
 } from "@/api/types";
 
 // Dashboard freshness is push-driven now: the global SSE stream (useEventStream)
@@ -25,6 +25,12 @@ export const useSetupStatus = () =>
   useQuery({ queryKey: keys.setupStatus, queryFn: () => apiFetch<SetupStatus>("/api/setup/status") });
 export const useStatus = () =>
   useQuery({ queryKey: keys.status, queryFn: () => apiFetch<SystemStatus>("/api/status"), refetchInterval: 60_000 });
+export const useSelfUpdate = () =>
+  useQuery({
+    queryKey: keys.selfUpdate,
+    queryFn: () => apiFetch<SelfUpdate>("/api/updates/self"),
+    refetchInterval: 6 * 60 * 60 * 1000,
+  });
 export const useSystemInfo = () =>
   useQuery({ queryKey: keys.systemInfo, queryFn: () => apiFetch<SystemInfo>("/api/system/info") });
 export const useJobs = (limit = 100) =>
