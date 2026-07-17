@@ -17,6 +17,7 @@ type Service struct {
 	ImageRef          string
 	CurrentDigest     string
 	CurrentImageID    string
+	ImageVersion      string // running image's org.opencontainers.image.version label ("" if unset)
 	Pinned            bool
 	Drifted           bool
 	State             string
@@ -50,13 +51,14 @@ func (s *Services) Upsert(sv Service) (int64, error) {
 	err = s.db.QueryRow(
 		`INSERT INTO services
 		   (project_id, name, container_ids, image_ref, current_digest,
-		    current_image_id, pinned, drifted, state, gone_since, healthcheck, auto_update_enabled)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+		    current_image_id, image_version, pinned, drifted, state, gone_since, healthcheck, auto_update_enabled)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
 		 ON CONFLICT(project_id, name) DO UPDATE SET
 		   container_ids    = excluded.container_ids,
 		   image_ref        = excluded.image_ref,
 		   current_digest   = excluded.current_digest,
 		   current_image_id = excluded.current_image_id,
+		   image_version    = excluded.image_version,
 		   pinned           = excluded.pinned,
 		   drifted          = excluded.drifted,
 		   state            = excluded.state,
@@ -65,7 +67,7 @@ func (s *Services) Upsert(sv Service) (int64, error) {
 		   updated_at       = CURRENT_TIMESTAMP
 		 RETURNING id`,
 		sv.ProjectID, sv.Name, string(cidsJSON), sv.ImageRef, sv.CurrentDigest,
-		sv.CurrentImageID, sv.Pinned, sv.Drifted, sv.State, sv.Healthcheck, auto,
+		sv.CurrentImageID, sv.ImageVersion, sv.Pinned, sv.Drifted, sv.State, sv.Healthcheck, auto,
 	).Scan(&id)
 	return id, err
 }
@@ -73,7 +75,7 @@ func (s *Services) Upsert(sv Service) (int64, error) {
 func (s *Services) ListByProject(projectID int64) ([]Service, error) {
 	rows, err := s.db.Query(
 		`SELECT id, project_id, name, container_ids, image_ref, current_digest,
-		        current_image_id, pinned, drifted, state, gone_since, healthcheck, auto_update_enabled, updated_at
+		        current_image_id, image_version, pinned, drifted, state, gone_since, healthcheck, auto_update_enabled, updated_at
 		   FROM services WHERE project_id=? ORDER BY name`,
 		projectID,
 	)
@@ -91,7 +93,7 @@ func (s *Services) ListByProject(projectID int64) ([]Service, error) {
 		)
 		if err := rows.Scan(
 			&sv.ID, &sv.ProjectID, &sv.Name, &cidsJSON, &sv.ImageRef, &sv.CurrentDigest,
-			&sv.CurrentImageID, &sv.Pinned, &sv.Drifted, &sv.State, &goneSince, &sv.Healthcheck, &auto, &sv.UpdatedAt,
+			&sv.CurrentImageID, &sv.ImageVersion, &sv.Pinned, &sv.Drifted, &sv.State, &goneSince, &sv.Healthcheck, &auto, &sv.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -147,12 +149,12 @@ func (s *Services) Get(id int64) (Service, error) {
 	)
 	err := s.db.QueryRow(
 		`SELECT id, project_id, name, container_ids, image_ref, current_digest,
-		        current_image_id, pinned, drifted, state, gone_since, healthcheck, auto_update_enabled, updated_at
+		        current_image_id, image_version, pinned, drifted, state, gone_since, healthcheck, auto_update_enabled, updated_at
 		   FROM services WHERE id=?`,
 		id,
 	).Scan(
 		&sv.ID, &sv.ProjectID, &sv.Name, &cidsJSON, &sv.ImageRef, &sv.CurrentDigest,
-		&sv.CurrentImageID, &sv.Pinned, &sv.Drifted, &sv.State, &goneSince, &sv.Healthcheck, &auto, &sv.UpdatedAt,
+		&sv.CurrentImageID, &sv.ImageVersion, &sv.Pinned, &sv.Drifted, &sv.State, &goneSince, &sv.Healthcheck, &auto, &sv.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Service{}, ErrServiceNotFound
@@ -217,7 +219,7 @@ func (s *Services) UpdateImageRef(id int64, imageRef string) error {
 func (s *Services) List() ([]Service, error) {
 	rows, err := s.db.Query(
 		`SELECT id, project_id, name, container_ids, image_ref, current_digest,
-		        current_image_id, pinned, drifted, state, gone_since, healthcheck, auto_update_enabled, updated_at
+		        current_image_id, image_version, pinned, drifted, state, gone_since, healthcheck, auto_update_enabled, updated_at
 		   FROM services ORDER BY id`,
 	)
 	if err != nil {
@@ -234,7 +236,7 @@ func (s *Services) List() ([]Service, error) {
 		)
 		if err := rows.Scan(
 			&sv.ID, &sv.ProjectID, &sv.Name, &cidsJSON, &sv.ImageRef, &sv.CurrentDigest,
-			&sv.CurrentImageID, &sv.Pinned, &sv.Drifted, &sv.State, &goneSince, &sv.Healthcheck, &auto, &sv.UpdatedAt,
+			&sv.CurrentImageID, &sv.ImageVersion, &sv.Pinned, &sv.Drifted, &sv.State, &goneSince, &sv.Healthcheck, &auto, &sv.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}

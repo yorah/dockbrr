@@ -561,6 +561,39 @@ func TestDetectFloatingTagNamesVersionsViaReverseLookup(t *testing.T) {
 	}
 }
 
+// TestDetectFloatingTagNamesFromViaRunningImageLabel proves a floating tag names
+// its "from" version from the running image's own OCI version label (captured at
+// discovery), without any reverse HEAD scan. This is the linuxserver case: the
+// versioned tags are pre-release (1.6.0-lsNNN) and the reverse scan skips them,
+// but both images carry org.opencontainers.image.version, so both ends resolve.
+func TestDetectFloatingTagNamesFromViaRunningImageLabel(t *testing.T) {
+	db := newDB(t)
+	svc := seedSvc(t, db, "ghcr.io/linuxserver/bazarr:latest", "sha256:old", false)
+	svc.ImageVersion = "1.6.0-ls354" // running image's label, set at discovery
+	r := fakeResolver{
+		// latest now resolves to a newer digest whose label carries the target
+		// version; no tags/head are needed because both ends read from labels.
+		img: registry.RemoteImage{
+			Digest:         "sha256:new",
+			PlatformDigest: "sha256:new",
+			Labels:         map[string]string{"org.opencontainers.image.version": "1.6.0-ls355"},
+		},
+	}
+	u, err := newDetector(db, r).Detect(context.Background(), svc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u == nil {
+		t.Fatal("expected an update, got nil")
+	}
+	if u.Tag != "latest" || u.ToDigest != "sha256:new" {
+		t.Fatalf("update = %s@%s, want latest@sha256:new", u.Tag, u.ToDigest)
+	}
+	if u.FromVersion != "1.6.0-ls354" || u.ToVersion != "1.6.0-ls355" {
+		t.Fatalf("versions = %q -> %q, want 1.6.0-ls354 -> 1.6.0-ls355", u.FromVersion, u.ToVersion)
+	}
+}
+
 // TestDetectFloatingReverseLookupNonFatal proves the reverse scan is best-effort:
 // a tag-list failure leaves the version strings blank and the update is still
 // recorded as a plain digest-only drift.
