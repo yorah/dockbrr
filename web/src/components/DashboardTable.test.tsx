@@ -1207,19 +1207,39 @@ test("an active search reveals a service under an otherwise-collapsed project", 
 });
 
 test("a manually-expanded project stays expanded across a refetch", async () => {
+  // The projects payload must actually CHANGE between the first fetch and the
+  // refetch triggered below. If it comes back byte-identical, React Query's
+  // default structural sharing (see web/src/api/queryClient.ts) returns the
+  // SAME `projects.data` reference, `rows` (memoized on `[projects.data, ...]`
+  // in useDashboardRows) keeps a stable identity, and the seed effect (dep
+  // `[rows, defaultCollapsed]`) never re-runs - the test would pass even if the
+  // seenProjects guard were deleted. A second top-level project ("db") is added
+  // on the refetch so the effect has something new to seed, which lets this
+  // test assert BOTH invariants: the guard holds for the already-expanded
+  // project, and the effect genuinely re-ran and collapsed the newcomer.
+  let fetchCount = 0;
   server.use(
-    http.get("/api/projects", () =>
-      HttpResponse.json([
-        {
-          id: 1, name: "app", kind: "compose", working_dir: "/srv",
-          auto_update_enabled: false, auto_named: false,
-          services: [{
-            id: 10, name: "web", image_ref: "nginx:1.27", current_digest: "sha256:a",
-            state: "running", pinned: false, healthcheck: false, auto_update_enabled: null,
-          }],
-        },
-      ]),
-    ),
+    http.get("/api/projects", () => {
+      fetchCount += 1;
+      const app = {
+        id: 1, name: "app", kind: "compose", working_dir: "/srv",
+        auto_update_enabled: false, auto_named: false,
+        services: [{
+          id: 10, name: "web", image_ref: "nginx:1.27", current_digest: "sha256:a",
+          state: "running", pinned: false, healthcheck: false, auto_update_enabled: null,
+        }],
+      };
+      if (fetchCount === 1) return HttpResponse.json([app]);
+      const db = {
+        id: 2, name: "db", kind: "compose", working_dir: "/srv/db",
+        auto_update_enabled: false, auto_named: false,
+        services: [{
+          id: 20, name: "postgres", image_ref: "postgres:16", current_digest: "sha256:c",
+          state: "running", pinned: false, healthcheck: false, auto_update_enabled: null,
+        }],
+      };
+      return HttpResponse.json([app, db]);
+    }),
     http.get("/api/updates", () => HttpResponse.json([])),
     // Backs the global "Check all services" button: its mutation invalidates
     // the projects query on success (see useScanAll), the same mechanism the
@@ -1233,6 +1253,15 @@ test("a manually-expanded project stays expanded across a refetch", async () => 
   // tests): the global button is named exactly "Check all services", distinct
   // from the per-project "Check all services in app" button.
   await userEvent.click(screen.getByRole("button", { name: /^check all services$/i }));
-  // The seed effect must NOT re-collapse a project the user expanded.
-  await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
+  // The new project's header must appear before asserting on its collapsed
+  // state, otherwise a false negative could just mean the refetch hasn't
+  // landed yet.
+  await waitFor(() => expect(screen.getByRole("button", { name: "db" })).toBeInTheDocument());
+  // Invariant 1: the seed effect must NOT re-collapse a project the user
+  // manually expanded (the seenProjects guard holds).
+  expect(screen.getByText("web")).toBeInTheDocument();
+  // Invariant 2: the newly-appeared top-level project IS seeded collapsed,
+  // proving the seed effect actually re-ran rather than the test passing
+  // vacuously because nothing re-triggered it.
+  expect(screen.queryByText("postgres")).not.toBeInTheDocument();
 });
