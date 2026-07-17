@@ -222,19 +222,21 @@ Non-blocking Minors deferred from the whole-branch review (behavior correct, gap
 
 ## Self-update notification (2026-07-17, branch `feat/self-update-notification`, all-tasks review clean)
 
-Two review minors were addressed in-branch (commit 50d2f32): the silently-swallowed GitHub
-failure now logs at debug in both the handler and the startup-warm path, and `readCache`
-gained a `url==""` guard against a partial 3-key cache write. Remaining are test-only gaps
-(behavior correct) plus one accepted design point.
+All four deferred minors were subsequently fixed in-branch (M1/M3/M4 test-only, M2 a code
+change to single-row atomic cache). Two earlier minors were addressed in commit 50d2f32:
+the silently-swallowed GitHub failure now logs at debug in both the handler and the
+startup-warm path. One accepted design point remains.
 
-- [ ] [su-M1] No test exercises the `tokenFn`/`Authorization: Bearer` header path in the checker
-      (`internal/selfupdate/checker.go`); token wiring is currently unverified.
-- [ ] [su-M2] `writeCache` sets 3 settings keys non-atomically; a `Set` error mid-write leaves a
-      partial cache. Low risk (in-proc SQLite) and the `readCache` `url==""` guard now masks the
-      common partial, but a genuine atomic write / single-row encoding would be cleaner.
-- [ ] [su-M3] No test covers context cancellation propagating into the outbound GitHub HTTP request.
-- [ ] [su-M4] The nil-dep handler test asserts only `update_available:false`, not that `checked_at`
-      is absent from the response.
+- [x] [su-M1] FIXED: `TestFetchSendsBearerToken` (table over with-token/empty-token) asserts the
+      outbound request carries `Authorization: Bearer <tok>` when a token is present and no header
+      when the token is empty.
+- [x] [su-M2] FIXED: cache is now a single JSON row under `selfupdate_cache` (`cacheEntry`), so
+      `writeCache` is one atomic `Set` with no partial-key window; `readCache` decodes and validates
+      it. Dropped the 3 old keys and the `url==""` guard they needed.
+- [x] [su-M3] FIXED: `TestCheckCancelledContext` cancels the context before `Check`, asserting the
+      call errors, claims no update, and never reaches the server.
+- [x] [su-M4] FIXED: `TestSelfUpdateEndpointNilDep` now also asserts `checked_at` is absent from the
+      nil-dep response.
 
 Known-accepted:
 - [su-A1] `UpdateNotice` reads the per-version dismissal from localStorage once at mount, so a

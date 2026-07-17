@@ -17,11 +17,18 @@ import (
 )
 
 const (
-	repoPath     = "yorah/dockbrr"
-	keyTag       = "selfupdate_latest_tag"
-	keyURL       = "selfupdate_latest_url"
-	keyCheckedAt = "selfupdate_checked_at"
+	repoPath = "yorah/dockbrr"
+	keyCache = "selfupdate_cache"
 )
+
+// cacheEntry is the single-row cache payload. Encoding all three fields under
+// one settings key makes writeCache a single atomic Set: a reader never sees a
+// half-written cache, so there is no partial-key state to guard against.
+type cacheEntry struct {
+	Tag       string    `json:"tag"`
+	URL       string    `json:"url"`
+	CheckedAt time.Time `json:"checked_at"`
+}
 
 // Result is a point-in-time answer to "is there a newer release?".
 type Result struct {
@@ -135,28 +142,26 @@ func (c *Checker) fetchLatest(ctx context.Context) (tag, htmlURL string, err err
 }
 
 func (c *Checker) readCache() (tag, url string, checkedAt time.Time, ok bool) {
-	tag, err := c.settings.Get(keyTag)
-	if err != nil || tag == "" {
+	raw, err := c.settings.Get(keyCache)
+	if err != nil || raw == "" {
 		return "", "", time.Time{}, false
 	}
-	url, _ = c.settings.Get(keyURL)
-	if url == "" {
+	var e cacheEntry
+	if err := json.Unmarshal([]byte(raw), &e); err != nil {
 		return "", "", time.Time{}, false
 	}
-	ts, err := c.settings.Get(keyCheckedAt)
-	if err != nil {
+	if e.Tag == "" || e.CheckedAt.IsZero() {
 		return "", "", time.Time{}, false
 	}
-	checkedAt, err = time.Parse(time.RFC3339, ts)
-	if err != nil {
-		return "", "", time.Time{}, false
-	}
-	return tag, url, checkedAt, true
+	return e.Tag, e.URL, e.CheckedAt, true
 }
 
 func (c *Checker) writeCache(tag, url string, at time.Time) {
-	// Best-effort persistence: a failed write just means the next request refetches.
-	_ = c.settings.Set(keyTag, tag)
-	_ = c.settings.Set(keyURL, url)
-	_ = c.settings.Set(keyCheckedAt, at.Format(time.RFC3339))
+	// Best-effort persistence: a failed write just means the next request
+	// refetches. One key, one Set: atomic, no partial-cache window.
+	raw, err := json.Marshal(cacheEntry{Tag: tag, URL: url, CheckedAt: at})
+	if err != nil {
+		return
+	}
+	_ = c.settings.Set(keyCache, string(raw))
 }

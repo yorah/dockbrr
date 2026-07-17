@@ -2,6 +2,7 @@ package selfupdate_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -48,6 +49,19 @@ func ghServer(t *testing.T, tag, htmlURL string, hits *int) *httptest.Server {
 	return srv
 }
 
+// seedCache writes the single-row cache the checker reads, so tests can plant a
+// stale entry without depending on the internal key layout.
+func seedCache(t *testing.T, s *store.Settings, tag, url string, at time.Time) {
+	t.Helper()
+	raw, err := json.Marshal(map[string]any{"tag": tag, "url": url, "checked_at": at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Set("selfupdate_cache", string(raw)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCheckFreshFetchDetectsNewer(t *testing.T) {
 	var hits int
 	gh := ghServer(t, "v0.5.0", "https://github.com/yorah/dockbrr/releases/tag/v0.5.0", &hits)
@@ -90,9 +104,7 @@ func TestCheckStaleCacheRefetches(t *testing.T) {
 	gh := ghServer(t, "v0.5.0", "https://x/y", &hits)
 	s := newSettings(t)
 	// Seed a stale cache: checked_at far in the past, TTL short.
-	_ = s.Set("selfupdate_latest_tag", "v0.4.9")
-	_ = s.Set("selfupdate_latest_url", "https://old")
-	_ = s.Set("selfupdate_checked_at", time.Now().Add(-2*time.Hour).UTC().Format(time.RFC3339))
+	seedCache(t, s, "v0.4.9", "https://old", time.Now().Add(-2*time.Hour).UTC())
 	c := selfupdate.NewChecker(gh.Client(), s, "0.4.2", gh.URL, time.Hour, nil)
 
 	res, err := c.Check(context.Background())
@@ -113,9 +125,7 @@ func TestCheckGitHubErrorServesStaleCache(t *testing.T) {
 	}))
 	t.Cleanup(gh.Close)
 	s := newSettings(t)
-	_ = s.Set("selfupdate_latest_tag", "v0.5.0")
-	_ = s.Set("selfupdate_latest_url", "https://stale")
-	_ = s.Set("selfupdate_checked_at", time.Now().Add(-2*time.Hour).UTC().Format(time.RFC3339))
+	seedCache(t, s, "v0.5.0", "https://stale", time.Now().Add(-2*time.Hour).UTC())
 	c := selfupdate.NewChecker(gh.Client(), s, "0.4.2", gh.URL, time.Hour, nil)
 
 	res, err := c.Check(context.Background())
@@ -169,5 +179,55 @@ func TestUpdateAvailableMatrix(t *testing.T) {
 				t.Errorf("%s: want %v, got %v", tc.name, tc.want, res.UpdateAvailable)
 			}
 		})
+	}
+}
+
+func TestFetchSendsBearerToken(t *testing.T) {
+	cases := []struct {
+		name       string
+		token      string
+		wantHeader string
+	}{
+		{"with-token", "ghp_secret", "Bearer ghp_secret"},
+		{"empty-token", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotAuth string
+			gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotAuth = r.Header.Get("Authorization")
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"tag_name":"v0.5.0","html_url":"https://x/y"}`))
+			}))
+			t.Cleanup(gh.Close)
+			c := selfupdate.NewChecker(gh.Client(), newSettings(t), "0.4.2", gh.URL, time.Hour, func() string { return tc.token })
+
+			if _, err := c.Check(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if gotAuth != tc.wantHeader {
+				t.Errorf("Authorization = %q, want %q", gotAuth, tc.wantHeader)
+			}
+		})
+	}
+}
+
+func TestCheckCancelledContext(t *testing.T) {
+	var hits int
+	gh := ghServer(t, "v0.5.0", "https://x/y", &hits)
+	c := selfupdate.NewChecker(gh.Client(), newSettings(t), "0.4.2", gh.URL, time.Hour, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before the call so the outbound request never completes
+
+	res, err := c.Check(ctx)
+	if err == nil {
+		t.Error("want error when context is cancelled and no cache exists")
+	}
+	if res.UpdateAvailable {
+		t.Errorf("cancelled + no cache must not claim an update: %+v", res)
+	}
+	if hits != 0 {
+		t.Errorf("cancelled request should not reach the server; hits=%d", hits)
 	}
 }

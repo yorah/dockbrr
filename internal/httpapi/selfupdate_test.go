@@ -66,4 +66,7 @@ func TestSelfUpdateEndpointNilDep(t *testing.T) {
 	if out["update_available"] != false {
 		t.Errorf("nil dep should be false: %v", out)
 	}
+	if _, ok := out["checked_at"]; ok {
+		t.Errorf("nil dep must not carry a checked_at: %v", out)
+	}
 }
