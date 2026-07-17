@@ -4,6 +4,7 @@ import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SidebarNav, rowClass } from "@/components/layout/SidebarNav";
 import { SidebarProjects } from "@/components/layout/SidebarProjects";
+import { UpdateNotice } from "@/components/layout/UpdateNotice";
 import { useStatus } from "@/hooks/queries";
 import { useLogout } from "@/hooks/mutations";
 
@@ -44,6 +45,7 @@ export function Sidebar({ collapsed, className }: { collapsed: boolean; classNam
       <SidebarProjects collapsed={collapsed} />
 
       <div className="mt-auto flex flex-col gap-2">
+        <UpdateNotice collapsed={collapsed} />
         <Separator />
         <div className="px-2">
           {collapsed ? (
