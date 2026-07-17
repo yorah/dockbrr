@@ -607,15 +607,22 @@ func TestGitHubRangeCapsTextSizeWithNote(t *testing.T) {
 }
 
 func TestGitHubRateLimitedYieldsErrRateLimited(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("X-RateLimit-Remaining", "0")
-		w.WriteHeader(http.StatusForbidden)
-	}))
-	t.Cleanup(srv.Close)
-	s := changelog.NewGitHubSource(srv.Client(), srv.URL, srv.URL, func() string { return "" }, nil, time.Hour)
-	_, err := s.Resolve(context.Background(), ghInput("ghcr.io/autobrr/autobrr:latest", "1.82.1"))
-	if !errors.Is(err, changelog.ErrRateLimited) {
-		t.Fatalf("err = %v, want ErrRateLimited", err)
+	// Both a 403 (primary limit) and a 429 (secondary/too-many-requests) with
+	// X-RateLimit-Remaining:0 are rate-limit exhaustion and must map to the
+	// sentinel via the same code path.
+	for _, status := range []int{http.StatusForbidden, http.StatusTooManyRequests} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("X-RateLimit-Remaining", "0")
+				w.WriteHeader(status)
+			}))
+			t.Cleanup(srv.Close)
+			s := changelog.NewGitHubSource(srv.Client(), srv.URL, srv.URL, func() string { return "" }, nil, time.Hour)
+			_, err := s.Resolve(context.Background(), ghInput("ghcr.io/autobrr/autobrr:latest", "1.82.1"))
+			if !errors.Is(err, changelog.ErrRateLimited) {
+				t.Fatalf("err = %v, want ErrRateLimited", err)
+			}
+		})
 	}
 }
 
@@ -627,7 +634,8 @@ func TestGitHubForbiddenWithoutRateHeaderIsGenericError(t *testing.T) {
 		status int
 		remain string
 	}{
-		{"secondary-403", http.StatusForbidden, "42"},
+		{"403-remaining-positive", http.StatusForbidden, "42"},
+		{"403-header-absent", http.StatusForbidden, ""},
 		{"auth-401", http.StatusUnauthorized, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

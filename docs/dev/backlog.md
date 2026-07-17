@@ -211,5 +211,5 @@ Known-accepted:
 ## Changelog rate-limit signal (2026-07-17, merged from feat/changelog-rate-limit-signal)
 
 Non-blocking Minors deferred from the whole-branch review (behavior correct, gaps are test-only):
-- [ ] [crl-M1] changelog/github_test: rate-limit detection has no explicit "403 with X-RateLimit-Remaining absent" case (uses remaining:42) and no positive "429 + remaining:0" case. Same code path as the tested 403+0 by construction; add explicit cases if that branch ever grows conditional logic.
-- [ ] [crl-M2] scan: no end-to-end test drives the clear-on-success round-trip through CheckService (rate_limited -> successful resolve -> changelog_status back to ''). The clear is guaranteed by SetChangelog's SQL (changelog_status='') and unit-tested at the store layer; add a scan-level test if the switch in CheckService ever changes.
+- [x] [crl-M1] FIXED: changelog/github_test now covers both a positive 429+remaining:0 case (TestGitHubRateLimitedYieldsErrRateLimited table over 403/429) and an explicit "403 header-absent" negative case (403-header-absent subtest).
+- [x] [crl-M2] FIXED: scan_test TestCheckServiceClearsRateLimitedStatusOnSuccess drives the full round-trip through CheckService (seed rate_limited -> resolve returns content -> changelog_status back to '' + content persisted).

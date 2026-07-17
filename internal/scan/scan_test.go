@@ -111,6 +111,42 @@ func TestCheckServicePersistsRateLimitedStatus(t *testing.T) {
 	}
 }
 
+// TestCheckServiceClearsRateLimitedStatusOnSuccess drives the full round-trip: a
+// prior rate-limited resolve left changelog_status='rate_limited', then a later
+// CheckService whose resolve returns content must persist that content AND clear
+// the marker back to '' (guaranteed by SetChangelog's SQL).
+func TestCheckServiceClearsRateLimitedStatusOnSuccess(t *testing.T) {
+	db := openScanStore(t)
+	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
+	sid, _ := store.NewServices(db).Upsert(store.Service{
+		ProjectID: pid, Name: "app", ImageRef: "ghcr.io/acme/web:1.2.3", CurrentDigest: "sha256:old",
+	})
+	updates := store.NewUpdates(db)
+	uid, _ := updates.Upsert(store.Update{ServiceID: sid, ToDigest: "sha256:new", Tag: "1.3.0", Status: "available"})
+	// Seed the pre-existing rate-limited marker a prior scan would have left.
+	if err := updates.SetChangelogStatus(uid, "rate_limited"); err != nil {
+		t.Fatal(err)
+	}
+
+	det := fakeDetector{upd: &store.Update{ID: uid, ServiceID: sid, ToDigest: "sha256:new", Tag: "1.3.0"}}
+	cl := &fakeChangelog{text: "release notes", url: "https://github.com/acme/web/releases/tag/1.3.0"}
+	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil, nil)
+
+	if err := s.CheckService(context.Background(), sid); err != nil {
+		t.Fatal(err)
+	}
+	got, err := updates.Get(uid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ChangelogStatus != "" {
+		t.Fatalf("ChangelogStatus = %q, want cleared", got.ChangelogStatus)
+	}
+	if got.ChangelogText != "release notes" || got.ChangelogURL != "https://github.com/acme/web/releases/tag/1.3.0" {
+		t.Fatalf("changelog content = (%q,%q), want persisted", got.ChangelogURL, got.ChangelogText)
+	}
+}
+
 func TestCheckServiceEmitsBreadcrumbs(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "app.log")
