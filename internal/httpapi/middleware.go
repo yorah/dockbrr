@@ -120,3 +120,28 @@ func isMutating(method string) bool {
 	}
 	return false
 }
+
+// cspPolicy is the app's Content-Security-Policy. The SPA is fully
+// self-contained (invariant #7: no CDN), so 'self' covers scripts, styles,
+// fonts, XHR and SSE. The two relaxations are deliberate: React/Radix set
+// inline style ATTRIBUTES ('unsafe-inline' in style-src governs those; inline
+// <style> injection is still same-origin only), and Vite inlines small
+// images/fonts as data: URIs.
+const cspPolicy = "default-src 'self'; script-src 'self'; " +
+	"style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
+	"font-src 'self' data:; connect-src 'self'; object-src 'none'; " +
+	"base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+
+// secureHeaders sets baseline hardening headers on every response, API and
+// SPA alike. Registered first on the mux so chi applies it to NotFound (the
+// SPA fallback) too.
+func secureHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Content-Security-Policy", cspPolicy)
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "same-origin")
+		next.ServeHTTP(w, r)
+	})
+}

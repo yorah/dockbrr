@@ -127,6 +127,8 @@ func (s *Server) serviceName(id int64) string {
 }
 
 func (s *Server) routes() {
+	s.mux.Use(secureHeaders)
+
 	s.mux.Get("/healthz", s.handleHealth)
 
 	// Open (pre-auth) routes.
