@@ -14,7 +14,7 @@ func newCreds(t *testing.T) (*store.Credentials, *store.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 	key, _ := secret.LoadOrCreateKey(t.TempDir())
 	sealer, _ := secret.NewSealer(key)
 	return store.NewCredentials(db, sealer), db

@@ -82,7 +82,7 @@ func (s *Services) ListByProject(projectID int64) ([]Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Service
 	for rows.Next() {
 		var (
@@ -225,7 +225,7 @@ func (s *Services) List() ([]Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Service
 	for rows.Next() {
 		var (

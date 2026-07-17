@@ -20,7 +20,7 @@ func newMiddlewareServer(t *testing.T) (*Server, *store.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 	deps := Deps{Sessions: store.NewSessions(db), Users: store.NewUsers(db)}
 	s := New(config.Config{}, db, deps)
 	return s, db

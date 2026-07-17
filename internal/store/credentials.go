@@ -62,7 +62,7 @@ func (c *Credentials) List() ([]Credential, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Credential
 	for rows.Next() {
 		var cr Credential

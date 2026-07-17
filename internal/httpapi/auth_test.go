@@ -18,7 +18,7 @@ func freshServer(t *testing.T) (*Server, *store.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 	deps := Deps{Users: store.NewUsers(db), Sessions: store.NewSessions(db)}
 	return New(config.Config{}, db, deps), db
 }

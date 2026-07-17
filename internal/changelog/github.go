@@ -379,7 +379,7 @@ func (s *GitHubSource) fetchReleasesPage(ctx context.Context, owner, repo string
 	if err != nil {
 		return nil, false, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	switch resp.StatusCode {
 	case http.StatusOK:
 		var rels []ghRelease

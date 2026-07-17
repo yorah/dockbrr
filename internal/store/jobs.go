@@ -121,7 +121,7 @@ func (j *Jobs) List(limit int) ([]Job, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Job
 	for rows.Next() {
 		job, err := scanJob(rows)
@@ -254,7 +254,7 @@ func (l *JobLogs) ListByJob(jobID int64) ([]JobLog, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []JobLog
 	for rows.Next() {
 		var lg JobLog

@@ -48,7 +48,7 @@ func (s *RegistrySource) Resolve(ctx context.Context, in Input) (Result, error) 
 	if err != nil {
 		return Result{}, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	switch resp.StatusCode {
 	case http.StatusOK:
 		var body struct {

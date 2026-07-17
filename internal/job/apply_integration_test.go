@@ -65,7 +65,7 @@ func TestRealApplyRecreatesAndRecordsSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer dc.Close()
+	defer func() { _ = dc.Close() }()
 
 	// 2) Discover the running project+service (project name = compose dir base).
 	locator := discovery.NewLocator(dc)
@@ -99,7 +99,7 @@ func TestRealApplyRecreatesAndRecordsSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	pid, _ := store.NewProjects(db).Upsert(store.Project{
 		HostID: 1, Kind: "compose", Name: projectName, Source: "discovered",
 		WorkingDir: dir, ConfigFiles: []string{composePath},

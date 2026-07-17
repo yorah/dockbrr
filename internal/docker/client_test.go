@@ -20,7 +20,7 @@ func TestClientIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer cl.Close()
+	defer func() { _ = cl.Close() }()
 
 	ctx := context.Background()
 

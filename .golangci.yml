@@ -1,0 +1,7 @@
+# golangci-lint v2. Standard preset = govet, errcheck, staticcheck,
+# ineffassign, unused. Add linters deliberately, one at a time, when they
+# prove signal — not wholesale.
+version: "2"
+
+linters:
+  default: standard

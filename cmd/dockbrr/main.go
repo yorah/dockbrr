@@ -69,7 +69,7 @@ func shutdownTestServer() {
 
 func main() {
 	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "version") {
-		os.Stdout.WriteString("dockbrr " + version.Version + "\n")
+		_, _ = os.Stdout.WriteString("dockbrr " + version.Version + "\n")
 		return
 	}
 	if err := run(os.Args[1:], os.Getenv); err != nil {
@@ -108,7 +108,7 @@ func run(args []string, getenv func(string) string) error {
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Repositories.
 	settings := store.NewSettings(db, sealer)
@@ -281,7 +281,7 @@ func run(args []string, getenv func(string) string) error {
 	var dockerProbe *docker.Client
 	if p, perr := docker.New(cfg.DockerSocket); perr == nil {
 		dockerProbe = p
-		defer dockerProbe.Close()
+		defer func() { _ = dockerProbe.Close() }()
 
 		// Log daemon up/down edges so the log says when Docker came back, not just
 		// that it was missing at boot. Edges only, steady state stays silent.
@@ -390,7 +390,7 @@ func run(args []string, getenv func(string) string) error {
 		dcMu.Lock()
 		defer dcMu.Unlock()
 		if dc != nil {
-			dc.Close()
+			_ = dc.Close()
 		}
 	}
 

@@ -20,7 +20,7 @@ func newSettings(t *testing.T) *store.Settings {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 	key, err := secret.LoadOrCreateKey(t.TempDir())
 	if err != nil {
 		t.Fatal(err)

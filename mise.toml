@@ -50,3 +50,7 @@ run = [
   "go test ./...",
   "cd web && npm test",
 ]
+
+[tasks.lint-go]
+description = "golangci-lint over the Go tree (same config as CI)"
+run = "go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run ./..."

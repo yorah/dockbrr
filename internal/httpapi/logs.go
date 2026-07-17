@@ -48,8 +48,8 @@ func (s *Server) handleLogDownload(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, err)
 		return
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Content-Disposition", "attachment; filename=\""+name+"\"")
-	io.Copy(w, rc)
+	_, _ = io.Copy(w, rc)
 }

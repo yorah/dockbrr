@@ -83,7 +83,7 @@ func (u *Updates) ListOpen() ([]Update, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Update
 	for rows.Next() {
 		var up Update
@@ -118,7 +118,7 @@ func (u *Updates) ListVisible() ([]Update, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Update
 	for rows.Next() {
 		var up Update
@@ -393,7 +393,7 @@ func (u *Updates) ListLastAppliedByService() ([]Update, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Update
 	for rows.Next() {
 		var up Update

@@ -80,7 +80,7 @@ func (cl *Client) ContainerLogsTail(ctx context.Context, id string, tail int) (s
 	if err != nil {
 		return "", fmt.Errorf("docker: logs %s: %w", id, err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 	return decodeLogStream(rc)
 }
 

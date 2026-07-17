@@ -62,7 +62,7 @@ func (e *Events) ListByService(serviceID int64) ([]Event, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Event
 	for rows.Next() {
 		var (
