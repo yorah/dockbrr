@@ -932,3 +932,63 @@ func TestUpdatesSetChangelogClearsStatus(t *testing.T) {
 		t.Fatalf("changelog content = (%q,%q)", got.ChangelogURL, got.ChangelogText)
 	}
 }
+
+func TestListLastAppliedPrefersAppliedOverCurrent(t *testing.T) {
+	db := openImagesStore(t)
+	sid := seedService(t, db)
+	u := store.NewUpdates(db)
+
+	// A synthetic current-version row (from == to), then a real applied update.
+	if _, err := u.Upsert(store.Update{
+		ServiceID: sid, FromDigest: "sha256:cur", ToDigest: "sha256:cur",
+		FromVersion: "1.0", ToVersion: "1.0", Tag: "1.0", Severity: "current", Status: "current",
+		ChangelogURL: "https://x/1.0", ChangelogText: "# 1.0 current",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	appliedID, err := u.Upsert(store.Update{
+		ServiceID: sid, FromDigest: "sha256:cur", ToDigest: "sha256:new",
+		Tag: "1.1", Severity: "minor", Status: "applied",
+		ChangelogURL: "https://x/1.1", ChangelogText: "# 1.1 applied",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := u.ListLastAppliedByService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1 (%+v)", len(got), got)
+	}
+	if got[0].ID != appliedID {
+		t.Fatalf("got id %d, want applied %d (current must not win)", got[0].ID, appliedID)
+	}
+}
+
+func TestListLastAppliedReturnsCurrentWhenOnly(t *testing.T) {
+	db := openImagesStore(t)
+	sid := seedService(t, db)
+	u := store.NewUpdates(db)
+
+	curID, err := u.Upsert(store.Update{
+		ServiceID: sid, FromDigest: "sha256:cur", ToDigest: "sha256:cur",
+		FromVersion: "1.0", ToVersion: "1.0", Tag: "1.0", Severity: "current", Status: "current",
+		ChangelogURL: "https://x/1.0", ChangelogText: "# 1.0 current",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := u.ListLastAppliedByService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != curID {
+		t.Fatalf("got %+v, want single current row id %d", got, curID)
+	}
+	if got[0].Status != "current" || got[0].ChangelogText != "# 1.0 current" {
+		t.Fatalf("current row not carried faithfully: %+v", got[0])
+	}
+}
