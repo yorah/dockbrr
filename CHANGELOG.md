@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.2](https://github.com/yorah/dockbrr/compare/v0.4.1...v0.4.2) (2026-07-17)
+
+
+### Bug Fixes
+
+* **detect:** show current version for up-to-date floating tags ([#34](https://github.com/yorah/dockbrr/issues/34)) ([60b3a35](https://github.com/yorah/dockbrr/commit/60b3a35f38773b5817231fdb66a71246e48fe53d))
+* **web:** mute the sha256 digest, keep the version at full weight ([#32](https://github.com/yorah/dockbrr/issues/32)) ([478b7c1](https://github.com/yorah/dockbrr/commit/478b7c145825b6669280299ef6093dcea23d2df7))
+
 ## [0.4.1](https://github.com/yorah/dockbrr/compare/v0.4.0...v0.4.1) (2026-07-17)
 
 
