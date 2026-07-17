@@ -41,7 +41,7 @@ fails on type errors, so it's a reliable backstop.
 - `detect`: compares running images vs remote registry state (digest + semver).
 - `discovery`: groups containers into projects/services, reconciles into store.
 - `registry`: resolves image refs to digests + OCI metadata.
-- `changelog`: enriches updates with changelog text/URL (respects air-gap).
+- `changelog`: enriches updates with changelog text/URL (GitHub releases, registry description, OCI labels).
 - `docker`: thin Docker SDK wrapper.
 - `httpapi`: REST + SSE API + embedded SPA (`spa.go`). Deps container for injection.
 - `auth`: argon2id password hashing, single-user.
