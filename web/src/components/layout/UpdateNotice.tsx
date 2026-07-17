@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Download, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { buttonVariants } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSelfUpdate } from "@/hooks/queries";
 
 export const DISMISS_KEY = "dockbrr_dismissed_update";
@@ -28,22 +28,20 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
   if (collapsed) {
     return (
       <div className="px-2">
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <a
-                href={data.html_url}
-                target="_blank"
-                rel="noreferrer"
-                aria-label={`Update available: ${data.latest}`}
-                className="flex h-9 items-center justify-center rounded-md text-success transition-colors hover:bg-accent"
-              >
-                <Download className="h-4 w-4 shrink-0" />
-              </a>
-            </TooltipTrigger>
-            <TooltipContent side="right">Update available: {data.latest}</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <a
+              href={data.html_url}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={`Update available: ${data.latest}`}
+              className="flex h-9 items-center justify-center rounded-md text-success transition-colors hover:bg-accent"
+            >
+              <Download className="h-4 w-4 shrink-0" />
+            </a>
+          </TooltipTrigger>
+          <TooltipContent side="right">Update available: {data.latest}</TooltipContent>
+        </Tooltip>
       </div>
     );
   }

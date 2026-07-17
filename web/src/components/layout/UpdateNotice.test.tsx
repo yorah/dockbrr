@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { server } from "@/test/msw";
 import { renderWithClient } from "@/test/utils";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { UpdateNotice, DISMISS_KEY } from "./UpdateNotice";
 
 const available = {
@@ -65,7 +66,11 @@ describe("UpdateNotice", () => {
 
   test("collapsed variant renders an icon-only link, no card text", async () => {
     server.use(http.get("/api/updates/self", () => HttpResponse.json(available)));
-    renderWithClient(<UpdateNotice collapsed={true} />);
+    renderWithClient(
+      <TooltipProvider delayDuration={300}>
+        <UpdateNotice collapsed={true} />
+      </TooltipProvider>,
+    );
     const link = await screen.findByRole("link", { name: /update available/i });
     expect(link).toHaveAttribute("href", available.html_url);
     expect(screen.queryByText(/view release/i)).not.toBeInTheDocument();
