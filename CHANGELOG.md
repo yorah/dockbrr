@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.0](https://github.com/yorah/dockbrr/compare/v0.3.1...v0.4.0) (2026-07-17)
+
+
+### Features
+
+* signal GitHub rate-limit when a changelog can't be fetched ([#27](https://github.com/yorah/dockbrr/issues/27)) ([7d591e1](https://github.com/yorah/dockbrr/commit/7d591e1e1f79842b5edfc3dfb26bb32ed2b8f2f8))
+* **web:** show project health indicator on the dashboard project row ([#25](https://github.com/yorah/dockbrr/issues/25)) ([23c3054](https://github.com/yorah/dockbrr/commit/23c30542f3478432479f396cc47206ab454f1533))
+
+
+### Bug Fixes
+
+* **detect:** name the "from" version of a floating tag from the running image label ([#26](https://github.com/yorah/dockbrr/issues/26)) ([342900a](https://github.com/yorah/dockbrr/commit/342900a82d26ead135a56a7e47c6d6c2a67ec453))
+* **web:** match Current-image version weight to Latest column ([#24](https://github.com/yorah/dockbrr/issues/24)) ([5c82082](https://github.com/yorah/dockbrr/commit/5c820829d4bc6e031c8fe5dd6fb8e941b8b4705d))
+
 ## [0.3.1](https://github.com/yorah/dockbrr/compare/v0.3.0...v0.3.1) (2026-07-16)
 
 
