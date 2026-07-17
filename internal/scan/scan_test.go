@@ -257,6 +257,110 @@ func TestCheckServiceNotifyRefiresAfterDriftClearsAndReturns(t *testing.T) {
 	}
 }
 
+func TestCheckServiceCreatesCurrentRowWhenUpToDateNoHistory(t *testing.T) {
+	db := openScanStore(t)
+	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
+	sid, _ := store.NewServices(db).Upsert(store.Service{
+		ProjectID: pid, Name: "app", ImageRef: "ghcr.io/acme/web:1.2.3",
+		// ImageVersion (the running image's version label) is deliberately
+		// DIFFERENT from the reverse-looked ResolvedVersion below, so the row's
+		// version asserted at the end proves ResolvedVersion wins the precedence.
+		CurrentDigest: "sha256:cur", ImageVersion: "0.0.0-label",
+	})
+	// The reverse-looked release version the UI shows for the running digest.
+	_, _ = store.NewImages(db).Upsert(store.Image{
+		Repo: "ghcr.io/acme/web", Digest: "sha256:cur",
+		Labels: `{"org.opencontainers.image.source":"https://github.com/acme/web"}`,
+	})
+	_ = store.NewImages(db).SetResolvedVersion("ghcr.io/acme/web", "sha256:cur", "1.2.3")
+
+	updates := store.NewUpdates(db)
+	det := fakeDetector{upd: nil} // up to date
+	cl := &fakeChangelog{text: "# 1.2.3 notes", url: "https://github.com/acme/web/releases/tag/1.2.3"}
+	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil, nil)
+
+	if err := s.CheckService(context.Background(), sid); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := updates.ListLastAppliedByService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("len(rows) = %d, want 1 current row (%+v)", len(rows), rows)
+	}
+	r := rows[0]
+	if r.Status != "current" {
+		t.Fatalf("status = %q, want current", r.Status)
+	}
+	if r.FromDigest != "sha256:cur" || r.ToDigest != "sha256:cur" {
+		t.Fatalf("digests = (%q,%q), want both sha256:cur", r.FromDigest, r.ToDigest)
+	}
+	if r.ToVersion != "1.2.3" || r.FromVersion != "1.2.3" {
+		t.Fatalf("versions = (%q,%q), want 1.2.3 (ResolvedVersion must win over ImageVersion 0.0.0-label)", r.FromVersion, r.ToVersion)
+	}
+	if r.ChangelogText != "# 1.2.3 notes" || r.ChangelogURL == "" {
+		t.Fatalf("changelog not persisted on current row: %+v", r)
+	}
+	// The resolver saw the running image's labels (repo resolution).
+	if cl.gotLabels["org.opencontainers.image.source"] != "https://github.com/acme/web" {
+		t.Fatalf("resolver got labels %v, want stored source label", cl.gotLabels)
+	}
+}
+
+func TestCheckServiceSkipsCurrentRowWhenHistoryExists(t *testing.T) {
+	db := openScanStore(t)
+	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
+	sid, _ := store.NewServices(db).Upsert(store.Service{
+		ProjectID: pid, Name: "app", ImageRef: "ghcr.io/acme/web:1.2.3",
+		CurrentDigest: "sha256:cur", ImageVersion: "1.2.3",
+	})
+	updates := store.NewUpdates(db)
+	// Pre-existing applied history: a current row must NOT be created.
+	if _, err := updates.Upsert(store.Update{
+		ServiceID: sid, FromDigest: "sha256:old", ToDigest: "sha256:cur",
+		Tag: "1.2.3", Status: "applied",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	det := fakeDetector{upd: nil}
+	cl := &fakeChangelog{text: "should not be called for current", url: "https://x"}
+	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil, nil)
+
+	if err := s.CheckService(context.Background(), sid); err != nil {
+		t.Fatal(err)
+	}
+
+	var cnt int
+	_ = db.QueryRow(`SELECT COUNT(*) FROM updates WHERE service_id=? AND status='current'`, sid).Scan(&cnt)
+	if cnt != 0 {
+		t.Fatalf("current rows = %d, want 0 (history existed)", cnt)
+	}
+}
+
+func TestCheckServiceCurrentRowRateLimited(t *testing.T) {
+	db := openScanStore(t)
+	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
+	sid, _ := store.NewServices(db).Upsert(store.Service{
+		ProjectID: pid, Name: "app", ImageRef: "ghcr.io/acme/web:1.2.3",
+		CurrentDigest: "sha256:cur", ImageVersion: "1.2.3",
+	})
+	updates := store.NewUpdates(db)
+	det := fakeDetector{upd: nil}
+	cl := &fakeChangelog{err: changelog.ErrRateLimited}
+	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil, nil)
+
+	if err := s.CheckService(context.Background(), sid); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := updates.ListLastAppliedByService()
+	if len(rows) != 1 || rows[0].ChangelogStatus != "rate_limited" {
+		t.Fatalf("want single current row marked rate_limited, got %+v", rows)
+	}
+}
+
 func TestCheckAllSweepsAllServices(t *testing.T) {
 	db := openScanStore(t)
 	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})

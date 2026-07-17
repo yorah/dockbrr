@@ -211,6 +211,34 @@ func TestUpdatesGetLatestOpenByService(t *testing.T) {
 	}
 }
 
+func TestHasAnyByService(t *testing.T) {
+	db := openImagesStore(t)
+	sid := seedService(t, db)
+	u := store.NewUpdates(db)
+
+	has, err := u.HasAnyByService(sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if has {
+		t.Fatal("HasAnyByService = true for a service with no update rows, want false")
+	}
+
+	if _, err := u.Upsert(store.Update{
+		ServiceID: sid, FromDigest: "sha256:a", ToDigest: "sha256:b",
+		Tag: "1.0", Status: "dismissed",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	has, err = u.HasAnyByService(sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !has {
+		t.Fatal("HasAnyByService = false after inserting a row, want true")
+	}
+}
+
 func TestUpdatesRecordDriftNewThenIdempotent(t *testing.T) {
 	db := openImagesStore(t)
 	sid := seedService(t, db)
@@ -930,5 +958,108 @@ func TestUpdatesSetChangelogClearsStatus(t *testing.T) {
 	}
 	if got.ChangelogText != "notes body" || got.ChangelogURL != "https://example.com/notes" {
 		t.Fatalf("changelog content = (%q,%q)", got.ChangelogURL, got.ChangelogText)
+	}
+}
+
+func TestListLastAppliedPrefersAppliedOverCurrent(t *testing.T) {
+	db := openImagesStore(t)
+	sid := seedService(t, db)
+	u := store.NewUpdates(db)
+
+	// A synthetic current-version row (from == to), then a real applied update.
+	if _, err := u.Upsert(store.Update{
+		ServiceID: sid, FromDigest: "sha256:cur", ToDigest: "sha256:cur",
+		FromVersion: "1.0", ToVersion: "1.0", Tag: "1.0", Severity: "current", Status: "current",
+		ChangelogURL: "https://x/1.0", ChangelogText: "# 1.0 current",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	appliedID, err := u.Upsert(store.Update{
+		ServiceID: sid, FromDigest: "sha256:cur", ToDigest: "sha256:new",
+		Tag: "1.1", Severity: "minor", Status: "applied",
+		ChangelogURL: "https://x/1.1", ChangelogText: "# 1.1 applied",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := u.ListLastAppliedByService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1 (%+v)", len(got), got)
+	}
+	if got[0].ID != appliedID {
+		t.Fatalf("got id %d, want applied %d (current must not win)", got[0].ID, appliedID)
+	}
+}
+
+// TestListLastAppliedTieBreakIgnoresIDAndTimestamp isolates the status sort key
+// from the id/timestamp fallback: the applied row is inserted FIRST, then the
+// current row SECOND, so the current row has the higher id and an equal-or-later
+// detected_at. If applied still wins, it can only be the primary
+// ORDER BY (status='current') key doing it, not the id/timestamp tie-break. This
+// is the reversed-insert counterpart to TestListLastAppliedPrefersAppliedOverCurrent
+// (where applied was also the newest row, so that test alone could not tell the
+// two orderings apart).
+func TestListLastAppliedTieBreakIgnoresIDAndTimestamp(t *testing.T) {
+	db := openImagesStore(t)
+	sid := seedService(t, db)
+	u := store.NewUpdates(db)
+
+	// Applied first (lower id), current second (higher id, equal-or-later ts).
+	appliedID, err := u.Upsert(store.Update{
+		ServiceID: sid, FromDigest: "sha256:cur", ToDigest: "sha256:new",
+		Tag: "1.1", Severity: "minor", Status: "applied",
+		ChangelogURL: "https://x/1.1", ChangelogText: "# 1.1 applied",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	curID, err := u.Upsert(store.Update{
+		ServiceID: sid, FromDigest: "sha256:cur", ToDigest: "sha256:cur",
+		FromVersion: "1.0", ToVersion: "1.0", Tag: "1.0", Severity: "current", Status: "current",
+		ChangelogURL: "https://x/1.0", ChangelogText: "# 1.0 current",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if curID <= appliedID {
+		t.Fatalf("test precondition broken: current id %d should exceed applied id %d", curID, appliedID)
+	}
+
+	got, err := u.ListLastAppliedByService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != appliedID {
+		t.Fatalf("got %+v, want applied id %d to win over newer current id %d (status key must dominate id/timestamp)", got, appliedID, curID)
+	}
+}
+
+func TestListLastAppliedReturnsCurrentWhenOnly(t *testing.T) {
+	db := openImagesStore(t)
+	sid := seedService(t, db)
+	u := store.NewUpdates(db)
+
+	curID, err := u.Upsert(store.Update{
+		ServiceID: sid, FromDigest: "sha256:cur", ToDigest: "sha256:cur",
+		FromVersion: "1.0", ToVersion: "1.0", Tag: "1.0", Severity: "current", Status: "current",
+		ChangelogURL: "https://x/1.0", ChangelogText: "# 1.0 current",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := u.ListLastAppliedByService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != curID {
+		t.Fatalf("got %+v, want single current row id %d", got, curID)
+	}
+	if got[0].Status != "current" || got[0].ChangelogText != "# 1.0 current" {
+		t.Fatalf("current row not carried faithfully: %+v", got[0])
 	}
 }

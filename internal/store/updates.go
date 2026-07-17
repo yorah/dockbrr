@@ -340,29 +340,54 @@ func (u *Updates) GetLatestOpenByService(serviceID int64) (Update, error) {
 	return up, err
 }
 
-// ListLastAppliedByService returns, for each service that has ever had an
-// update applied, that service's most recently APPLIED update, changelog
-// columns included. Ordering prefers applied_at (when the apply actually ran,
-// via MarkApplied); rows applied before migration 0007 introduced that column
-// have a NULL applied_at and fall back to detected_at, so legacy data keeps
-// its old (approximate) ordering instead of erroring or vanishing. It is the
-// read path behind the dashboard's "last applied changelog": an applied
-// update leaves ListVisible, but its cached changelog stays on the row
-// (SetStatus/MarkApplied never clear it), so the dashboard can keep showing
-// it once the pending update is gone.
+// HasAnyByService reports whether the service has any update row at all,
+// regardless of status. scan uses it to gate synthetic current-version row
+// creation: a current row is written only for a service with no history.
+func (u *Updates) HasAnyByService(serviceID int64) (bool, error) {
+	var one int
+	err := u.db.QueryRow(
+		`SELECT 1 FROM updates WHERE service_id=? LIMIT 1`, serviceID,
+	).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// ListLastAppliedByService returns, for each service, the newest
+// changelog-bearing non-open row among status IN ('applied', 'current'),
+// changelog columns included, with 'applied' outranking 'current' for the
+// same service regardless of timestamp (a real apply beats a synthetic
+// current-version baseline). Ordering within a tier prefers applied_at (when
+// the apply actually ran, via MarkApplied); rows applied before migration
+// 0007 introduced that column have a NULL applied_at and fall back to
+// detected_at, so legacy data keeps its old (approximate) ordering instead
+// of erroring or vanishing. It is the read path behind the dashboard's "last
+// applied changelog": an applied update leaves ListVisible, but its cached
+// changelog stays on the row (SetStatus/MarkApplied never clear it), so the
+// dashboard can keep showing it once the pending update is gone.
 //
-// Only status='applied' rows are considered; a row RecordDrift has flipped back
-// to 'available' is therefore (correctly) no longer the last applied one. It is
-// pending again and the dashboard renders it via the normal updates list.
+// Only status IN ('applied', 'current') rows are considered; a row
+// RecordDrift has flipped back to 'available' is therefore (correctly) no
+// longer the last applied one. It is pending again and the dashboard renders
+// it via the normal updates list.
 func (u *Updates) ListLastAppliedByService() ([]Update, error) {
 	rows, err := u.db.Query(
 		`SELECT id, service_id, from_digest, to_digest, from_version, to_version,
 		        tag, severity, changelog_url, changelog_text, changelog_status, status, detected_at, applied_at
 		   FROM updates
-		  WHERE status='applied'
+		  WHERE status IN ('applied','current')
 		    AND id = (SELECT id FROM updates u2
-		               WHERE u2.service_id = updates.service_id AND u2.status='applied'
-		               ORDER BY COALESCE(u2.applied_at, u2.detected_at) DESC, u2.id DESC LIMIT 1)
+		               WHERE u2.service_id = updates.service_id
+		                 AND u2.status IN ('applied','current')
+		               -- applied outranks current for the same service (a real apply
+		               -- beats a synthetic baseline); (status='current') sorts 0/1 so
+		               -- applied(0) comes first, then newest-first within a tier.
+		               ORDER BY (u2.status='current'),
+		                        COALESCE(u2.applied_at, u2.detected_at) DESC, u2.id DESC LIMIT 1)
 		  ORDER BY service_id`,
 	)
 	if err != nil {

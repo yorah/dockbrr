@@ -213,3 +213,9 @@ Known-accepted:
 Non-blocking Minors deferred from the whole-branch review (behavior correct, gaps are test-only):
 - [x] [crl-M1] FIXED: changelog/github_test now covers both a positive 429+remaining:0 case (TestGitHubRateLimitedYieldsErrRateLimited table over 403/429) and an explicit "403 header-absent" negative case (403-header-absent subtest).
 - [x] [crl-M2] FIXED: scan_test TestCheckServiceClearsRateLimitedStatusOnSuccess drives the full round-trip through CheckService (seed rate_limited -> resolve returns content -> changelog_status back to '' + content persisted).
+
+## Current-version changelog for up-to-date services (2026-07-17, feat/current-version-changelog)
+
+Non-blocking Minors deferred from the whole-branch review (behavior correct, gaps are test-only):
+- [x] [cvc-M1] FIXED: added TestListLastAppliedTieBreakIgnoresIDAndTimestamp (updates_test.go) inserting applied first, current second (higher id, equal-or-later ts) and asserting applied still wins, isolating the ORDER BY (status='current') key from the id/timestamp fallback.
+- [x] [cvc-M2] FIXED: scan create-row test now sets ImageVersion="0.0.0-label" distinct from ResolvedVersion="1.2.3" and asserts the row version is "1.2.3", proving ResolvedVersion wins the precedence.

@@ -134,6 +134,7 @@ function ActionsCell({
   // a fresh one for something the user (or something else) removed.
   const canApply = update?.status === "available" && service.state !== "gone";
   const isHistory = !!changelog && changelog !== update;
+  const isCurrent = isHistory && changelog?.status === "current";
   // "gone" services have no container left to start/stop/restart: only Logs
   // (which reads cached history, not a live container) still makes sense.
   const gone = service.state === "gone";
@@ -154,9 +155,11 @@ function ActionsCell({
               className="h-7 w-7 p-0"
               disabled={!changelog}
               aria-label={
-                isHistory
-                  ? `Last applied changelog for ${service.name}`
-                  : `Changelog for ${service.name}`
+                isCurrent
+                  ? `Current version changelog for ${service.name}`
+                  : isHistory
+                    ? `Last applied changelog for ${service.name}`
+                    : `Changelog for ${service.name}`
               }
               onClick={(e) => {
                 e.stopPropagation();
@@ -166,7 +169,9 @@ function ActionsCell({
               <Eye className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>{isHistory ? "Last applied changelog" : "Changelog"}</TooltipContent>
+          <TooltipContent>
+            {isCurrent ? "Current version changelog" : isHistory ? "Last applied changelog" : "Changelog"}
+          </TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
