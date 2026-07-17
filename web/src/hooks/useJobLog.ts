@@ -21,6 +21,10 @@ export function useJobLog(jobId: number | null) {
   const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
+    // Intentional reset-then-resubscribe when jobId changes; a key-based
+    // remount would change this hook's public shape (it's a hook, not a
+    // component to key), out of scope for a lint fix.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLines([]);
     setClosed(false);
     if (jobId == null) return;

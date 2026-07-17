@@ -53,6 +53,11 @@ export function LogsDrawer({ service, open, onOpenChange }: LogsDrawerProps) {
 
   useEffect(() => {
     if (open && service) {
+      // Intentional reset-then-fetch on open/service change; restructuring to
+      // a key-based remount would change the drawer's mount lifecycle (state,
+      // animation), out of scope for a lint fix. requestedServiceId already
+      // guards against a stale in-flight response clobbering this reset.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLogs(null);
       load();
     }

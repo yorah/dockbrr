@@ -29,6 +29,8 @@ jobs:
       - run: npm ci
       - name: Typecheck
         run: ./node_modules/.bin/tsc -b --noEmit
+      - name: Lint
+        run: npm run lint
       - name: Test
         run: npm test
       - name: Build SPA
