@@ -21,8 +21,10 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
   if (dismissed === data.latest) return null;
 
   const dismiss = () => {
-    localStorage.setItem(DISMISS_KEY, data.latest);
-    setDismissed(data.latest);
+    // Guarded by the update_available check above: the backend always sends
+    // latest/html_url together with update_available:true.
+    localStorage.setItem(DISMISS_KEY, data.latest!);
+    setDismissed(data.latest!);
   };
 
   if (collapsed) {

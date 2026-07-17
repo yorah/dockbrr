@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"dockbrr/internal/detect"
+	"dockbrr/internal/logger"
 	"dockbrr/internal/store"
 )
 
@@ -69,8 +70,10 @@ func (c *Checker) Check(ctx context.Context) (Result, error) {
 		if haveCache {
 			// Best-effort: serve stale and leave checked_at untouched so the
 			// next request retries GitHub rather than waiting out the TTL.
+			logger.Debugf("selfupdate: github fetch failed, serving stale cache: %v", err)
 			return c.result(tag, url, checkedAt), nil
 		}
+		logger.Debugf("selfupdate: github fetch failed, no cache: %v", err)
 		return Result{Current: c.current}, err
 	}
 
@@ -137,6 +140,9 @@ func (c *Checker) readCache() (tag, url string, checkedAt time.Time, ok bool) {
 		return "", "", time.Time{}, false
 	}
 	url, _ = c.settings.Get(keyURL)
+	if url == "" {
+		return "", "", time.Time{}, false
+	}
 	ts, err := c.settings.Get(keyCheckedAt)
 	if err != nil {
 		return "", "", time.Time{}, false

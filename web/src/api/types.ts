@@ -103,9 +103,9 @@ export interface SystemStatus {
   version: string;
 }
 export interface SelfUpdate {
-  current: string;
-  latest: string;
-  html_url: string;
+  current?: string;
+  latest?: string;
+  html_url?: string;
   update_available: boolean;
   checked_at?: string;
 }
