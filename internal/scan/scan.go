@@ -106,6 +106,13 @@ func (s *Scanner) CheckService(ctx context.Context, serviceID int64) error {
 		s.mu.Lock()
 		delete(s.notifiedTo, serviceID)
 		s.mu.Unlock()
+		// A historyless, up-to-date service still deserves a changelog: write a
+		// synthetic current-version row (from == to) so the dashboard can show
+		// what the running version shipped. Only when the service has no update
+		// row at all, so we never shadow real (open/applied/dismissed) history.
+		if err := s.ensureCurrentChangelog(ctx, svc); err != nil {
+			logger.Errorf("scan: ensure current changelog (service %d (%s)): %v", svc.ID, svc.Name, err)
+		}
 		return nil // up-to-date / unmonitorable
 	}
 	logger.Infof("scan: update available service %d (%s): %s -> %s [%s]",
@@ -134,6 +141,72 @@ func (s *Scanner) CheckService(ctx context.Context, serviceID int64) error {
 	case text != "" || url != "":
 		if serr := s.updates.SetChangelog(upd.ID, url, text); serr != nil {
 			logger.Errorf("scan: persist changelog (update %d): %v", upd.ID, serr)
+		}
+	}
+	return nil
+}
+
+// ensureCurrentChangelog writes a synthetic status='current' update row for an
+// up-to-date, historyless service and resolves its changelog. The row is
+// from == to == the current running version, so the resolver returns that
+// version's own release notes. It is inert everywhere pending/applied logic
+// lives (those key on 'available'/'applied'); only the dashboard's last-applied
+// fallback surfaces it. A missing/failed changelog is non-fatal.
+func (s *Scanner) ensureCurrentChangelog(ctx context.Context, svc store.Service) error {
+	if svc.CurrentDigest == "" {
+		return nil // nothing to key the row on
+	}
+	has, err := s.updates.HasAnyByService(svc.ID)
+	if err != nil {
+		return err
+	}
+	if has {
+		return nil // real (or prior current) history already provides a changelog
+	}
+
+	repo, tag := detect.SplitRef(svc.ImageRef)
+	version := svc.ImageVersion
+	var labels map[string]string
+	if img, gerr := s.images.GetByDigest(repo, svc.CurrentDigest); gerr == nil {
+		if img.ResolvedVersion != "" {
+			version = img.ResolvedVersion
+		}
+		if img.Labels != "" {
+			_ = json.Unmarshal([]byte(img.Labels), &labels)
+		}
+	}
+	if version == "" {
+		version = tag
+	}
+
+	row := store.Update{
+		ServiceID:   svc.ID,
+		FromDigest:  svc.CurrentDigest,
+		ToDigest:    svc.CurrentDigest,
+		FromVersion: version,
+		ToVersion:   version,
+		Tag:         tag,
+		Severity:    "current",
+		Status:      "current",
+	}
+	id, err := s.updates.Upsert(row)
+	if err != nil {
+		return err
+	}
+	row.ID = id
+
+	remote := registry.RemoteImage{Ref: svc.ImageRef, Digest: svc.CurrentDigest, Labels: labels}
+	text, url, err := s.changelog.Resolve(ctx, row, remote)
+	switch {
+	case errors.Is(err, changelog.ErrRateLimited):
+		if serr := s.updates.SetChangelogStatus(id, "rate_limited"); serr != nil {
+			logger.Errorf("scan: persist changelog status (current row %d): %v", id, serr)
+		}
+	case err != nil:
+		return err
+	case text != "" || url != "":
+		if serr := s.updates.SetChangelog(id, url, text); serr != nil {
+			logger.Errorf("scan: persist changelog (current row %d): %v", id, serr)
 		}
 	}
 	return nil
