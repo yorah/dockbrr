@@ -90,3 +90,16 @@ jobs:
           distribution: goreleaser
           version: "~> v2"
           args: release --snapshot --clean
+
+  govulncheck:
+    name: Go vulnerabilities (govulncheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      # Gate with an explicit allowlist of accepted advisories (see the
+      # script header for why); any NEW advisory fails the job.
+      - run: ./scripts/govulncheck-gate.sh
