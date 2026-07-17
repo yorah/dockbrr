@@ -159,6 +159,47 @@ func TestDetectNoUpdateWhenDigestMatches(t *testing.T) {
 	}
 }
 
+// TestDetectUpToDateSupersedesStaleOpenUpdate proves that once a service's
+// running image reaches an available update's target, a later up-to-date detect
+// closes that stale row. This is the dockbrr-on-itself case: applying a
+// self-update recreates dockbrr's OWN container, killing the process before
+// worker.MarkApplied runs, so the update stays 'available'. The next detect
+// finds the tag already up to date and must supersede it, otherwise the
+// dashboard keeps rendering the running image with the stale from_version.
+func TestDetectUpToDateSupersedesStaleOpenUpdate(t *testing.T) {
+	db := newDB(t)
+	svc := seedSvc(t, db, "ghcr.io/yorah/dockbrr:latest", "sha256:v041", false)
+	// 1. Drift detected: remote latest moved to 0.4.2's digest.
+	drift := fakeResolver{img: registry.RemoteImage{
+		Digest: "sha256:v042", PlatformDigest: "sha256:v042",
+		Labels: map[string]string{"org.opencontainers.image.version": "0.4.2"},
+	}}
+	if _, err := newDetector(db, drift).Detect(context.Background(), svc); err != nil {
+		t.Fatal(err)
+	}
+	if open, _ := store.NewUpdates(db).ListOpen(); len(open) != 1 {
+		t.Fatalf("after drift: open updates = %d, want 1", len(open))
+	}
+
+	// 2. Container reached the target OUTSIDE MarkApplied (self-update recreate).
+	// A fresh detect now sees latest == the running digest.
+	svc.CurrentDigest = "sha256:v042"
+	upToDate := fakeResolver{img: registry.RemoteImage{
+		Digest: "sha256:v042", PlatformDigest: "sha256:v042",
+		Labels: map[string]string{"org.opencontainers.image.version": "0.4.2"},
+	}}
+	u, err := newDetector(db, upToDate).Detect(context.Background(), svc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u != nil {
+		t.Fatalf("up-to-date service must yield no update, got %+v", u)
+	}
+	if open, _ := store.NewUpdates(db).ListOpen(); len(open) != 0 {
+		t.Fatalf("stale update not superseded: open updates = %d, want 0", len(open))
+	}
+}
+
 func TestDetectMatchesOnPlatformDigest(t *testing.T) {
 	db := newDB(t)
 	// Container recorded the platform manifest digest; index digest differs.

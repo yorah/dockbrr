@@ -73,6 +73,7 @@ func (d *Detector) Detect(ctx context.Context, svc store.Service) (*store.Update
 	if remoteDigest, ok := d.freshCachedDigest(repo, tag, now); ok {
 		logger.Tracef("detect: %s cache hit digest %s", svc.ImageRef, shortDigest(remoteDigest))
 		if remoteDigest == svc.CurrentDigest {
+			d.closeStaleUpdates(svc.ID)
 			return nil, nil
 		}
 		return d.record(svc, tag, remoteDigest, "", "", "digest-only")
@@ -145,6 +146,7 @@ func (d *Detector) Detect(ctx context.Context, svc store.Service) (*store.Update
 		// digest to a release tag once (cached on the image row, keyed by
 		// digest) so the list can surface "v1.13.2" for a pending-nothing
 		// service. Best-effort: any failure just leaves the version blank.
+		d.closeStaleUpdates(svc.ID)
 		d.resolveCurrentVersion(ctx, repo, tag, svc.CurrentDigest, remote)
 		return nil, nil
 	}
@@ -294,6 +296,25 @@ func (d *Detector) reverseVersions(ctx context.Context, repo, fromDigest string,
 		}
 	}
 	return fromVer, toVer
+}
+
+// closeStaleUpdates supersedes any still-available update for an up-to-date
+// service. The running image already matches the tracked tag's remote, so no
+// prior drift is actionable; a lingering row would keep the dashboard showing
+// the old target as available and label the running image with its stale
+// from_version. This fires when a container reached its target outside the
+// apply path, e.g. dockbrr updating its own container (the recreate kills the
+// process before MarkApplied runs) or an image updated outside dockbrr.
+// Best-effort: a failure is logged, never fatal.
+func (d *Detector) closeStaleUpdates(serviceID int64) {
+	if d.updates == nil {
+		return
+	}
+	if n, err := d.updates.SupersedeAllOpen(serviceID); err != nil {
+		logger.Warnf("detect: supersede stale updates for service %d: %v", serviceID, err)
+	} else if n > 0 {
+		logger.Debugf("detect: service %d up to date, superseded %d stale update(s)", serviceID, n)
+	}
 }
 
 // resolveCurrentVersion names the running version of an up-to-date service and
