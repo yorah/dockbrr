@@ -4,6 +4,7 @@ import { useProjects, useServiceEvents } from "@/hooks/queries";
 import { HistoryTimeline } from "@/components/HistoryTimeline";
 import { DigestShort } from "@/components/DigestShort";
 import { StatusBadge, computeStatus } from "@/components/StatusBadge";
+import { Badge } from "@/components/ui/badge";
 import type { Project, Service } from "@/api/types";
 
 function findService(
@@ -54,7 +55,11 @@ export function ServiceDetail({ serviceId }: ServiceDetailProps) {
           <>
             <div className="flex items-center gap-2">
               <h1 className="text-lg font-semibold">{found.service.name}</h1>
-              <StatusBadge status={computeStatus(found.service, undefined)} />
+              {found.service.image_local ? (
+                <Badge variant="default">Local</Badge>
+              ) : (
+                <StatusBadge status={computeStatus(found.service, undefined)} />
+              )}
             </div>
             <p className="mt-1 text-sm text-muted-foreground">{found.service.image_ref}</p>
             <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
