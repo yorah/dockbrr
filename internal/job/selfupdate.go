@@ -94,13 +94,21 @@ func (u *SelfUpdater) Handle(ctx context.Context, job store.Job) {
 // ref. A pinned tag is swapped to latestTag, with any leading "v" stripped to
 // match the image tag convention (GoReleaser publishes "1.2.0", the release
 // tag is "v1.2.0").
+//
+// A digest pins the ref regardless of any tag alongside it (docker pull
+// resolves the digest and ignores the tag), so a digest always counts as
+// "pinned" and must be swapped to latestTag. detect.SplitRef drops the
+// digest before returning repo/tag, so a digest-stripped ref is otherwise
+// indistinguishable from a genuinely untagged (floating) repo; the digest
+// check below must happen before that distinction is lost.
 func targetSelfImage(currentRef, latestTag string) string {
+	hasDigest := strings.Contains(currentRef, "@")
 	repo, tag := detect.SplitRef(currentRef)
-	if tag == "" || tag == "latest" {
-		return currentRef
-	}
 	norm := strings.TrimPrefix(latestTag, "v")
 	if norm == "" {
+		return currentRef
+	}
+	if !hasDigest && (tag == "" || tag == "latest") {
 		return currentRef
 	}
 	return repo + ":" + norm

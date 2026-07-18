@@ -14,6 +14,9 @@ func TestTargetSelfImage(t *testing.T) {
 		{"ghcr.io/yorah/dockbrr:latest", "v1.2.0", "ghcr.io/yorah/dockbrr:latest"}, // floating kept
 		{"ghcr.io/yorah/dockbrr:1.1.0", "v1.2.0", "ghcr.io/yorah/dockbrr:1.2.0"},   // pinned swapped, v stripped
 		{"ghcr.io/yorah/dockbrr", "v1.2.0", "ghcr.io/yorah/dockbrr"},               // untagged == floating, kept
+		{"ghcr.io/yorah/dockbrr@sha256:deadbeef", "v1.2.0", "ghcr.io/yorah/dockbrr:1.2.0"},        // pure digest, moved off pin
+		{"ghcr.io/yorah/dockbrr:latest@sha256:deadbeef", "v1.2.0", "ghcr.io/yorah/dockbrr:1.2.0"}, // tag+digest, latest was pinned
+		{"ghcr.io/yorah/dockbrr:1.1.0@sha256:deadbeef", "v1.2.0", "ghcr.io/yorah/dockbrr:1.2.0"},  // tag+digest, semver pinned
 	}
 	for _, c := range cases {
 		if got := targetSelfImage(c.ref, c.latest); got != c.want {
