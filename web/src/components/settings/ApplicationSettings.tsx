@@ -1,7 +1,7 @@
 import { useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
-import { toast } from "sonner";
+import { notify } from "@/lib/notify";
 import { apiFetch } from "@/api/client";
 import { keys } from "@/api/keys";
 import { useSystemInfo } from "@/hooks/queries";
@@ -133,14 +133,14 @@ export function ApplicationSettings() {
               try {
                 const body = JSON.parse(await file.text());
                 await apiFetch("/api/settings/import", { method: "POST", body });
-                toast.success("Settings imported");
+                notify.success("Settings imported");
                 qc.invalidateQueries({ queryKey: keys.settings });
                 qc.invalidateQueries({ queryKey: keys.registries });
                 // An imported log_level is validated + applied server-side; the
                 // Logs page reads this query independently of keys.settings.
                 qc.invalidateQueries({ queryKey: keys.logConfig });
               } catch {
-                toast.error("Import failed. Invalid file?");
+                notify.error("Import failed. Invalid file?");
               } finally {
                 e.target.value = "";
               }

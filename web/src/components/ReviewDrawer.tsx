@@ -1,4 +1,4 @@
-import { toast } from "sonner";
+import { notify } from "@/lib/notify";
 import {
   Drawer,
   DrawerContent,
@@ -51,7 +51,7 @@ export function ReviewDrawer({ update, service, project, onClose, onApplied }: R
           markServiceBusy(service.id, res.job_id, "apply");
           onApplied(res.job_id);
         },
-        onError: () => toast.error("Failed to start apply. Please try again."),
+        onError: () => notify.error("Failed to start apply. Please try again."),
       },
     );
   }
@@ -59,14 +59,14 @@ export function ReviewDrawer({ update, service, project, onClose, onApplied }: R
   function handleDismiss() {
     dismiss.mutate(update.id, {
       onSuccess: () => onClose(),
-      onError: () => toast.error("Failed to dismiss update. Please try again."),
+      onError: () => notify.error("Failed to dismiss update. Please try again."),
     });
   }
 
   function handleRestore() {
     restore.mutate(update.id, {
       onSuccess: () => onClose(),
-      onError: () => toast.error("Failed to restore update. Please try again."),
+      onError: () => notify.error("Failed to restore update. Please try again."),
     });
   }
 

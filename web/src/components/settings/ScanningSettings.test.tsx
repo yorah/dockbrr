@@ -114,7 +114,7 @@ describe("ScanningSettings", () => {
     });
 
     // Changing concurrency specifically warns that it needs a restart.
-    await waitFor(() => expect(toast.info).toHaveBeenCalledWith("Concurrency applies after restart"));
+    await waitFor(() => expect(toast.info).toHaveBeenCalledWith(expect.stringMatching(/^Concurrency applies after restart/), expect.anything()));
   });
 
   // Carried over from GeneralSettings.test.tsx ("dims a field left at its

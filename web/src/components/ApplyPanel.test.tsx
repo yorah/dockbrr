@@ -64,7 +64,7 @@ test("shows Applied and no rollback when the apply job succeeds", async () => {
       HttpResponse.json({ id: 7, type: "apply", status: "success", scope: "service", exit_code: 0, error: "" })),
   );
   renderWithClient(<ApplyPanel jobId={7} onClose={vi.fn()} />);
-  await waitFor(() => expect(screen.getByText("Applied")).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText(/^Applied/)).toBeInTheDocument());
   expect(screen.queryByText(/health gate: waiting/i)).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /rollback/i })).not.toBeInTheDocument();
 });
@@ -76,7 +76,7 @@ test("labels a successful rollback job as Rolled back", async () => {
       HttpResponse.json({ id: 8, type: "rollback", status: "success", scope: "service", exit_code: 0, error: "" })),
   );
   renderWithClient(<ApplyPanel jobId={8} onClose={vi.fn()} />);
-  await waitFor(() => expect(screen.getByText("Rolled back")).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText(/^Rolled back/)).toBeInTheDocument());
 });
 
 test("auto-closes a few seconds after the job succeeds", async () => {
@@ -87,9 +87,19 @@ test("auto-closes a few seconds after the job succeeds", async () => {
   );
   const onClose = vi.fn();
   renderWithClient(<ApplyPanel jobId={7} onClose={onClose} />);
-  await waitFor(() => expect(screen.getByText("Applied")).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText(/^Applied/)).toBeInTheDocument());
   expect(onClose).not.toHaveBeenCalled();
   // Success dismisses on its own after AUTO_CLOSE_SUCCESS_MS (4s); failures
   // are covered by the rollback tests above, which rely on the panel staying.
   await waitFor(() => expect(onClose).toHaveBeenCalled(), { timeout: 6000 });
 }, 10000);
+
+test("success line shows the closing countdown", async () => {
+  __setEventSourceFactory((url) => new FakeES(url) as unknown as EventSource);
+  server.use(
+    http.get("/api/jobs/:id", () =>
+      HttpResponse.json({ id: 7, type: "apply", status: "success", scope: "service", exit_code: 0, error: "" })),
+  );
+  renderWithClient(<ApplyPanel jobId={7} onClose={vi.fn()} />);
+  expect(await screen.findByText(/Applied · closing in \ds/)).toBeInTheDocument();
+});

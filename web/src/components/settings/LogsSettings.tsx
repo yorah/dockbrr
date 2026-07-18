@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { notify } from "@/lib/notify";
 import { apiFetch } from "@/api/client";
 import { keys } from "@/api/keys";
 import { useSaveSettings } from "@/hooks/mutations";
@@ -79,7 +79,7 @@ export function LogsSettings() {
                 qc.setQueryData<LogConfig>(keys.logConfig, (o) => (o ? { ...o, level } : o));
                 save.mutate(
                   { log_level: level },
-                  { onSuccess: () => toast.success(`Log level: ${level}`) },
+                  { onSuccess: () => notify.success(`Log level: ${level}`) },
                 );
               }}
             >

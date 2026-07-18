@@ -23,12 +23,13 @@ const FAILED_STATUSES = new Set(["failed", "canceled"]);
 const TERMINAL_STATUSES = new Set(["success", "failed", "canceled"]);
 const AUTO_CLOSE_SUCCESS_MS = 4000;
 
-function StatusLine({ status, type, error }: { status?: string; type?: string; error?: string }) {
+function StatusLine({ status, type, error, closingIn }: { status?: string; type?: string; error?: string; closingIn?: number }) {
   if (status === "success") {
+    const suffix = closingIn !== undefined ? ` · closing in ${closingIn}s` : "";
     if (type === "rollback") {
-      return <p className="text-sm font-medium text-warning">Rolled back</p>;
+      return <p className="text-sm font-medium text-warning">Rolled back{suffix}</p>;
     }
-    return <p className="text-sm font-medium text-success">Applied</p>;
+    return <p className="text-sm font-medium text-success">Applied{suffix}</p>;
   }
   if (status && FAILED_STATUSES.has(status)) {
     return (
@@ -72,10 +73,20 @@ export function ApplyPanel({ jobId: initialJobId, onClose, readOnly = false }: A
   // to read the success line, short enough that start/stop (which open this
   // panel too) don't leave it parked over the table. Failures stay open, the
   // error and the rollback offer must not vanish out from under the user.
+  // closingIn drives the visible "closing in Ns" countdown on the status line.
+  const [closingIn, setClosingIn] = useState<number | undefined>(undefined);
   useEffect(() => {
     if (readOnly || status !== "success") return;
+    setClosingIn(AUTO_CLOSE_SUCCESS_MS / 1000);
+    const tick = setInterval(
+      () => setClosingIn((s) => (s !== undefined && s > 1 ? s - 1 : s)),
+      1000,
+    );
     const t = setTimeout(onClose, AUTO_CLOSE_SUCCESS_MS);
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(t);
+      clearInterval(tick);
+    };
   }, [readOnly, status, onClose]);
 
   return (
@@ -92,7 +103,7 @@ export function ApplyPanel({ jobId: initialJobId, onClose, readOnly = false }: A
         </Button>
       </header>
 
-      <StatusLine status={status} type={jobType} error={job.data?.error} />
+      <StatusLine status={status} type={jobType} error={job.data?.error} closingIn={closingIn} />
 
       <div
         ref={logRef}

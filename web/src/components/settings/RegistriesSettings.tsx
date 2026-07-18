@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { toast } from "sonner";
+import { notify } from "@/lib/notify";
 import { useRegistries, useSettings } from "@/hooks/queries";
 import { useAddRegistry, useDeleteRegistry } from "@/hooks/mutations";
 import { useSettingsForm, type SettingKey } from "@/hooks/useSettingsForm";
@@ -65,7 +65,7 @@ export function RegistriesSettings() {
                       disabled={deleteRegistry.isPending}
                       onClick={() =>
                         deleteRegistry.mutate(r.RegistryHost, {
-                          onSuccess: () => toast.success("Registry removed"),
+                          onSuccess: () => notify.success("Registry removed"),
                         })
                       }
                     >
@@ -86,7 +86,7 @@ export function RegistriesSettings() {
                 { host, username, password },
                 {
                   onSuccess: () => {
-                    toast.success("Registry added");
+                    notify.success("Registry added");
                     setHost("");
                     setUsername("");
                     setPassword("");
