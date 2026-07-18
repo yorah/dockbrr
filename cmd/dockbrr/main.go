@@ -228,7 +228,12 @@ func run(args []string, getenv func(string) string) error {
 			jobs, updates, services, projects, snapshots, events,
 			resolver, dc, plat, healthTimeout, healthPoll, engine,
 		)
-		engine.SetHandler(job.NewDispatcher(applier, lifecycle, standalone, projects))
+		dispatcher := job.NewDispatcher(applier, lifecycle, standalone, projects)
+		if selfID := job.SelfContainerID(); selfID != "" {
+			logger.Infof("job engine: self-guard armed (own container %s)", selfID)
+			dispatcher.SetSelfGuard(selfID, services, jobs, engine)
+		}
+		engine.SetHandler(dispatcher)
 		if n, rerr := engine.ResumeInterrupted(); rerr != nil {
 			logger.Errorf("job engine: resume interrupted: %v", rerr)
 		} else if n > 0 {
