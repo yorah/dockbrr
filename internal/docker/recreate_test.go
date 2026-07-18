@@ -135,3 +135,20 @@ func TestCreateArgsFromInspectRejectsEmpty(t *testing.T) {
 		t.Fatal("expected an error when Config is missing")
 	}
 }
+
+func TestCreateArgsFromInspectPreservesComposeLabels(t *testing.T) {
+	raw := `{"Name":"/dockbrr","Config":{"Image":"old:1","Labels":{"com.docker.compose.project":"stack","com.docker.compose.service":"dockbrr"}},"HostConfig":{},"NetworkSettings":{"Networks":{}}}`
+	cfg, _, _, _, err := createArgsFromInspect(raw, "new:2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Image != "new:2" {
+		t.Errorf("image = %q, want new:2", cfg.Image)
+	}
+	if cfg.Labels["com.docker.compose.project"] != "stack" {
+		t.Errorf("compose project label dropped: %v", cfg.Labels)
+	}
+	if cfg.Labels["com.docker.compose.service"] != "dockbrr" {
+		t.Errorf("compose service label dropped: %v", cfg.Labels)
+	}
+}
