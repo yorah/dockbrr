@@ -115,7 +115,7 @@ type RemoteState struct {
 	RemoteDigest   string
 	ResolvedAt     *time.Time
 	ManifestLabels string // raw JSON object
-	Status         string // ok|rate_limited|error
+	Status         string // ok|rate_limited|error|not_found|local
 }
 
 // RemoteStates is the repository for the image_remote_state table.

@@ -67,6 +67,14 @@ func (d *Detector) Detect(ctx context.Context, svc store.Service) (*store.Update
 	repo, tag := SplitRef(svc.ImageRef)
 	now := time.Now().UTC()
 
+	// A locally built image (compose build: directive) has no registry to check.
+	// Record it as such and skip all network resolution: the periodic scan never
+	// probes it, and the dashboard reads it as intentional rather than an error.
+	if svc.ImageLocal {
+		_ = d.states.Upsert(store.RemoteState{Repo: repo, Tag: tag, Status: "local", ResolvedAt: &now})
+		return nil, nil
+	}
+
 	// 1. Try a fresh cache hit (digest only, no labels). A cache hit
 	// intentionally skips the semver tag scan below (digest-only path) until
 	// the cache TTL expires.

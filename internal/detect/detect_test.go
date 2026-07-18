@@ -818,6 +818,30 @@ func TestDetectReverseLookupUsesTagCache(t *testing.T) {
 	}
 }
 
+// TestDetectSkipsLocalImage proves a locally built (compose build:) image
+// short-circuits before any registry call: Detect must return (nil, nil) and
+// record the remote state as "local" without ever invoking the resolver.
+func TestDetectSkipsLocalImage(t *testing.T) {
+	db := newDB(t)
+	svc := seedSvc(t, db, "api:dev", "sha256:x", false)
+	svc.ImageLocal = true
+	r := fakeResolver{err: errors.New("resolver must not be called for a local image")}
+	u, err := newDetector(db, r).Detect(context.Background(), svc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u != nil {
+		t.Fatalf("upd = %+v, want nil (local image)", u)
+	}
+	st, err := store.NewRemoteStates(db).Get("api", "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Status != "local" {
+		t.Fatalf("status = %q, want local", st.Status)
+	}
+}
+
 func TestDetectSplitRef(t *testing.T) {
 	cases := []struct{ ref, repo, tag string }{
 		{"nginx", "nginx", "latest"},
