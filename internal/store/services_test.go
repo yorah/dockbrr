@@ -240,6 +240,19 @@ func TestServicesSetAutoUpdateNullable(t *testing.T) {
 	}
 }
 
+func TestServicesUpdateState(t *testing.T) {
+	db := openTempStore(t)
+	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
+	sid, _ := store.NewServices(db).Upsert(store.Service{ProjectID: pid, Name: "app", State: "running"})
+	if err := store.NewServices(db).UpdateState(sid, "exited"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := store.NewServices(db).Get(sid)
+	if got.State != "exited" {
+		t.Fatalf("state = %q, want exited", got.State)
+	}
+}
+
 func TestServicesUpdateRuntime(t *testing.T) {
 	db := openTempStore(t)
 	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})

@@ -283,3 +283,58 @@ func TestLifecycleMutatorErrorFailsJob(t *testing.T) {
 		t.Fatalf("status = %q, want failed", done.Status)
 	}
 }
+
+// fakeRediscoverer returns fixed container ids so rediscover() proceeds to the
+// live-inspect state stamp.
+type fakeRediscoverer struct{ ids []string }
+
+func (f fakeRediscoverer) LocateService(_ context.Context, _, _ string) ([]string, string, error) {
+	return f.ids, "sha256:d", nil
+}
+
+// A finished stop must stamp the live-inspected state into the store, so the
+// API's post-job read reflects the action immediately (the discovery
+// reconcile's debounce lands only later).
+func TestLifecycleStopStampsInspectedState(t *testing.T) {
+	db := openJobDB(t)
+	pid, dbSvc, _ := seedComposeProject(t, db)
+	m := &fakeMutator{inspectState: "exited"}
+	jobs := store.NewJobs(db)
+	jid, _ := jobs.Enqueue(store.Job{Type: "stop", ServiceID: &dbSvc.ID, ProjectID: &pid, Scope: "service"})
+	j, _ := jobs.Get(jid)
+
+	l := job.NewLifecycle(
+		jobs, store.NewServices(db), store.NewProjects(db), store.NewEvents(db),
+		m, fakeComposer{}, fakeRediscoverer{ids: []string{"db-cid"}}, nil,
+	)
+	l.Handle(context.Background(), j)
+
+	got, _ := store.NewServices(db).Get(dbSvc.ID)
+	if got.State != "exited" {
+		t.Fatalf("stored state = %q after stop, want exited (live-inspect stamp)", got.State)
+	}
+}
+
+func TestLifecycleStartStampsInspectedState(t *testing.T) {
+	db := openJobDB(t)
+	pid, dbSvc, _ := seedComposeProject(t, db)
+	m := &fakeMutator{inspectState: "running"}
+	jobs := store.NewJobs(db)
+	jid, _ := jobs.Enqueue(store.Job{Type: "start", ServiceID: &dbSvc.ID, ProjectID: &pid, Scope: "service"})
+	j, _ := jobs.Get(jid)
+
+	// Seed a stale stopped state to prove the stamp overwrites it.
+	if err := store.NewServices(db).UpdateState(dbSvc.ID, "exited"); err != nil {
+		t.Fatal(err)
+	}
+	l := job.NewLifecycle(
+		jobs, store.NewServices(db), store.NewProjects(db), store.NewEvents(db),
+		m, fakeComposer{}, fakeRediscoverer{ids: []string{"db-cid"}}, nil,
+	)
+	l.Handle(context.Background(), j)
+
+	got, _ := store.NewServices(db).Get(dbSvc.ID)
+	if got.State != "running" {
+		t.Fatalf("stored state = %q after start, want running (live-inspect stamp)", got.State)
+	}
+}

@@ -238,6 +238,16 @@ func (l *Lifecycle) rediscover(ctx context.Context, svc store.Service, proj stor
 	if err := l.services.UpdateRuntime(svc.ID, ids, digest); err != nil {
 		logger.Warnf("lifecycle: update runtime for %s: %v", svc.Name, err)
 	}
+	// Stamp the live post-action state. The stored state is otherwise only
+	// refreshed by the event-driven discovery reconcile, whose debounce lands
+	// AFTER job_finished, so without this the UI's post-job refetch reads the
+	// pre-action state (an enabled Stop button for a container that just
+	// stopped). Best-effort: the reconcile corrects any miss shortly after.
+	if st, ierr := l.mutator.InspectStatus(ctx, ids[0]); ierr == nil && st.State != "" {
+		if uerr := l.services.UpdateState(svc.ID, st.State); uerr != nil {
+			logger.Warnf("lifecycle: update state for %s: %v", svc.Name, uerr)
+		}
+	}
 }
 
 // eventKind maps a lifecycle job type to its history event kind (past tense,

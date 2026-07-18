@@ -207,6 +207,18 @@ func (s *Services) UpdateRuntime(id int64, containerIDs []string, currentDigest 
 	return err
 }
 
+// UpdateState stamps the service's runtime state (verified by a live inspect,
+// e.g. right after a lifecycle job). Discovery's event-driven reconcile remains
+// the authority; this closes the window until its next (debounced) pass, so an
+// API read immediately after a job reflects the action that just ran.
+func (s *Services) UpdateState(id int64, state string) error {
+	_, err := s.db.Exec(
+		`UPDATE services SET state=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+		state, id,
+	)
+	return err
+}
+
 // UpdateImageRef persists a service's tracked image reference (e.g. after a
 // cross-tag apply moved it to a newer tag). Discovery would re-derive it on the
 // next reconcile; this makes the dashboard reflect it immediately.
