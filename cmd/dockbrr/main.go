@@ -72,6 +72,14 @@ func main() {
 		_, _ = os.Stdout.WriteString("dockbrr " + version.Version + "\n")
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "self-update-swap" {
+		// Detached helper entry point: must not open the DB or bind the HTTP
+		// server, so it returns here instead of falling into run().
+		if err := runSelfUpdateSwap(os.Args[2:]); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if err := run(os.Args[1:], os.Getenv); err != nil {
 		log.Fatal(err)
 	}
