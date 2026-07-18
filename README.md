@@ -28,6 +28,14 @@ message broker, nothing else to run alongside it.
 - Optionally auto-applies updates on a schedule, per project and per service, off by
   default.
 
+## Screenshots
+
+![Dashboard: projects, pending updates with severity, per-service actions](docs/screenshots/dashboard-dark.png)
+
+| Changelog for a pending update | Live apply log with health gate |
+| --- | --- |
+| ![Changelog drawer showing release notes](docs/screenshots/changelog.png) | ![Apply panel streaming the compose pull/up log](docs/screenshots/apply.png) |
+
 ## Safety model
 
 This is the part that matters most, since dockbrr is something you give access to
