@@ -285,6 +285,23 @@ func TestServicesList(t *testing.T) {
 	}
 }
 
+func TestServiceImageLocalRoundTrips(t *testing.T) {
+	db := openTempStore(t)
+	pid := seedProject(t, db)
+	services := store.NewServices(db)
+	id, err := services.Upsert(store.Service{ProjectID: pid, Name: "api", ImageRef: "api:dev", CurrentDigest: "sha256:x", State: "running", ImageLocal: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := services.Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.ImageLocal {
+		t.Fatalf("ImageLocal = false after round-trip, want true")
+	}
+}
+
 func TestEffectiveAutoUpdate(t *testing.T) {
 	tru, fls := true, false
 	on := store.Project{AutoUpdateEnabled: true}
