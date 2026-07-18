@@ -111,24 +111,42 @@ func (j *Jobs) Get(id int64) (Job, error) {
 	return job, err
 }
 
-// List returns the most recent jobs, newest first. limit is clamped to
-// (0, 500]; an out-of-range value falls back to 50.
-func (j *Jobs) List(limit int) ([]Job, error) {
+// JobListRow is a Job plus the display names the Jobs history screen shows.
+// LEFT JOINed, so a job whose service/project has since been deleted comes
+// back with an empty name rather than dropping off the list.
+type JobListRow struct {
+	Job
+	ProjectName string
+	ServiceName string
+}
+
+// List returns the most recent jobs, newest first, with project/service names
+// resolved. limit is clamped to (0, 500]; an out-of-range value falls back to 50.
+func (j *Jobs) List(limit int) ([]JobListRow, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 50
 	}
-	rows, err := j.db.Query(`SELECT `+jobColumns+` FROM jobs ORDER BY id DESC LIMIT ?`, limit)
+	rows, err := j.db.Query(`
+		SELECT j.id, j.type, j.project_id, j.service_id, j.status, j.scope,
+		       j.requested_by, j.created_at, j.started_at, j.finished_at, j.exit_code, j.error,
+		       COALESCE(p.name, ''), COALESCE(s.name, '')
+		  FROM jobs j
+		  LEFT JOIN projects p ON p.id = j.project_id
+		  LEFT JOIN services s ON s.id = j.service_id
+		 ORDER BY j.id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	var out []Job
+	var out []JobListRow
 	for rows.Next() {
-		job, err := scanJob(rows)
+		var row JobListRow
+		job, err := scanJob(rows, &row.ProjectName, &row.ServiceName)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, job)
+		row.Job = job
+		out = append(out, row)
 	}
 	return out, rows.Err()
 }
@@ -173,8 +191,9 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
-// scanJob scans a jobColumns row into a Job.
-func scanJob(row rowScanner) (Job, error) {
+// scanJob scans a jobColumns row into a Job. extra receives any additional
+// columns selected after jobColumns (List's joined name columns).
+func scanJob(row rowScanner, extra ...any) (Job, error) {
 	var (
 		job        Job
 		projID     sql.NullInt64
@@ -183,10 +202,12 @@ func scanJob(row rowScanner) (Job, error) {
 		finishedAt sql.NullTime
 		exitCode   sql.NullInt64
 	)
-	if err := row.Scan(
+	dest := []any{
 		&job.ID, &job.Type, &projID, &svcID, &job.Status, &job.Scope,
 		&job.RequestedBy, &job.CreatedAt, &startedAt, &finishedAt, &exitCode, &job.Error,
-	); err != nil {
+	}
+	dest = append(dest, extra...)
+	if err := row.Scan(dest...); err != nil {
 		return Job{}, err
 	}
 	if projID.Valid {

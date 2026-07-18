@@ -200,6 +200,28 @@ func TestJobsListNewestFirst(t *testing.T) {
 	if got[0].ID != ids[2] || got[1].ID != ids[1] {
 		t.Fatalf("ids = [%d,%d], want [%d,%d] (newest first)", got[0].ID, got[1].ID, ids[2], ids[1])
 	}
+	if got[0].ProjectName != "p" || got[0].ServiceName != "app" {
+		t.Fatalf("names = %q/%q, want p/app", got[0].ProjectName, got[0].ServiceName)
+	}
+}
+
+func TestJobsListNamesEmptyWhenUnset(t *testing.T) {
+	db := openImagesStore(t)
+	jobs := store.NewJobs(db)
+	// No project/service reference at all (e.g. a sync job).
+	if _, err := jobs.Enqueue(store.Job{Type: "sync"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := jobs.List(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1", len(got))
+	}
+	if got[0].ProjectName != "" || got[0].ServiceName != "" {
+		t.Fatalf("names = %q/%q, want empty", got[0].ProjectName, got[0].ServiceName)
+	}
 }
 
 func TestJobsListDefaultsLimit(t *testing.T) {

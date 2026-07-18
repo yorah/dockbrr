@@ -22,6 +22,10 @@ type jobDTO struct {
 	RequestedBy string `json:"requested_by"`
 	CreatedAt   string `json:"created_at"`
 	FinishedAt  string `json:"finished_at"`
+	// Resolved display names, list endpoint only ("" on the single-job
+	// endpoint and for since-deleted services/projects).
+	ProjectName string `json:"project_name,omitempty"`
+	ServiceName string `json:"service_name,omitempty"`
 }
 
 // toJobDTO converts a store.Job into the wire shape shared by the single-job
@@ -68,7 +72,10 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]jobDTO, 0, len(jobs))
 	for _, j := range jobs {
-		out = append(out, toJobDTO(j))
+		dto := toJobDTO(j.Job)
+		dto.ProjectName = j.ProjectName
+		dto.ServiceName = j.ServiceName
+		out = append(out, dto)
 	}
 	writeJSON(w, http.StatusOK, out)
 }

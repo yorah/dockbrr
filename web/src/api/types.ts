@@ -80,6 +80,10 @@ export interface JobRow extends Job {
   requested_by: string;
   created_at: string;
   finished_at: string;
+  // Resolved display names; absent/"" when the project/service was deleted
+  // or the job has no target (e.g. sync).
+  project_name?: string;
+  service_name?: string;
 }
 export interface ServiceEvent {
   id: number;

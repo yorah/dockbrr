@@ -21,6 +21,16 @@ const STATUS_VARIANT: Record<string, "default" | "success" | "warning" | "danger
 
 const FINISHED = new Set(["success", "failed", "canceled"]);
 
+// Human-readable job target: "project / service" for service-scoped jobs,
+// the project name alone for project-scoped ones. Empty when the job has no
+// target (sync) or the names were deleted since.
+function jobTarget(j: JobRow): string {
+  const project = j.project_name ?? "";
+  const service = j.service_name ?? "";
+  if (j.scope === "service" && service) return project ? `${project} / ${service}` : service;
+  return project;
+}
+
 // Rollback restores the service's LATEST snapshot, so it is only offered on
 // the most recent finished apply per service: on an older row it would restore
 // a newer state than the row suggests.
@@ -108,6 +118,7 @@ export function JobsScreen() {
                 <TableHead>#</TableHead>
                 <TableHead>Type</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Target</TableHead>
                 <TableHead>Scope</TableHead>
                 <TableHead>Requested by</TableHead>
                 <TableHead>Created</TableHead>
@@ -120,6 +131,9 @@ export function JobsScreen() {
                   <TableCell>{j.id}</TableCell>
                   <TableCell>{j.type}</TableCell>
                   <TableCell><Badge variant={STATUS_VARIANT[j.status] ?? "default"}>{j.status}</Badge></TableCell>
+                  <TableCell>
+                    {jobTarget(j) || <span className="text-muted-foreground">-</span>}
+                  </TableCell>
                   <TableCell>{j.scope}</TableCell>
                   <TableCell>{j.requested_by}</TableCell>
                   <TableCell>{new Date(j.created_at).toLocaleString()}</TableCell>

@@ -35,6 +35,7 @@ test("renders jobs rows with status badges", async () => {
         {
           id: 2, type: "apply", status: "success", scope: "service", exit_code: 0, error: "",
           project_id: 1, service_id: 10, requested_by: "user",
+          project_name: "smoke", service_name: "web",
           created_at: "2026-07-06T10:00:00Z", finished_at: "2026-07-06T10:00:05Z",
         },
         {
@@ -54,6 +55,9 @@ test("renders jobs rows with status badges", async () => {
   expect(screen.getByText("failed")).toBeInTheDocument();
   expect(screen.getByText("user")).toBeInTheDocument();
   expect(screen.getByText("scheduler")).toBeInTheDocument();
+  // Target column: "project / service" when names are resolved, "-" otherwise.
+  expect(screen.getByText("smoke / web")).toBeInTheDocument();
+  expect(screen.getByText("-")).toBeInTheDocument();
 });
 
 test("shows the empty state when there are no jobs", async () => {
