@@ -16,7 +16,10 @@ export function AppLayout() {
   const overlay = !collapsed && isNarrow;
   return (
     <TooltipProvider delayDuration={300}>
-      <div className="flex min-h-screen bg-background text-foreground">
+      {/* h-screen (not min-h-screen): the shell is pinned to the viewport and
+          `main` below scrolls internally, so the scrollbar lives inside the
+          content pane under the topbar instead of on the window. */}
+      <div className="flex h-screen bg-background text-foreground">
         {overlay && (
           <div className="fixed inset-0 z-30 bg-overlay/50" aria-hidden="true" onClick={toggle} />
         )}
@@ -29,7 +32,7 @@ export function AppLayout() {
         />
         <div className="flex min-w-0 flex-1 flex-col">
           <Topbar collapsed={collapsed} onToggle={toggle} />
-          <main className="flex min-h-0 w-full flex-1 flex-col p-4">
+          <main className="flex min-h-0 w-full flex-1 flex-col overflow-y-auto p-4">
             <Outlet />
           </main>
         </div>
