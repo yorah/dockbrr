@@ -23,6 +23,7 @@ type serviceDTO struct {
 	Pinned            bool   `json:"pinned"`
 	Drifted           bool   `json:"drifted"`
 	Healthcheck       bool   `json:"healthcheck"`
+	ImageLocal        bool   `json:"image_local"`
 	AutoUpdateEnabled *bool  `json:"auto_update_enabled"`
 	CheckStatus       string `json:"check_status"`
 	LastChecked       string `json:"last_checked"`
@@ -95,6 +96,7 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 				Pinned:            sv.Pinned,
 				Drifted:           sv.Drifted,
 				Healthcheck:       sv.Healthcheck,
+				ImageLocal:        sv.ImageLocal,
 				AutoUpdateEnabled: sv.AutoUpdateEnabled,
 				CheckStatus:       checkStatus,
 				LastChecked:       lastChecked,
