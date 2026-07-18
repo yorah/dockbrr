@@ -101,20 +101,25 @@ export function ApplyPanel({ jobId: initialJobId, onClose, readOnly = false }: A
   // panel too) don't leave it parked over the table. Failures stay open, the
   // error and the rollback offer must not vanish out from under the user.
   // closingIn drives the visible "closing in Ns" countdown on the status line.
+  // State only changes inside the interval/cleanup (never synchronously in the
+  // effect body, react-hooks/set-state-in-effect); the first second's value is
+  // the render-time default below.
   const [closingIn, setClosingIn] = useState<number | undefined>(undefined);
   useEffect(() => {
     if (readOnly || status !== "success") return;
-    setClosingIn(AUTO_CLOSE_SUCCESS_MS / 1000);
+    const full = AUTO_CLOSE_SUCCESS_MS / 1000;
     const tick = setInterval(
-      () => setClosingIn((s) => (s !== undefined && s > 1 ? s - 1 : s)),
+      () => setClosingIn((s) => (s === undefined ? full - 1 : s > 1 ? s - 1 : s)),
       1000,
     );
     const t = setTimeout(onClose, AUTO_CLOSE_SUCCESS_MS);
     return () => {
       clearTimeout(t);
       clearInterval(tick);
+      setClosingIn(undefined);
     };
   }, [readOnly, status, onClose]);
+  const closingInShown = status === "success" && !readOnly ? (closingIn ?? AUTO_CLOSE_SUCCESS_MS / 1000) : undefined;
 
   return (
     <section
@@ -130,7 +135,7 @@ export function ApplyPanel({ jobId: initialJobId, onClose, readOnly = false }: A
         </Button>
       </header>
 
-      <StatusLine status={status} type={jobType} error={job.data?.error} closingIn={closingIn} />
+      <StatusLine status={status} type={jobType} error={job.data?.error} closingIn={closingInShown} />
 
       <div
         ref={logRef}
