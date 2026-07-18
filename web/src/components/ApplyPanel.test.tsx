@@ -103,3 +103,15 @@ test("success line shows the closing countdown", async () => {
   renderWithClient(<ApplyPanel jobId={7} onClose={vi.fn()} />);
   expect(await screen.findByText(/Applied · closing in \ds/)).toBeInTheDocument();
 });
+
+test("lifecycle jobs get their own title and success label", async () => {
+  __setEventSourceFactory((url) => new FakeES(url) as unknown as EventSource);
+  server.use(
+    http.get("/api/jobs/:id", () =>
+      HttpResponse.json({ id: 9, type: "stop", status: "success", scope: "service", exit_code: 0, error: "" })),
+  );
+  renderWithClient(<ApplyPanel jobId={9} onClose={vi.fn()} />);
+  expect(await screen.findByText(/Stopping \(job #9\)/)).toBeInTheDocument();
+  expect(screen.getByText(/^Stopped/)).toBeInTheDocument();
+  expect(screen.queryByText(/^Applied/)).not.toBeInTheDocument();
+});
