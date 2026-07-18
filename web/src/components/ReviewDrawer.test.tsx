@@ -35,6 +35,7 @@ const service: Service = {
   healthcheck: true,
   auto_update_enabled: null,
   check_status: "ok",
+  image_local: false,
   last_checked: "",
 };
 const project: Project = {

@@ -36,6 +36,7 @@ function project(): Project {
         healthcheck: true,
         auto_update_enabled: null,
         check_status: "ok",
+        image_local: false,
         last_checked: new Date().toISOString(),
       },
     ],

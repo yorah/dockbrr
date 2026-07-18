@@ -9,6 +9,7 @@ export interface Service {
   healthcheck: boolean;
   auto_update_enabled: boolean | null;
   check_status: string;
+  image_local: boolean;
   last_checked: string;
   /** Reverse-resolved running release for a floating tag with no pending
    * update; "" or absent when unknown. Always emitted by the API. */

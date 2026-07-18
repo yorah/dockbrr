@@ -5,7 +5,7 @@ import type { Service } from "@/api/types";
 const svc = (o: Partial<Service> = {}): Service => ({
   id: 1, name: "web", image_ref: "x:1", current_digest: "sha256:a",
   state: "running", pinned: false, drifted: false, healthcheck: false, auto_update_enabled: null,
-  check_status: "ok", last_checked: "", ...o,
+  check_status: "ok", image_local: false, last_checked: "", ...o,
 });
 
 test("pinned wins", () => {

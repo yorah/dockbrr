@@ -1479,3 +1479,41 @@ test("stopping a service disables its lifecycle buttons until the job clears", a
   await waitFor(() => expect(screen.getByRole("button", { name: "Stop web" })).toBeEnabled());
   expect(screen.getByRole("button", { name: "Restart web" })).toBeEnabled();
 });
+
+test("a locally built image shows the Local badge instead of Up to date, and is excluded from Apply all", async () => {
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 1,
+          name: "app",
+          kind: "compose",
+          working_dir: "/srv",
+          auto_update_enabled: false,
+          services: [
+            {
+              id: 10,
+              name: "web",
+              image_ref: "myapp:local",
+              current_digest: "sha256:a",
+              state: "running",
+              pinned: false,
+              healthcheck: false,
+              auto_update_enabled: null,
+              image_local: true,
+              check_status: "local",
+            },
+          ],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () => HttpResponse.json([])),
+  );
+  renderDashboardWithRouter();
+  await expandProject("app");
+  expect(await screen.findByText("Local")).toBeInTheDocument();
+  expect(screen.queryByText("Up to date")).not.toBeInTheDocument();
+  // No pending update exists for a local image (nothing to check against), so
+  // the project's Apply all stays disabled.
+  expect(await screen.findByRole("button", { name: "Apply all updates in app" })).toBeDisabled();
+});

@@ -1,4 +1,4 @@
-import { AlertTriangle, CircleSlash } from "lucide-react";
+import { AlertTriangle, CircleSlash, Wrench } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 const STATUS_TEXT: Record<string, string> = {
@@ -8,6 +8,8 @@ const STATUS_TEXT: Record<string, string> = {
     "Registry lookup failed (network or registry error). dockbrr retries on the next scan.",
   not_found:
     "Image not found in its registry. A locally built image can't be checked for updates; if this is a private image, add credentials in Settings, Registries.",
+  local:
+    "Built locally from a compose build: directive. There is no registry to check, so dockbrr does not track updates for it.",
 };
 
 // CheckStatusIcon renders the per-service registry check outcome in the
@@ -25,6 +27,9 @@ export function CheckStatusIcon({ status }: { status: string }) {
       break;
     case "error":
       icon = <AlertTriangle aria-label="Registry error" className="h-3.5 w-3.5 text-danger" />;
+      break;
+    case "local":
+      icon = <Wrench aria-label="Built locally" className="h-3.5 w-3.5 text-muted-foreground" />;
       break;
     default:
       icon = <CircleSlash aria-label="Image not in registry" className="h-3.5 w-3.5 text-muted-foreground" />;

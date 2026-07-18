@@ -397,8 +397,11 @@ function ProjectBulkActions({
   // Excludes gone services even though "Show removed" being off already hides
   // their row from the table. Otherwise Apply all would silently reanimate
   // a removed container the user never saw in this list.
+  // Locally built (compose build:) services have no registry to check, so
+  // they never carry an "available" update; excluded explicitly anyway so a
+  // future backend regression can't silently offer to "apply" one.
   const pending = project.services
-    .filter((s) => s.state !== "gone")
+    .filter((s) => s.state !== "gone" && !s.image_local)
     .map((s) => updatesByService.get(s.id))
     .filter((u): u is Update => u?.status === "available");
   return (
@@ -501,6 +504,10 @@ function buildColumns(
       cell: ({ row }) => {
         const r = row.original;
         if (r.kind !== "service") return null;
+        // Locally built images have no registry state to compare against, so
+        // they can never be "up to date" or "have an update"; a distinct grey
+        // badge here instead of computeStatus keeps them out of both tallies.
+        if (r.service.image_local) return <Badge variant="default">Local</Badge>;
         const status = computeStatus(
           r.service,
           r.update

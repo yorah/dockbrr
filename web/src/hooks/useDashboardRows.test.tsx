@@ -5,8 +5,8 @@ import type { Project, Update } from "@/api/types";
 const projects: Project[] = [{
   id: 1, name: "app", kind: "compose", working_dir: "/srv", auto_update_enabled: false, unmanaged: false, auto_named: false,
   services: [
-    { id: 10, name: "web", image_ref: "nginx:1.27", current_digest: "sha256:a", state: "running", pinned: false, drifted: false, healthcheck: false, auto_update_enabled: null, check_status: "ok", last_checked: "" },
-    { id: 11, name: "db", image_ref: "postgres:16", current_digest: "sha256:b", state: "running", pinned: true, drifted: false, healthcheck: true, auto_update_enabled: null, check_status: "ok", last_checked: "" },
+    { id: 10, name: "web", image_ref: "nginx:1.27", current_digest: "sha256:a", state: "running", pinned: false, drifted: false, healthcheck: false, auto_update_enabled: null, check_status: "ok", image_local: false, last_checked: "" },
+    { id: 11, name: "db", image_ref: "postgres:16", current_digest: "sha256:b", state: "running", pinned: true, drifted: false, healthcheck: true, auto_update_enabled: null, check_status: "ok", image_local: false, last_checked: "" },
   ],
 }];
 const updates: Update[] = [
@@ -40,7 +40,7 @@ describe("joinRows", () => {
       ...projects[0],
       services: [
         ...projects[0].services,
-        { id: 12, name: "cache", image_ref: "redis:7", current_digest: "sha256:d", state: "gone", pinned: false, drifted: false, healthcheck: false, auto_update_enabled: null, check_status: "ok", last_checked: "" },
+        { id: 12, name: "cache", image_ref: "redis:7", current_digest: "sha256:d", state: "gone", pinned: false, drifted: false, healthcheck: false, auto_update_enabled: null, check_status: "ok", image_local: false, last_checked: "" },
       ],
     }];
 
@@ -55,7 +55,7 @@ describe("joinRows", () => {
     const goneOnly: Project[] = [{
       id: 2, name: "torn-down", kind: "compose", working_dir: "/srv2", auto_update_enabled: false, unmanaged: false, auto_named: false,
       services: [
-        { id: 20, name: "old", image_ref: "redis:6", current_digest: "sha256:x", state: "gone", pinned: false, drifted: false, healthcheck: false, auto_update_enabled: null, check_status: "ok", last_checked: "" },
+        { id: 20, name: "old", image_ref: "redis:6", current_digest: "sha256:x", state: "gone", pinned: false, drifted: false, healthcheck: false, auto_update_enabled: null, check_status: "ok", image_local: false, last_checked: "" },
       ],
     }];
 
@@ -73,7 +73,7 @@ describe("joinRows", () => {
       ...projects[0],
       services: [
         ...projects[0].services,
-        { id: 12, name: "cache", image_ref: "redis:7", current_digest: "sha256:d", state: "gone", pinned: false, drifted: false, healthcheck: false, auto_update_enabled: null, check_status: "ok", last_checked: "" },
+        { id: 12, name: "cache", image_ref: "redis:7", current_digest: "sha256:d", state: "gone", pinned: false, drifted: false, healthcheck: false, auto_update_enabled: null, check_status: "ok", image_local: false, last_checked: "" },
       ],
     }];
     const rows = joinRows(withGone, updates, { onlyUpdates: false, project: "", status: "gone", search: "", showRemoved: false });
@@ -87,7 +87,7 @@ describe("joinRows", () => {
       ...projects[0],
       services: [
         ...projects[0].services,
-        { id: 13, name: "worker", image_ref: "busybox:1", current_digest: "sha256:e", state: "restarting", pinned: false, drifted: false, healthcheck: false, auto_update_enabled: null, check_status: "ok", last_checked: "" },
+        { id: 13, name: "worker", image_ref: "busybox:1", current_digest: "sha256:e", state: "restarting", pinned: false, drifted: false, healthcheck: false, auto_update_enabled: null, check_status: "ok", image_local: false, last_checked: "" },
       ],
     }];
     const rows = joinRows(withRestart, updates, { onlyUpdates: false, project: "", status: "restarting", search: "", showRemoved: false });
