@@ -406,6 +406,56 @@ func TestCheckServiceFreshInvalidatesDetectCache(t *testing.T) {
 	}
 }
 
+func TestCheckServiceFreshReopensRolledBack(t *testing.T) {
+	db := openScanStore(t)
+	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
+	sid, _ := store.NewServices(db).Upsert(store.Service{
+		ProjectID: pid, Name: "web", ImageRef: "nginx:1.25.0", CurrentDigest: "sha256:old",
+	})
+	updates := store.NewUpdates(db)
+	uid, _, err := updates.RecordDrift(store.Update{ServiceID: sid, ToDigest: "sha256:new", Status: "applied"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := updates.MarkRolledBack(sid, "sha256:new"); err != nil {
+		t.Fatal(err)
+	}
+
+	s := scan.New(fakeDetector{}, &fakeChangelog{}, store.NewServices(db), updates, store.NewImages(db), &spyInvalidator{}, nil)
+	if err := s.CheckServiceFresh(context.Background(), sid); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := updates.Get(uid); got.Status != "available" {
+		t.Fatalf("status = %q, want available (manual check lifts rolled_back suppression)", got.Status)
+	}
+}
+
+func TestCheckServiceKeepsRolledBackSuppressed(t *testing.T) {
+	// The poll path must NOT lift the suppression: that is what stops the
+	// scheduler from feeding a just-reverted target back to auto-apply.
+	db := openScanStore(t)
+	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
+	sid, _ := store.NewServices(db).Upsert(store.Service{
+		ProjectID: pid, Name: "web", ImageRef: "nginx:1.25.0", CurrentDigest: "sha256:old",
+	})
+	updates := store.NewUpdates(db)
+	uid, _, err := updates.RecordDrift(store.Update{ServiceID: sid, ToDigest: "sha256:new", Status: "applied"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := updates.MarkRolledBack(sid, "sha256:new"); err != nil {
+		t.Fatal(err)
+	}
+
+	s := scan.New(fakeDetector{}, &fakeChangelog{}, store.NewServices(db), updates, store.NewImages(db), &spyInvalidator{}, nil)
+	if err := s.CheckService(context.Background(), sid); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := updates.Get(uid); got.Status != "rolled_back" {
+		t.Fatalf("status = %q, want rolled_back (poll path keeps the suppression)", got.Status)
+	}
+}
+
 func TestCheckServiceDoesNotInvalidate(t *testing.T) {
 	// The periodic poll path (CheckService) must NOT touch the detect cache.
 	db := openScanStore(t)

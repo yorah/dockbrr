@@ -547,6 +547,43 @@ func TestMarkRolledBack(t *testing.T) {
 	}
 }
 
+func TestReopenRolledBack(t *testing.T) {
+	db := openImagesStore(t)
+	svcID := seedService(t, db)
+	other := seedServiceNamed(t, db, "other")
+	u := store.NewUpdates(db)
+
+	id, _, err := u.RecordDrift(store.Update{ServiceID: svcID, ToDigest: "A", Status: "applied"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := u.MarkRolledBack(svcID, "A"); err != nil {
+		t.Fatal(err)
+	}
+	// Another service's rolled_back row must not be touched.
+	oid, _, err := u.RecordDrift(store.Update{ServiceID: other, ToDigest: "A", Status: "applied"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := u.MarkRolledBack(other, "A"); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := u.ReopenRolledBack(svcID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("reopened %d, want 1", n)
+	}
+	if got, _ := u.Get(id); got.Status != "available" {
+		t.Fatalf("status = %q, want available", got.Status)
+	}
+	if got, _ := u.Get(oid); got.Status != "rolled_back" {
+		t.Fatalf("other service status = %q, want rolled_back (untouched)", got.Status)
+	}
+}
+
 func TestListVisibleIncludesRolledBack(t *testing.T) {
 	db := openImagesStore(t)
 	svcID := seedService(t, db)

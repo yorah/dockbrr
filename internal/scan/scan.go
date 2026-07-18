@@ -84,6 +84,16 @@ func (s *Scanner) CheckServiceFresh(ctx context.Context, serviceID int64) error 
 		}
 		logger.Debugf("scan: manual re-check service %d (%s) (cache invalidated)", serviceID, svc.Name)
 	}
+	// A manual check is the explicit "look again" gesture, so it also lifts the
+	// rolled_back suppression (RecordDrift preserves rolled_back on scheduled
+	// polls so auto-apply can never re-apply a just-reverted target on its own).
+	if s.updates != nil {
+		if n, err := s.updates.ReopenRolledBack(serviceID); err != nil {
+			logger.Errorf("scan: reopen rolled-back updates (service %d): %v", serviceID, err)
+		} else if n > 0 {
+			logger.Infof("scan: service %d manual check reopened %d rolled-back update(s)", serviceID, n)
+		}
+	}
 	return s.CheckService(ctx, serviceID)
 }
 

@@ -289,6 +289,23 @@ func (u *Updates) MarkRolledBack(serviceID int64, toDigest string) error {
 	return err
 }
 
+// ReopenRolledBack flips a service's rolled_back updates to available.
+// RecordDrift deliberately preserves rolled_back (so the scheduler's re-detect
+// can never feed a just-reverted target back to auto-apply), which means the
+// suppression can only be lifted by an explicit user action: the manual
+// per-service check calls this before detecting, so "check again" re-surfaces
+// the update the user rolled back. Returns rows reopened.
+func (u *Updates) ReopenRolledBack(serviceID int64) (int64, error) {
+	res, err := u.db.Exec(
+		`UPDATE updates SET status='available'
+		   WHERE service_id=? AND status='rolled_back'`,
+		serviceID)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // SetChangelog persists the resolved changelog url + text on the update row and
 // clears changelog_status (a successful resolve supersedes a prior rate-limit).
 func (u *Updates) SetChangelog(updateID int64, url, text string) error {
