@@ -73,7 +73,13 @@ func (d *Detector) Detect(ctx context.Context, svc store.Service) (*store.Update
 	if remoteDigest, ok := d.freshCachedDigest(repo, tag, now); ok {
 		logger.Tracef("detect: %s cache hit digest %s", svc.ImageRef, shortDigest(remoteDigest))
 		if remoteDigest == svc.CurrentDigest {
-			d.closeStaleUpdates(svc.ID)
+			// Only close updates whose target the service now RUNS. This path
+			// skipped the semver tag scan, so an open update targeting a
+			// different (newer) tag may still be perfectly current; supersede
+			// -all here would flap it closed on every cache-window re-check
+			// (e.g. a scan-all right after a manual per-service check) until
+			// the TTL expires and the full resolve re-opens it.
+			d.closeReachedUpdates(svc.ID, remoteDigest)
 			return nil, nil
 		}
 		return d.record(svc, tag, remoteDigest, "", "", "digest-only")
@@ -305,7 +311,9 @@ func (d *Detector) reverseVersions(ctx context.Context, repo, fromDigest string,
 // from_version. This fires when a container reached its target outside the
 // apply path, e.g. dockbrr updating its own container (the recreate kills the
 // process before MarkApplied runs) or an image updated outside dockbrr.
-// Best-effort: a failure is logged, never fatal.
+// Only called from the FULL-resolve path, where the semver scan has run and
+// "up to date" is authoritative for every candidate target. Best-effort: a
+// failure is logged, never fatal.
 func (d *Detector) closeStaleUpdates(serviceID int64) {
 	if d.updates == nil {
 		return
@@ -314,6 +322,21 @@ func (d *Detector) closeStaleUpdates(serviceID int64) {
 		logger.Warnf("detect: supersede stale updates for service %d: %v", serviceID, err)
 	} else if n > 0 {
 		logger.Debugf("detect: service %d up to date, superseded %d stale update(s)", serviceID, n)
+	}
+}
+
+// closeReachedUpdates is closeStaleUpdates' narrow sibling for the digest-only
+// cache-hit path: it supersedes only updates whose target digest the service
+// now runs, leaving different-tag (semver) targets open since that path cannot
+// judge them. Best-effort: a failure is logged, never fatal.
+func (d *Detector) closeReachedUpdates(serviceID int64, reachedDigest string) {
+	if d.updates == nil {
+		return
+	}
+	if n, err := d.updates.SupersedeOpenAtDigest(serviceID, reachedDigest); err != nil {
+		logger.Warnf("detect: supersede reached updates for service %d: %v", serviceID, err)
+	} else if n > 0 {
+		logger.Debugf("detect: service %d reached %s, superseded %d update(s)", serviceID, shortDigest(reachedDigest), n)
 	}
 }
 

@@ -200,6 +200,61 @@ func TestDetectUpToDateSupersedesStaleOpenUpdate(t *testing.T) {
 	}
 }
 
+// TestDetectCacheHitUpToDateKeepsSemverUpdateOpen pins the digest-only
+// cache-hit path's supersede scope: the tracked tag matching the running
+// digest says NOTHING about a semver update targeting a different tag (the
+// cache-hit path skips the tag scan), so that row must stay open. Before this
+// was narrowed, a scan-all inside the cache TTL right after a manual check
+// flapped the freshly (re)opened semver update back to superseded.
+func TestDetectCacheHitUpToDateKeepsSemverUpdateOpen(t *testing.T) {
+	db := newDB(t)
+	svc := seedSvc(t, db, "ghcr.io/acme/web:1.2.3", "sha256:old", false)
+	updates := store.NewUpdates(db)
+
+	// A semver update to a different tag's digest...
+	semverID, _, err := updates.RecordDrift(store.Update{
+		ServiceID: svc.ID, FromDigest: "sha256:old", ToDigest: "sha256:semver",
+		Tag: "1.3.0", Severity: "minor", Status: "available",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// ...and a same-tag update whose target the service has since reached
+	// (to_digest == running digest). RecordDrift's tail superseded the semver
+	// row (one-available invariant); force both open to observe the scope.
+	reachedID, _, err := updates.RecordDrift(store.Update{
+		ServiceID: svc.ID, FromDigest: "sha256:older", ToDigest: "sha256:old",
+		Tag: "1.2.3", Status: "available",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := updates.SetStatus(semverID, "available"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Fresh cache: tracked tag resolves to the running digest (up to date).
+	now := time.Now().UTC()
+	_ = store.NewRemoteStates(db).Upsert(store.RemoteState{
+		Repo: "ghcr.io/acme/web", Tag: "1.2.3", RemoteDigest: "sha256:old",
+		Status: "ok", ResolvedAt: &now,
+	})
+	r := fakeResolver{err: errors.New("resolver must not be called on a fresh cache hit")}
+	u, err := newDetector(db, r).Detect(context.Background(), svc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u != nil {
+		t.Fatalf("expected no update on cache-hit up-to-date, got %+v", u)
+	}
+	if got, _ := updates.Get(reachedID); got.Status != "superseded" {
+		t.Fatalf("reached-target row status = %q, want superseded", got.Status)
+	}
+	if got, _ := updates.Get(semverID); got.Status != "available" {
+		t.Fatalf("semver row status = %q, want available (cache-hit path must not close it)", got.Status)
+	}
+}
+
 func TestDetectMatchesOnPlatformDigest(t *testing.T) {
 	db := newDB(t)
 	// Container recorded the platform manifest digest; index digest differs.

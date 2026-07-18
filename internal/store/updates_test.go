@@ -547,6 +547,39 @@ func TestMarkRolledBack(t *testing.T) {
 	}
 }
 
+func TestSupersedeOpenAtDigest(t *testing.T) {
+	db := openImagesStore(t)
+	svcID := seedService(t, db)
+	u := store.NewUpdates(db)
+
+	semverID, _, err := u.RecordDrift(store.Update{ServiceID: svcID, ToDigest: "B", Status: "available"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reachedID, _, err := u.RecordDrift(store.Update{ServiceID: svcID, ToDigest: "A", Status: "available"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// RecordDrift's tail superseded the first row; force both open.
+	if err := u.SetStatus(semverID, "available"); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := u.SupersedeOpenAtDigest(svcID, "A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("superseded %d, want 1", n)
+	}
+	if got, _ := u.Get(reachedID); got.Status != "superseded" {
+		t.Fatalf("reached row status = %q, want superseded", got.Status)
+	}
+	if got, _ := u.Get(semverID); got.Status != "available" {
+		t.Fatalf("other-digest row status = %q, want available (untouched)", got.Status)
+	}
+}
+
 func TestReopenRolledBack(t *testing.T) {
 	db := openImagesStore(t)
 	svcID := seedService(t, db)
