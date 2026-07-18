@@ -1,0 +1,167 @@
+package docker
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+
+	dcontainer "github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/mount"
+)
+
+// UpdaterContainerName is the fixed name of the detached helper container that
+// performs a self-update swap. A fixed name lets dockbrr clean up a leftover
+// helper (from a failed swap) on its next boot.
+const UpdaterContainerName = "dockbrr-self-update"
+
+// ContainerImageRef returns a container's configured image reference (Config.Image).
+// Read-only.
+func (cl *Client) ContainerImageRef(ctx context.Context, id string) (string, error) {
+	ct, err := cl.c.ContainerInspect(ctx, id)
+	if err != nil {
+		return "", fmt.Errorf("docker: inspect %s: %w", id, err)
+	}
+	if ct.Config == nil {
+		return "", fmt.Errorf("docker: inspect %s: no config", id)
+	}
+	return ct.Config.Image, nil
+}
+
+// SpawnUpdater creates and starts a detached helper container that runs `image`
+// with `cmd`, bind-mounting the Docker socket so the helper can drive the daemon
+// after dockbrr itself stops. It is NOT auto-removed: a failed swap leaves the
+// container in place so its logs survive for `docker logs`; a successful swap's
+// leftover is pruned on the next dockbrr boot (RemoveLeftoverUpdater). Any prior
+// container with the fixed name is removed first. Returns the new helper
+// container id.
+func (cl *Client) SpawnUpdater(ctx context.Context, image string, cmd []string, socketPath string) (string, error) {
+	// A fresh self-update is starting: any container still holding the fixed
+	// name is a stale leftover from a prior attempt, so it is force-removed
+	// even if (unexpectedly) still running. This is deliberately more
+	// aggressive than the boot-time cleanup below, which leaves a running
+	// helper alone on the chance a swap is genuinely still in flight.
+	if id, ok, err := cl.ContainerIDByName(ctx, UpdaterContainerName); err != nil {
+		return "", fmt.Errorf("docker: check for leftover updater: %w", err)
+	} else if ok {
+		if err := cl.c.ContainerRemove(ctx, id, dcontainer.RemoveOptions{Force: true}); err != nil {
+			return "", fmt.Errorf("docker: remove leftover updater: %w", err)
+		}
+	}
+
+	cfg := &dcontainer.Config{Image: image, Cmd: cmd}
+	host := &dcontainer.HostConfig{
+		Mounts: []mount.Mount{{
+			Type:   mount.TypeBind,
+			Source: socketPath,
+			Target: socketPath,
+		}},
+		RestartPolicy: dcontainer.RestartPolicy{Name: dcontainer.RestartPolicyDisabled},
+	}
+	resp, err := cl.c.ContainerCreate(ctx, cfg, host, nil, nil, UpdaterContainerName)
+	if err != nil {
+		return "", fmt.Errorf("docker: create updater: %w", err)
+	}
+	if err := cl.c.ContainerStart(ctx, resp.ID, dcontainer.StartOptions{}); err != nil {
+		return "", fmt.Errorf("docker: start updater: %w", err)
+	}
+	return resp.ID, nil
+}
+
+// removeLeftoverUpdater best-effort removes a stopped leftover helper
+// container from a prior self-update, by its fixed name. Called on boot. No
+// Force: a still-running helper means a swap may genuinely still be in
+// flight (e.g. dockbrr's own new instance started up quickly after the
+// helper started it), and killing it mid-operation would be worse than
+// leaving it; removal is a silent no-op in that case.
+func (cl *Client) removeLeftoverUpdater(ctx context.Context) {
+	id, ok, err := cl.ContainerIDByName(ctx, UpdaterContainerName)
+	if err != nil || !ok {
+		return
+	}
+	_ = cl.c.ContainerRemove(ctx, id, dcontainer.RemoveOptions{})
+}
+
+// RemoveLeftoverUpdater is the exported boot-cleanup entry point: it prunes a
+// leftover helper container from a self-update that ran before the previous
+// dockbrr exit (successful or not).
+func (cl *Client) RemoveLeftoverUpdater(ctx context.Context) { cl.removeLeftoverUpdater(ctx) }
+
+// SwapContainer replaces the target container with newImage, preserving its
+// full config via ContainerCreateFromInspect. It is executed by the detached
+// updater helper (the target is dockbrr itself, so the process calling this
+// normally dies at the stop; the helper survives). On a create/start failure
+// AFTER the old container was removed, it best-effort recreates the old
+// container from the same captured inspect with its original image, so a
+// failed swap lands back on a running old version rather than nothing.
+func (cl *Client) SwapContainer(ctx context.Context, targetID, newImage string, logf func(string)) error {
+	if logf == nil {
+		logf = func(string) {}
+	}
+	st, err := cl.InspectStatus(ctx, targetID)
+	if err != nil {
+		return fmt.Errorf("swap: inspect target: %w", err)
+	}
+	name, oldImage, err := parseInspectNameImage(st.RawJSON)
+	if err != nil {
+		return fmt.Errorf("swap: %w", err)
+	}
+
+	logf("stopping " + name)
+	if err := cl.ContainerStop(ctx, targetID); err != nil {
+		return fmt.Errorf("swap: stop target: %w", err)
+	}
+	logf("removing " + name)
+	if err := cl.ContainerRemove(ctx, targetID); err != nil {
+		return fmt.Errorf("swap: remove target: %w", err)
+	}
+
+	logf("creating " + name + " from " + newImage)
+	newID, err := cl.ContainerCreateFromInspect(ctx, st.RawJSON, newImage, name)
+	if err != nil {
+		logf("create failed, rolling back to " + oldImage + ": " + err.Error())
+		return rollback(ctx, cl, st.RawJSON, oldImage, name, logf, fmt.Errorf("create new container: %w", err))
+	}
+	if err := cl.ContainerStart(ctx, newID); err != nil {
+		logf("start failed, rolling back to " + oldImage + ": " + err.Error())
+		_ = cl.ContainerRemove(ctx, newID)
+		return rollback(ctx, cl, st.RawJSON, oldImage, name, logf, fmt.Errorf("start new container: %w", err))
+	}
+	logf("started " + name + " (" + newID + ") on " + newImage)
+	return nil
+}
+
+// rollback recreates the old container from the captured inspect (with the
+// original image) after a failed swap, so dockbrr is not left dead. It returns
+// the original swap error wrapped, or a combined error if the rollback itself
+// fails. Best-effort: every step is logged via logf for post-mortem.
+func rollback(ctx context.Context, cl *Client, rawJSON, oldImage, name string, logf func(string), cause error) error {
+	id, err := cl.ContainerCreateFromInspect(ctx, rawJSON, oldImage, name)
+	if err != nil {
+		logf("rollback create failed: " + err.Error())
+		return fmt.Errorf("swap failed (%w) and rollback failed: %v", cause, err)
+	}
+	if err := cl.ContainerStart(ctx, id); err != nil {
+		logf("rollback start failed: " + err.Error())
+		return fmt.Errorf("swap failed (%w) and rollback start failed: %v", cause, err)
+	}
+	logf("rolled back to " + oldImage)
+	return fmt.Errorf("swap failed, rolled back to previous image: %w", cause)
+}
+
+// parseInspectNameImage extracts the container name (leading slash trimmed)
+// and its configured image from an inspect JSON blob. Pure.
+func parseInspectNameImage(rawJSON string) (name, image string, err error) {
+	if strings.TrimSpace(rawJSON) == "" {
+		return "", "", errors.New("docker: empty inspect JSON")
+	}
+	var meta struct {
+		Name   string
+		Config struct{ Image string }
+	}
+	if err := json.Unmarshal([]byte(rawJSON), &meta); err != nil {
+		return "", "", fmt.Errorf("docker: parse inspect: %w", err)
+	}
+	return strings.TrimPrefix(meta.Name, "/"), meta.Config.Image, nil
+}
