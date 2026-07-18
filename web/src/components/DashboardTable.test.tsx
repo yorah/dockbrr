@@ -1243,6 +1243,34 @@ test("dashboard loads every top-level project collapsed", async () => {
   expect(screen.queryByText("web")).not.toBeInTheDocument();
 });
 
+test("a manually-expanded project survives unmount/remount (route navigation)", async () => {
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 1, name: "app", kind: "compose", working_dir: "/srv",
+          auto_update_enabled: false, auto_named: false,
+          services: [{
+            id: 10, name: "web", image_ref: "nginx:1.27", current_digest: "sha256:a",
+            state: "running", pinned: false, healthcheck: false, auto_update_enabled: null,
+          }],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () => HttpResponse.json([])),
+  );
+  const first = renderDashboardWithRouter();
+  await expandProject("app");
+  await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
+
+  // Simulate navigating to Jobs/Settings and back: full unmount, fresh mount.
+  first.unmount();
+  renderDashboardWithRouter();
+  await waitFor(() => expect(screen.getByRole("button", { name: "app" })).toBeInTheDocument());
+  // Still expanded: the collapse choice was persisted, not re-defaulted.
+  await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
+});
+
 test("an active search reveals a service under an otherwise-collapsed project", async () => {
   server.use(
     http.get("/api/projects", () =>

@@ -286,6 +286,31 @@ func TestDetectRateLimitedIsNonFatal(t *testing.T) {
 	}
 }
 
+// TestDetectNotFoundStatus pins the classification of "image is not in the
+// registry": a 404, or the 401 public registries answer for an anonymous
+// request to a nonexistent repo (Docker Hub hides existence behind
+// Unauthorized). Both are the steady state for a locally built image, so they
+// record status not_found (dashboard: muted "not in registry" hint) instead of
+// a hard error.
+func TestDetectNotFoundStatus(t *testing.T) {
+	for _, code := range []int{401, 404} {
+		db := newDB(t)
+		svc := seedSvc(t, db, "docker.io/library/localonly:latest", "sha256:old", false)
+		r := fakeResolver{err: &transport.Error{StatusCode: code}}
+		u, err := newDetector(db, r).Detect(context.Background(), svc)
+		if err != nil {
+			t.Fatalf("code %d must be non-fatal, got err %v", code, err)
+		}
+		if u != nil {
+			t.Fatalf("no update on code %d, got %+v", code, u)
+		}
+		rs, _ := store.NewRemoteStates(db).Get("docker.io/library/localonly", "latest")
+		if rs.Status != "not_found" {
+			t.Fatalf("code %d: status = %q, want not_found", code, rs.Status)
+		}
+	}
+}
+
 func TestDetectResolveErrorIsNonFatal(t *testing.T) {
 	db := newDB(t)
 	svc := seedSvc(t, db, "ghcr.io/acme/web:1.2.3", "sha256:old", false)

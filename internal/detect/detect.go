@@ -89,11 +89,25 @@ func (d *Detector) Detect(ctx context.Context, svc store.Service) (*store.Update
 	logger.Tracef("detect: %s resolving from registry", svc.ImageRef)
 	remote, err := d.resolver.Resolve(ctx, svc.ImageRef, d.plat)
 	if err != nil {
+		// Classify: a 404 means the repo/tag does not exist, and a 401 is how
+		// public registries answer an anonymous request for a nonexistent repo
+		// (Docker Hub hides existence behind Unauthorized). Both are the
+		// expected steady state for a locally built image, or a private image
+		// with no credentials configured, so they get their own status (the
+		// dashboard explains it) at debug log level instead of an error spammed
+		// on every scan. Anything else (network, 5xx) stays a hard error.
 		status := "error"
-		if registry.IsRateLimited(err) {
+		switch {
+		case registry.IsRateLimited(err):
 			status = "rate_limited"
+		case registry.IsUnauthorized(err) || registry.IsNotFound(err):
+			status = "not_found"
 		}
-		logger.Errorf("detect: resolve %q: %v (status=%s)", svc.ImageRef, err, status)
+		if status == "not_found" {
+			logger.Debugf("detect: resolve %q: %v (status=not_found)", svc.ImageRef, err)
+		} else {
+			logger.Errorf("detect: resolve %q: %v (status=%s)", svc.ImageRef, err, status)
+		}
 		_ = d.states.Upsert(store.RemoteState{Repo: repo, Tag: tag, Status: status, ResolvedAt: &now})
 		return nil, nil // non-fatal
 	}

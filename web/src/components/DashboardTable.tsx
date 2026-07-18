@@ -7,7 +7,6 @@ import {
   type ColumnDef,
 } from "@tanstack/react-table";
 import {
-  AlertTriangle,
   ArrowUpCircle,
   ChevronRight,
   Eye,
@@ -35,6 +34,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { StatusBadge, computeStatus, isStopped } from "@/components/StatusBadge";
+import { CheckStatusIcon } from "@/components/CheckStatusIcon";
 import { SeverityDelta } from "@/components/SeverityDelta";
 import { DigestShort } from "@/components/DigestShort";
 import { ComposeModal } from "@/components/ComposeModal";
@@ -537,12 +537,7 @@ function buildColumns(
         return (
           <span className="flex items-center gap-1 text-xs text-muted-foreground">
             {s.last_checked ? relative(s.last_checked) : "-"}
-            {s.check_status === "rate_limited" && (
-              <AlertTriangle aria-label="Registry rate-limited" className="h-3.5 w-3.5 text-warning" />
-            )}
-            {s.check_status === "error" && (
-              <AlertTriangle aria-label="Registry error" className="h-3.5 w-3.5 text-danger" />
-            )}
+            <CheckStatusIcon status={s.check_status} />
           </span>
         );
       },
@@ -571,6 +566,50 @@ function buildColumns(
   ];
 }
 
+// Session-scoped persistence for the dashboard's expand/collapse choices: the
+// table unmounts on every navigation to Jobs/Settings, so without this the
+// user returns to an all-collapsed dashboard each time. sessionStorage keeps
+// it per tab and drops it when the tab closes (a fresh session starts at the
+// collapse default again). Storage access is best-effort: some privacy modes
+// throw, in which case the state simply doesn't persist.
+const COLLAPSED_KEY = "dockbrr.dashboard.collapsed";
+const SEEN_KEY = "dockbrr.dashboard.seenProjects";
+const LOOSE_KEY = "dockbrr.dashboard.looseOpen";
+
+function loadIdSet(key: string): Set<number> {
+  try {
+    const arr: unknown = JSON.parse(sessionStorage.getItem(key) ?? "[]");
+    return new Set(Array.isArray(arr) ? arr.filter((n): n is number => typeof n === "number") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveIdSet(key: string, ids: Set<number>) {
+  try {
+    sessionStorage.setItem(key, JSON.stringify([...ids]));
+  } catch {
+    // best-effort
+  }
+}
+
+function loadLooseOpen(): boolean | null {
+  try {
+    const v = sessionStorage.getItem(LOOSE_KEY);
+    return v === null ? null : v === "1";
+  } catch {
+    return null;
+  }
+}
+
+function saveLooseOpen(open: boolean) {
+  try {
+    sessionStorage.setItem(LOOSE_KEY, open ? "1" : "0");
+  } catch {
+    // best-effort
+  }
+}
+
 export function DashboardTable({
   rows,
   onReview,
@@ -583,12 +622,15 @@ export function DashboardTable({
   defaultCollapsed = false,
   filtersActive = false,
 }: DashboardTableProps) {
-  const [collapsed, setCollapsed] = useState<Set<number>>(() => new Set());
+  const [collapsed, setCollapsed] = useState<Set<number>>(() => loadIdSet(COLLAPSED_KEY));
   // Ids we've already applied the collapse default to. Lets a user-expanded
   // project survive a rows refetch: once seen, the effect never re-collapses it.
-  const seenProjects = useRef<Set<number>>(new Set());
+  const seenProjects = useRef<Set<number>>(loadIdSet(SEEN_KEY));
   const [composeProject, setComposeProject] = useState<Project | null>(null);
-  const [looseOpen, setLooseOpen] = useState(looseDefaultOpen);
+  const [looseOpen, setLooseOpen] = useState(() => loadLooseOpen() ?? looseDefaultOpen);
+  // Persist the collapse choices across route changes (the table unmounts when
+  // navigating to Jobs/Settings) and reloads, session-scoped per tab.
+  useEffect(() => saveIdSet(COLLAPSED_KEY, collapsed), [collapsed]);
   const removeContainer = useRemoveContainer();
   // Same per-project health (open-update count + status dot) the sidebar shows,
   // so the project row carries the identical glyph.
@@ -600,8 +642,25 @@ export function DashboardTable({
   // rows (job_finished SSE refetches projects → the gone service is filtered out).
   const [removingIds, setRemovingIds] = useState<Set<number>>(() => new Set());
 
-  // Auto-expand under an active filter, re-collapse when it clears.
-  useEffect(() => setLooseOpen(looseDefaultOpen), [looseDefaultOpen]);
+  // Auto-expand under an active filter, re-collapse when it clears. Skipped on
+  // mount so it doesn't clobber the persisted looseOpen the user chose; only a
+  // filter TRANSITION (activated/cleared while on screen) drives it, and that
+  // transient override is deliberately not persisted.
+  const looseDefaultRan = useRef(false);
+  useEffect(() => {
+    if (!looseDefaultRan.current) {
+      looseDefaultRan.current = true;
+      return;
+    }
+    setLooseOpen(looseDefaultOpen);
+  }, [looseDefaultOpen]);
+
+  function toggleLoose() {
+    setLooseOpen((o) => {
+      saveLooseOpen(!o);
+      return !o;
+    });
+  }
 
   // Self-heal the removing set: drop any id whose service is no longer a
   // removable (stopped) row. Success removes the container (row gone); a failed
@@ -647,9 +706,11 @@ export function DashboardTable({
       for (const id of seenProjects.current) {
         if (!present.has(id)) seenProjects.current.delete(id);
       }
+      saveIdSet(SEEN_KEY, seenProjects.current);
     }
     if (fresh.length === 0) return;
     for (const id of fresh) seenProjects.current.add(id);
+    saveIdSet(SEEN_KEY, seenProjects.current);
     setCollapsed((prev) => {
       const next = new Set(prev);
       for (const id of fresh) next.add(id);
@@ -766,9 +827,9 @@ export function DashboardTable({
                   key={row.id}
                   tabIndex={0}
                   className="cursor-pointer bg-muted/20 font-medium text-muted-foreground"
-                  onClick={() => setLooseOpen((o) => !o)}
+                  onClick={toggleLoose}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") setLooseOpen((o) => !o);
+                    if (e.key === "Enter") toggleLoose();
                   }}
                 >
                   <TableCell colSpan={row.getVisibleCells().length}>

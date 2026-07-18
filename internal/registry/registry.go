@@ -204,3 +204,9 @@ func IsUnauthorized(err error) bool {
 	var terr *transport.Error
 	return errors.As(err, &terr) && terr.StatusCode == http.StatusUnauthorized
 }
+
+// IsNotFound reports whether err is a registry 404 (repo or manifest unknown).
+func IsNotFound(err error) bool {
+	var terr *transport.Error
+	return errors.As(err, &terr) && terr.StatusCode == http.StatusNotFound
+}
