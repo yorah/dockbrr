@@ -12,7 +12,8 @@ export type Status =
   | "gone"
   | "dismissed"
   | "rolled-back"
-  | "drifted";
+  | "drifted"
+  | "local";
 
 // Container states the Docker layer records for a non-running-but-present
 // workload. "gone" (discovery no longer sees the container at all) is
@@ -36,6 +37,7 @@ const LABEL: Record<Status, string> = {
   dismissed: "Dismissed",
   "rolled-back": "Rolled back",
   drifted: "Drifted",
+  local: "Local",
 };
 
 const VARIANT: Record<Status, "default" | "success" | "warning" | "danger" | "info"> = {
@@ -50,6 +52,7 @@ const VARIANT: Record<Status, "default" | "success" | "warning" | "danger" | "in
   dismissed: "default",
   "rolled-back": "default",
   drifted: "warning",
+  local: "default",
 };
 
 export function computeStatus(
@@ -57,6 +60,11 @@ export function computeStatus(
   update: { open: boolean; dismissed?: boolean; rolledBack?: boolean } | undefined,
   opts: { updating?: boolean } = {},
 ): Status {
+  // A locally built image has no registry state to compare against, so it
+  // can never be "up to date" or "have an update". Check this first, ahead
+  // of every other branch (including "updating"/"gone"/"stopped"), so a
+  // local image always renders as the distinct grey "Local" badge.
+  if (svc.image_local) return "local";
   if (opts.updating) return "updating";
   if (svc.state === "gone") return "gone";
   if (isStopped(svc.state)) return "stopped";

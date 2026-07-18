@@ -504,10 +504,6 @@ function buildColumns(
       cell: ({ row }) => {
         const r = row.original;
         if (r.kind !== "service") return null;
-        // Locally built images have no registry state to compare against, so
-        // they can never be "up to date" or "have an update"; a distinct grey
-        // badge here instead of computeStatus keeps them out of both tallies.
-        if (r.service.image_local) return <Badge variant="default">Local</Badge>;
         const status = computeStatus(
           r.service,
           r.update
