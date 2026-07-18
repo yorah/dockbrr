@@ -98,7 +98,8 @@ volumes:
 The image bundles the Docker CLI + Compose plugin and drives your host's Docker
 through the mounted socket. To *apply* updates to a Compose project, the
 container also needs to see that project's files at the same paths they live on
-the host, so bind-mount those directories too (see the path note below).
+the host, so bind-mount those directories too; the how and why is in
+[docs/path-mapping.md](docs/path-mapping.md).
 
 ### Prebuilt binaries and packages
 
