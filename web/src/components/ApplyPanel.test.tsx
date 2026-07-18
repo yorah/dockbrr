@@ -115,3 +115,14 @@ test("lifecycle jobs get their own title and success label", async () => {
   expect(screen.getByText(/^Stopped/)).toBeInTheDocument();
   expect(screen.queryByText(/^Applied/)).not.toBeInTheDocument();
 });
+
+test("self_update jobs get the Updating dockbrr title and Update started label", async () => {
+  __setEventSourceFactory((url) => new FakeES(url) as unknown as EventSource);
+  server.use(
+    http.get("/api/jobs/:id", () =>
+      HttpResponse.json({ id: 10, type: "self_update", status: "success", scope: "service", exit_code: 0, error: "" })),
+  );
+  renderWithClient(<ApplyPanel jobId={10} onClose={vi.fn()} />);
+  expect(await screen.findByText(/Updating dockbrr \(job #10\)/)).toBeInTheDocument();
+  expect(screen.getByText(/^Update started/)).toBeInTheDocument();
+});

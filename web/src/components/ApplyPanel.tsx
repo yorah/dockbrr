@@ -32,6 +32,7 @@ const TITLES: Record<string, string> = {
   stop: "Stopping",
   restart: "Restarting",
   remove: "Removing",
+  self_update: "Updating dockbrr",
 };
 
 function panelTitle(readOnly: boolean, type?: string) {
@@ -47,6 +48,7 @@ const SUCCESS_LABELS: Record<string, string> = {
   stop: "Stopped",
   restart: "Restarted",
   remove: "Removed",
+  self_update: "Update started",
 };
 
 function StatusLine({ status, type, error, closingIn }: { status?: string; type?: string; error?: string; closingIn?: number }) {

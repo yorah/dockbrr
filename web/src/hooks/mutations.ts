@@ -195,6 +195,19 @@ export function useCreateProject() {
     onError: toastError,
   });
 }
+// useApplySelfUpdate triggers the watchtower-style self-update (Task 12's
+// POST /api/updates/self/apply), which enqueues a self_update job that swaps
+// the running dockbrr binary/container. The job list (keys.jobs) is
+// invalidated so ApplyPanel/the jobs screen pick up the new job; the browser
+// connection is expected to drop mid-job when the process restarts.
+export function useApplySelfUpdate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch<{ job_id: number }>("/api/updates/self/apply", { method: "POST" }),
+    onSuccess: () => invalidate(qc, keys.jobs),
+    onError: toastError,
+  });
+}
 export function useLogin() {
   const qc = useQueryClient();
   return useMutation({

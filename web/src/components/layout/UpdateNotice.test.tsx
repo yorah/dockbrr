@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { http, HttpResponse } from "msw";
+import { delay, http, HttpResponse } from "msw";
 import { server } from "@/test/msw";
 import { renderWithClient } from "@/test/utils";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -62,6 +62,25 @@ describe("UpdateNotice", () => {
     server.use(http.get("/api/updates/self", () => HttpResponse.json(available)));
     renderWithClient(<UpdateNotice collapsed={false} />);
     expect(await screen.findByText(/update available/i)).toBeInTheDocument();
+  });
+
+  test("Update now posts to the apply endpoint and shows Updating while pending", async () => {
+    let posted = false;
+    server.use(
+      http.get("/api/updates/self", () => HttpResponse.json(available)),
+      http.post("/api/updates/self/apply", async () => {
+        posted = true;
+        await delay(50);
+        return HttpResponse.json({ job_id: 5 });
+      }),
+    );
+    renderWithClient(<UpdateNotice collapsed={false} />);
+
+    const btn = await screen.findByRole("button", { name: /update now/i });
+    await userEvent.click(btn);
+
+    expect(await screen.findByRole("button", { name: /updating/i })).toBeDisabled();
+    await waitFor(() => expect(posted).toBe(true));
   });
 
   test("collapsed variant renders an icon-only link, no card text", async () => {

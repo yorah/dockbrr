@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { Download, X } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSelfUpdate } from "@/hooks/queries";
+import { useApplySelfUpdate } from "@/hooks/mutations";
 
 export const DISMISS_KEY = "dockbrr_dismissed_update";
 
@@ -15,6 +16,7 @@ export const DISMISS_KEY = "dockbrr_dismissed_update";
  */
 export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
   const { data } = useSelfUpdate();
+  const apply = useApplySelfUpdate();
   const [dismissed, setDismissed] = useState<string | null>(() => localStorage.getItem(DISMISS_KEY));
 
   if (!data?.update_available) return null;
@@ -68,14 +70,25 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
         <p className="mt-1 text-xs text-muted-foreground">
           Version {data.latest} is now available
         </p>
-        <a
-          href={data.html_url}
-          target="_blank"
-          rel="noreferrer"
-          className={cn(buttonVariants({ variant: "outline", size: "sm" }), "mt-2")}
-        >
-          View Release
-        </a>
+        <div className="mt-2 flex items-center gap-2">
+          <Button
+            type="button"
+            variant="default"
+            size="sm"
+            disabled={apply.isPending}
+            onClick={() => apply.mutate()}
+          >
+            {apply.isPending ? "Updating..." : "Update now"}
+          </Button>
+          <a
+            href={data.html_url}
+            target="_blank"
+            rel="noreferrer"
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+          >
+            View Release
+          </a>
+        </div>
       </div>
     </div>
   );
