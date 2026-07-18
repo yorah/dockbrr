@@ -6,8 +6,31 @@ import (
 	"testing"
 
 	"dockbrr/internal/job"
+	"dockbrr/internal/selfupdate"
 	"dockbrr/internal/store"
 )
+
+// fakeDispatchSelfDocker is a job.SelfDocker spy used to observe whether a
+// self_update job actually reached the SelfUpdater's Handle.
+type fakeDispatchSelfDocker struct {
+	imageRef string
+	pulled   string
+}
+
+func (f *fakeDispatchSelfDocker) ContainerImageRef(_ context.Context, _ string) (string, error) {
+	return f.imageRef, nil
+}
+func (f *fakeDispatchSelfDocker) ImagePull(_ context.Context, ref string) error {
+	f.pulled = ref
+	return nil
+}
+func (f *fakeDispatchSelfDocker) SpawnUpdater(_ context.Context, _ string, _ []string, _ string) (string, error) {
+	return "helper123", nil
+}
+
+type fakeDispatchChecker struct{ res selfupdate.Result }
+
+func (f fakeDispatchChecker) Check(_ context.Context) (selfupdate.Result, error) { return f.res, nil }
 
 func TestDispatcherRoutesLifecycleAndApply(t *testing.T) {
 	db := openJobDB(t)
@@ -101,5 +124,54 @@ func TestDispatcherRoutesStandaloneApplyToSDK(t *testing.T) {
 
 	if len(r.ops) == 0 {
 		t.Fatal("standalone apply did not reach the SDK recreate path")
+	}
+}
+
+func TestDispatcherRoutesSelfUpdateToUpdater(t *testing.T) {
+	db := openJobDB(t)
+	jobs := store.NewJobs(db)
+	fd := &fakeDispatchSelfDocker{imageRef: "ghcr.io/yorah/dockbrr:1.1.0"}
+	ck := fakeDispatchChecker{res: selfupdate.Result{Latest: "v1.2.0", UpdateAvailable: true}}
+	u := job.NewSelfUpdater(jobs, nil, fd, ck, "abc123def456", "/var/run/docker.sock")
+
+	d := job.NewDispatcher(nil, nil, nil, nil)
+	d.SetSelfUpdater(u)
+
+	jid, err := jobs.Enqueue(store.Job{Type: "self_update", RequestedBy: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	j, _ := jobs.Get(jid)
+	d.Handle(context.Background(), j)
+
+	if fd.pulled != "ghcr.io/yorah/dockbrr:1.2.0" {
+		t.Fatalf("self_update job did not reach the SelfUpdater: pulled = %q", fd.pulled)
+	}
+	got, _ := jobs.Get(jid)
+	if got.Status != "success" {
+		t.Fatalf("status = %q, want success", got.Status)
+	}
+}
+
+func TestDispatchSelfUpdateWithoutUpdaterFails(t *testing.T) {
+	// A dispatcher with no SelfUpdater wired must fail a self_update job cleanly
+	// (not panic, not route it to the compose applier). d.jobs must be populated
+	// for the fallback to mark the job failed; SetSelfGuard wires it.
+	db := openJobDB(t)
+	jobs := store.NewJobs(db)
+	services := store.NewServices(db)
+	d := job.NewDispatcher(nil, nil, nil, nil)
+	d.SetSelfGuard("abc123def456", services, jobs, nil) // populates d.jobs
+
+	jid, err := jobs.Enqueue(store.Job{Type: "self_update", RequestedBy: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	j, _ := jobs.Get(jid)
+	d.Handle(context.Background(), j)
+
+	got, _ := jobs.Get(jid)
+	if got.Status != "failed" {
+		t.Fatalf("status = %q, want failed", got.Status)
 	}
 }

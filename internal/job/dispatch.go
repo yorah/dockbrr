@@ -24,6 +24,8 @@ type Dispatcher struct {
 	services *store.Services
 	jobs     *store.Jobs
 	emitter  Emitter
+
+	selfUpdater *SelfUpdater
 }
 
 func NewDispatcher(applier *Applier, lifecycle *Lifecycle, standalone *StandaloneApplier, projects *store.Projects) *Dispatcher {
@@ -41,7 +43,23 @@ func (d *Dispatcher) SetSelfGuard(selfID string, services *store.Services, jobs 
 	d.emitter = emitter
 }
 
+// SetSelfUpdater wires the self-update runner. Call before the engine starts.
+// Without it, self_update jobs fail cleanly instead of reaching a nil runner.
+func (d *Dispatcher) SetSelfUpdater(u *SelfUpdater) { d.selfUpdater = u }
+
 func (d *Dispatcher) Handle(ctx context.Context, job store.Job) {
+	if job.Type == "self_update" {
+		if d.selfUpdater == nil {
+			const msg = "self-update is not available (no updater wired)"
+			logger.Warnf("job: self_update (job %d) with no updater wired; failing", job.ID)
+			if d.jobs != nil {
+				_ = d.jobs.Finish(job.ID, "failed", nil, msg)
+			}
+			return
+		}
+		d.selfUpdater.Handle(ctx, job)
+		return
+	}
 	if d.refuseSelfTarget(job) {
 		return
 	}
