@@ -1,10 +1,13 @@
 import type { ReactNode } from "react";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { makeQueryClient } from "@/api/queryClient";
 import { keys } from "@/api/keys";
+import { __resetBusyServices, markServiceBusy, useBusyServices } from "@/hooks/useBusyServices";
 import { useEventStream, __setEventSourceFactory } from "./useEventStream";
+
+beforeEach(() => __resetBusyServices());
 
 class FakeES {
   onmessage: ((e: MessageEvent) => void) | null = null;
@@ -56,6 +59,17 @@ describe("useEventStream", () => {
     expect(invalidated).toContainEqual(keys.updates);
     expect(invalidated).toContainEqual(keys.projects);
     expect(invalidated).toContainEqual(keys.job(42));
+  });
+
+  test("job_finished clears the busy marker for services enqueued under that job", () => {
+    __setEventSourceFactory((url) => new FakeES(url) as unknown as EventSource);
+    const { W } = wrapper();
+    renderHook(() => useEventStream(), { wrapper: W });
+    const busy = renderHook(() => useBusyServices());
+    act(() => markServiceBusy(10, 42, "apply"));
+    expect(busy.result.current.get(10)).toBe("apply");
+    act(() => FakeES.last!.emit(JSON.stringify({ type: "job_finished", job_id: 42 })));
+    expect(busy.result.current.get(10)).toBeUndefined();
   });
 
   test("reconciled invalidates projects", () => {

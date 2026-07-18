@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { keys } from "@/api/keys";
+import { clearJobBusy } from "@/hooks/useBusyServices";
 
 type Factory = (url: string) => EventSource;
 let factory: Factory | null = null;
@@ -43,7 +44,10 @@ export function useEventStream(enabled = true) {
             void qc.invalidateQueries({ queryKey: keys.updates });
             void qc.invalidateQueries({ queryKey: keys.projects });
             void qc.invalidateQueries({ queryKey: keys.jobs });
-            if (ev.job_id) void qc.invalidateQueries({ queryKey: keys.job(ev.job_id) });
+            if (ev.job_id) {
+              void qc.invalidateQueries({ queryKey: keys.job(ev.job_id) });
+              clearJobBusy(ev.job_id);
+            }
             break;
           case "jobs_cleared":
             void qc.invalidateQueries({ queryKey: keys.jobs });

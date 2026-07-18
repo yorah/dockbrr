@@ -47,6 +47,7 @@ import {
   useRemoveContainer,
   useToggleProjectAuto,
 } from "@/hooks/mutations";
+import { markServiceBusy, useBusyServices } from "@/hooks/useBusyServices";
 import { ApplyAllButton, CheckAllButton } from "@/components/BulkActions";
 import type { Row } from "@/hooks/useDashboardRows";
 import type { Project, Service, Update } from "@/api/types";
@@ -139,10 +140,21 @@ function ActionsCell({
   // (which reads cached history, not a live container) still makes sense.
   const gone = service.state === "gone";
   const stopped = isStopped(service.state);
+  // Which async job-backed action (if any) is in flight for this row. Any one
+  // of apply/start/stop/restart being busy disables all four: the backend's
+  // per-project mutex serializes them anyway, so a second click here would
+  // just queue behind the first, not run alongside it.
+  const busyMap = useBusyServices();
+  const busyAction = busyMap.get(service.id);
   const runLifecycle = (action: "start" | "stop" | "restart") => {
     lifecycle.mutate(
       { serviceId: service.id, action },
-      { onSuccess: (res) => onApplied(res.job_id) },
+      {
+        onSuccess: (res) => {
+          markServiceBusy(service.id, res.job_id, action);
+          onApplied(res.job_id);
+        },
+      },
     );
   };
   return (
@@ -179,7 +191,7 @@ function ActionsCell({
               size="sm"
               variant="ghost"
               className="h-7 w-7 p-0"
-              disabled={!canApply || apply.isPending}
+              disabled={!canApply || apply.isPending || !!busyAction}
               aria-label={`Apply update to ${service.name}`}
               onClick={(e) => {
                 e.stopPropagation();
@@ -190,11 +202,20 @@ function ActionsCell({
                 if (!window.confirm(msg)) return;
                 apply.mutate(
                   { id: update.id, scope: "service" },
-                  { onSuccess: (res) => onApplied(res.job_id) },
+                  {
+                    onSuccess: (res) => {
+                      markServiceBusy(service.id, res.job_id, "apply");
+                      onApplied(res.job_id);
+                    },
+                  },
                 );
               }}
             >
-              <ArrowUpCircle className="h-4 w-4" />
+              {apply.isPending || busyAction === "apply" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <ArrowUpCircle className="h-4 w-4" />
+              )}
             </Button>
           </TooltipTrigger>
           <TooltipContent>Apply update</TooltipContent>
@@ -224,14 +245,18 @@ function ActionsCell({
                 size="sm"
                 variant="ghost"
                 className="h-7 w-7 p-0"
-                disabled={lifecycle.isPending}
+                disabled={lifecycle.isPending || !!busyAction}
                 aria-label={`Start ${service.name}`}
                 onClick={(e) => {
                   e.stopPropagation();
                   runLifecycle("start");
                 }}
               >
-                <Play className="h-4 w-4" />
+                {busyAction === "start" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Play className="h-4 w-4" />
+                )}
               </Button>
             </TooltipTrigger>
             <TooltipContent>Start</TooltipContent>
@@ -245,14 +270,18 @@ function ActionsCell({
                   size="sm"
                   variant="ghost"
                   className="h-7 w-7 p-0"
-                  disabled={lifecycle.isPending}
+                  disabled={lifecycle.isPending || !!busyAction}
                   aria-label={`Stop ${service.name}`}
                   onClick={(e) => {
                     e.stopPropagation();
                     runLifecycle("stop");
                   }}
                 >
-                  <Square className="h-4 w-4" />
+                  {busyAction === "stop" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Square className="h-4 w-4" />
+                  )}
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Stop</TooltipContent>
@@ -263,14 +292,18 @@ function ActionsCell({
                   size="sm"
                   variant="ghost"
                   className="h-7 w-7 p-0"
-                  disabled={lifecycle.isPending}
+                  disabled={lifecycle.isPending || !!busyAction}
                   aria-label={`Restart ${service.name}`}
                   onClick={(e) => {
                     e.stopPropagation();
                     runLifecycle("restart");
                   }}
                 >
-                  <RotateCw className="h-4 w-4" />
+                  {busyAction === "restart" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RotateCw className="h-4 w-4" />
+                  )}
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Restart</TooltipContent>
