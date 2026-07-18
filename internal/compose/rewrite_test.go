@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -141,5 +142,32 @@ func TestWriteFileAtomicNewFileDefaultMode(t *testing.T) {
 	}
 	if perm := info.Mode().Perm(); perm != 0o644 {
 		t.Errorf("new file mode: got %o, want 0644", perm)
+	}
+}
+
+// Ownership preservation: with the writer and the file owner being the same
+// uid (the only case exercisable without root), the chown path must be a
+// no-op that leaves the file owned by us. The cross-uid case (containerized
+// dockbrr as root over a user-owned bind mount) is what the code exists for
+// and is covered by inspection + the release smoke.
+func TestWriteFileAtomicKeepsOwnership(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "compose.yml")
+	if err := os.WriteFile(p, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteFileAtomic(p, "new"); err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sys, ok := st.Sys().(*syscall.Stat_t)
+	if !ok {
+		t.Skip("no syscall.Stat_t on this platform")
+	}
+	if int(sys.Uid) != os.Getuid() || int(sys.Gid) != os.Getgid() {
+		t.Fatalf("owner = %d:%d, want %d:%d", sys.Uid, sys.Gid, os.Getuid(), os.Getgid())
 	}
 }
