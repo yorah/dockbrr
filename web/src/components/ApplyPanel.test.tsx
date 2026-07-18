@@ -78,3 +78,18 @@ test("labels a successful rollback job as Rolled back", async () => {
   renderWithClient(<ApplyPanel jobId={8} onClose={vi.fn()} />);
   await waitFor(() => expect(screen.getByText("Rolled back")).toBeInTheDocument());
 });
+
+test("auto-closes a few seconds after the job succeeds", async () => {
+  __setEventSourceFactory((url) => new FakeES(url) as unknown as EventSource);
+  server.use(
+    http.get("/api/jobs/:id", () =>
+      HttpResponse.json({ id: 7, type: "apply", status: "success", scope: "service", exit_code: 0, error: "" })),
+  );
+  const onClose = vi.fn();
+  renderWithClient(<ApplyPanel jobId={7} onClose={onClose} />);
+  await waitFor(() => expect(screen.getByText("Applied")).toBeInTheDocument());
+  expect(onClose).not.toHaveBeenCalled();
+  // Success dismisses on its own after AUTO_CLOSE_SUCCESS_MS (4s); failures
+  // are covered by the rollback tests above, which rely on the panel staying.
+  await waitFor(() => expect(onClose).toHaveBeenCalled(), { timeout: 6000 });
+}, 10000);

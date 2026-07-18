@@ -21,6 +21,7 @@ export interface ApplyPanelProps {
 // rolled_back are EVENT kinds, not job statuses, so do not key off them here.)
 const FAILED_STATUSES = new Set(["failed", "canceled"]);
 const TERMINAL_STATUSES = new Set(["success", "failed", "canceled"]);
+const AUTO_CLOSE_SUCCESS_MS = 4000;
 
 function StatusLine({ status, type, error }: { status?: string; type?: string; error?: string }) {
   if (status === "success") {
@@ -66,6 +67,16 @@ export function ApplyPanel({ jobId: initialJobId, onClose, readOnly = false }: A
     void qc.invalidateQueries({ queryKey: keys.updates });
     void qc.invalidateQueries({ queryKey: keys.jobs });
   }, [readOnly, status, jobId, qc]);
+
+  // A successful job dismisses the panel on its own after a beat: long enough
+  // to read the success line, short enough that start/stop (which open this
+  // panel too) don't leave it parked over the table. Failures stay open, the
+  // error and the rollback offer must not vanish out from under the user.
+  useEffect(() => {
+    if (readOnly || status !== "success") return;
+    const t = setTimeout(onClose, AUTO_CLOSE_SUCCESS_MS);
+    return () => clearTimeout(t);
+  }, [readOnly, status, onClose]);
 
   return (
     <section
