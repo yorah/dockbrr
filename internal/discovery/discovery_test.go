@@ -819,6 +819,53 @@ func TestReconcileDriftOddNameNotDriftedWhenImageMatchesDeclared(t *testing.T) {
 	}
 }
 
+func TestReconcileMarksBuildServiceLocal(t *testing.T) {
+	db := openDB(t)
+	projects := store.NewProjects(db)
+	services := store.NewServices(db)
+
+	dir := t.TempDir()
+	cfgPath := writeComposeFile(t, dir, "services:\n  api:\n    build: .\n  cache:\n    image: redis:7.2.0\n")
+
+	fc := &fakeCollector{
+		containers: []docker.Container{
+			{
+				ID: "c1", Project: "app", Service: "api",
+				WorkingDir: dir, ConfigFiles: []string{cfgPath},
+				Name: "app_api_1", ImageRef: "app_api", State: "running",
+			},
+			{
+				ID: "c2", Project: "app", Service: "cache",
+				WorkingDir: dir, ConfigFiles: []string{cfgPath},
+				Name: "app_cache_1", ImageRef: "redis:7.2.0", State: "running",
+			},
+		},
+	}
+	r := discovery.NewReconciler(fc, projects, services, 1, nil, nil)
+	if _, err := r.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := projects.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	svcs, err := services.ListByProject(all[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, s := range svcs {
+		got[s.Name] = s.ImageLocal
+	}
+	if !got["api"] {
+		t.Errorf("api ImageLocal = false, want true")
+	}
+	if got["cache"] {
+		t.Errorf("cache ImageLocal = true, want false")
+	}
+}
+
 // ── goneServiceIDs pure unit test ────────────────────────────────────────────
 
 // ── unmanaged detection ──────────────────────────────────────────────────────

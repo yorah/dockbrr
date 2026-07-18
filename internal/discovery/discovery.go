@@ -292,13 +292,15 @@ func (r *Reconciler) Reconcile(ctx context.Context) (changed bool, err error) {
 		// digest pin the file doesn't carry, or an out-of-band edit). Reuses
 		// the read-only compose parser.
 		declared := map[string]string{} // service name -> declared image ref
+		buildLocal := map[string]bool{} // service name -> has a compose build: directive
 		if g.Kind == "compose" && len(g.ConfigFiles) > 0 {
 			if pj, perr := compose.Parse(ctx, g.WorkingDir, g.ConfigFiles); perr == nil {
 				for _, s := range pj.Services {
 					declared[s.Name] = s.Image
+					buildLocal[s.Name] = s.Build
 				}
 			}
-			// parse error: leave declared empty -> nothing marked drifted this cycle.
+			// parse error: leave declared/buildLocal empty -> nothing marked this cycle.
 		}
 
 		// Prior stored digests, keyed by service name, for detect-cache
@@ -336,6 +338,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) (changed bool, err error) {
 				Drifted:        declaredDiffers(declared[s.Name], s.ImageRef),
 				State:          s.State,
 				Healthcheck:    s.Healthcheck,
+				ImageLocal:     buildLocal[s.Name],
 				// AutoUpdateEnabled intentionally nil, discovery must not override user setting.
 			}); err != nil {
 				return false, err
