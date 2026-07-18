@@ -18,7 +18,7 @@ func (s *Server) handleScanAll(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 	logger.Infof("scan: manual check-all requested")
-	if err := s.deps.Checker.CheckAll(ctx); err != nil {
+	if err := s.deps.Checker.CheckAllFresh(ctx); err != nil {
 		writeJSONError(w, http.StatusBadGateway, err)
 		return
 	}

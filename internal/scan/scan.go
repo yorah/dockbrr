@@ -78,11 +78,7 @@ func (s *Scanner) CheckServiceFresh(ctx context.Context, serviceID int64) error 
 		if err != nil {
 			return err
 		}
-		repo, tag := detect.SplitRef(svc.ImageRef)
-		if err := s.states.Invalidate(repo, tag); err != nil {
-			logger.Errorf("scan: invalidate detect cache (service %d (%s)): %v", serviceID, svc.Name, err)
-		}
-		logger.Debugf("scan: manual re-check service %d (%s) (cache invalidated)", serviceID, svc.Name)
+		s.invalidateFor(svc)
 	}
 	// A manual check is the explicit "look again" gesture, so it also lifts the
 	// rolled_back suppression (RecordDrift preserves rolled_back on scheduled
@@ -95,6 +91,17 @@ func (s *Scanner) CheckServiceFresh(ctx context.Context, serviceID int64) error 
 		}
 	}
 	return s.CheckService(ctx, serviceID)
+}
+
+// invalidateFor drops svc's cached remote-resolution so the next detect does a
+// full network resolve + semver scan. Best-effort: a failure is logged and the
+// check proceeds against the (possibly cached) state.
+func (s *Scanner) invalidateFor(svc store.Service) {
+	repo, tag := detect.SplitRef(svc.ImageRef)
+	if err := s.states.Invalidate(repo, tag); err != nil {
+		logger.Errorf("scan: invalidate detect cache (service %d (%s)): %v", svc.ID, svc.Name, err)
+	}
+	logger.Debugf("scan: manual re-check service %d (%s) (cache invalidated)", svc.ID, svc.Name)
 }
 
 // CheckService detects drift for one service and, on a fresh update, resolves +
@@ -236,14 +243,31 @@ func (s *Scanner) markNotified(serviceID int64, toDigest string) bool {
 }
 
 // CheckAll runs CheckService over every service. Per-service errors are logged,
-// never abort the sweep.
+// never abort the sweep. This is the scheduler's path: it keeps the detect
+// cache, so within the cache TTL a service takes the cheap digest-only route.
 func (s *Scanner) CheckAll(ctx context.Context) error {
+	return s.checkAll(ctx, false)
+}
+
+// CheckAllFresh is CheckAll with the detect cache invalidated per service, so
+// every service gets a full network resolve + semver scan. The manual "Check
+// all" button uses it: a user-initiated sweep means "look again now", the same
+// contract as the per-service check button. It does NOT lift the rolled_back
+// suppression; only the targeted per-service check does that.
+func (s *Scanner) CheckAllFresh(ctx context.Context) error {
+	return s.checkAll(ctx, true)
+}
+
+func (s *Scanner) checkAll(ctx context.Context, fresh bool) error {
 	svcs, err := s.services.List()
 	if err != nil {
 		return err
 	}
 	logger.Infof("scan: checking %d service(s)", len(svcs))
 	for _, svc := range svcs {
+		if fresh && s.states != nil {
+			s.invalidateFor(svc)
+		}
 		if err := s.CheckService(ctx, svc.ID); err != nil {
 			logger.Errorf("scan: check service %d (%s): %v", svc.ID, svc.Name, err)
 		}

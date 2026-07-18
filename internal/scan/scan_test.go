@@ -373,6 +373,37 @@ func TestCheckAllSweepsAllServices(t *testing.T) {
 	}
 }
 
+func TestCheckAllFreshInvalidatesEveryService(t *testing.T) {
+	db := openScanStore(t)
+	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
+	_, _ = store.NewServices(db).Upsert(store.Service{ProjectID: pid, Name: "a", ImageRef: "nginx:1.25.0"})
+	_, _ = store.NewServices(db).Upsert(store.Service{ProjectID: pid, Name: "b", ImageRef: "redis:7.2.0"})
+	spy := &spyInvalidator{}
+	s := scan.New(fakeDetector{}, &fakeChangelog{}, store.NewServices(db), store.NewUpdates(db), store.NewImages(db), spy, nil)
+	if err := s.CheckAllFresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if spy.calls != 2 {
+		t.Fatalf("Invalidate calls = %d, want 2 (one per service)", spy.calls)
+	}
+}
+
+func TestCheckAllKeepsCache(t *testing.T) {
+	// The scheduler path must not invalidate: within the cache TTL it takes the
+	// cheap digest-only route by design.
+	db := openScanStore(t)
+	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
+	_, _ = store.NewServices(db).Upsert(store.Service{ProjectID: pid, Name: "a", ImageRef: "nginx:1.25.0"})
+	spy := &spyInvalidator{}
+	s := scan.New(fakeDetector{}, &fakeChangelog{}, store.NewServices(db), store.NewUpdates(db), store.NewImages(db), spy, nil)
+	if err := s.CheckAll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if spy.calls != 0 {
+		t.Fatalf("Invalidate calls = %d, want 0 (scheduler sweep keeps the cache)", spy.calls)
+	}
+}
+
 // spyInvalidator records the (repo, tag) passed to Invalidate.
 type spyInvalidator struct {
 	repo, tag string
