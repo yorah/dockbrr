@@ -241,6 +241,15 @@ func run(args []string, getenv func(string) string) error {
 			logger.Infof("job engine: self-guard armed (own container %s)", selfID)
 			dispatcher.SetSelfGuard(selfID, services, jobs, engine)
 		}
+
+		// Self-update: pull the new image in-process, then a detached helper swaps
+		// this container. Wired only when Docker is reachable (here). Clean up any
+		// leftover helper from a prior (possibly failed) self-update first.
+		dc.RemoveLeftoverUpdater(ctx)
+		if selfID := job.SelfContainerID(); selfID != "" {
+			dispatcher.SetSelfUpdater(job.NewSelfUpdater(jobs, engine, dc, selfUpdateChecker, selfID, cfg.DockerSocket))
+		}
+
 		engine.SetHandler(dispatcher)
 		if n, rerr := engine.ResumeInterrupted(); rerr != nil {
 			logger.Errorf("job engine: resume interrupted: %v", rerr)
