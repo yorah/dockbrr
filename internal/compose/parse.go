@@ -25,6 +25,9 @@ type Service struct {
 	NetworkMode string
 	Ipc         string
 	Pid         string
+	// Build is true when the service declares a compose `build:` section, i.e.
+	// its image is built locally and has no registry to check for updates.
+	Build       bool
 }
 
 // Project is the read-only parse result: the project name and its services.
@@ -67,6 +70,7 @@ func Parse(ctx context.Context, workingDir string, configFiles []string) (Projec
 		out.Services = append(out.Services, Service{
 			Name: name, Image: svc.Image,
 			NetworkMode: svc.NetworkMode, Ipc: svc.Ipc, Pid: svc.Pid,
+			Build: svc.Build != nil,
 		})
 	}
 	sort.Slice(out.Services, func(i, j int) bool { return out.Services[i].Name < out.Services[j].Name })
