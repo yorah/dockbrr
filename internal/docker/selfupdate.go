@@ -58,6 +58,9 @@ func (cl *Client) SpawnUpdater(ctx context.Context, image string, cmd []string, 
 			Target: socketPath,
 		}},
 		RestartPolicy: dcontainer.RestartPolicy{Name: dcontainer.RestartPolicyDisabled},
+		// Must stay false: a failed swap helper needs to survive so its logs
+		// are available via `docker logs` for post-mortem.
+		AutoRemove: false,
 	}
 	resp, err := cl.c.ContainerCreate(ctx, cfg, host, nil, nil, UpdaterContainerName)
 	if err != nil {
@@ -136,7 +139,34 @@ func (cl *Client) SwapContainer(ctx context.Context, targetID, newImage string, 
 // original image) after a failed swap, so dockbrr is not left dead. It returns
 // the original swap error wrapped, or a combined error if the rollback itself
 // fails. Best-effort: every step is logged via logf for post-mortem.
+//
+// It is idempotent on `name` before recreating: ContainerCreateFromInspect can
+// itself create the container and only then fail on a later step (e.g.
+// NetworkConnect for a second network), leaving a container already holding
+// `name`. If that happened on the failed new-image create, a plain recreate
+// here would collide on the name and dockbrr would be left dead. So any
+// container currently holding `name` is force-removed first, mirroring the
+// leftover-handling SpawnUpdater does for its own fixed name.
+//
+// Untested at the unit level: Client wraps the concrete Docker SDK client
+// (*dockerclient.Client) directly rather than an interface, so there is no
+// seam in this package to stub ContainerIDByName/ContainerCreateFromInspect
+// failures without a live daemon. This sequencing is exercised only by the
+// live-daemon integration path (see client_test.go's skip-if-no-socket
+// pattern); introducing an interface seam purely to unit-test this would be a
+// larger refactor than this fix warrants.
 func rollback(ctx context.Context, cl *Client, rawJSON, oldImage, name string, logf func(string), cause error) error {
+	if id, ok, err := cl.ContainerIDByName(ctx, name); err != nil {
+		logf("rollback: check for name collision failed: " + err.Error())
+		return fmt.Errorf("swap failed (%w) and rollback failed: check for name collision: %v", cause, err)
+	} else if ok {
+		logf("rollback: freeing name " + name + " held by " + id)
+		if err := cl.c.ContainerRemove(ctx, id, dcontainer.RemoveOptions{Force: true}); err != nil {
+			logf("rollback: force-remove of colliding container failed: " + err.Error())
+			return fmt.Errorf("swap failed (%w) and rollback failed: free name %s: %v", cause, name, err)
+		}
+	}
+
 	id, err := cl.ContainerCreateFromInspect(ctx, rawJSON, oldImage, name)
 	if err != nil {
 		logf("rollback create failed: " + err.Error())
