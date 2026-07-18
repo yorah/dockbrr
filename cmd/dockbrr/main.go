@@ -352,6 +352,7 @@ func run(args []string, getenv func(string) string) error {
 		Events: events, Jobs: jobs, JobLogs: jobLogs, RemoteStates: states,
 		Engine: engine, Checker: scanner, HostID: 1, Bus: bus,
 		SelfUpdate: selfUpdateChecker,
+		SelfID:     job.SelfContainerID(),
 		StartedAt:  time.Now(),
 		NextScan: func() time.Time {
 			sec := nextScan.Load()

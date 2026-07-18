@@ -95,6 +95,9 @@ type Deps struct {
 	// SelfUpdate reports whether a newer dockbrr release is available. Optional:
 	// nil (as in tests) degrades /api/updates/self to update_available:false.
 	SelfUpdate *selfupdate.Checker
+	// SelfID is dockbrr's own container id ("" on a host install). Gates the
+	// self-update apply endpoint; injected so it stays testable.
+	SelfID string
 }
 
 type Server struct {
@@ -147,6 +150,7 @@ func (s *Server) routes() {
 		r.Post("/api/auth/password", s.handleChangePassword)
 		r.Get("/api/status", s.handleStatus)
 		r.Get("/api/updates/self", s.handleSelfUpdate)
+		r.Post("/api/updates/self/apply", s.handleSelfUpdateApply)
 		r.Get("/api/system/info", s.handleSystemInfo)
 		r.Get("/api/projects", s.handleProjects)
 		r.Get("/api/projects/{id}/compose", s.handleProjectCompose)
