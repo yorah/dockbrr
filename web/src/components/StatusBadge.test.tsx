@@ -67,3 +67,22 @@ test("renders a label", () => {
   render(<StatusBadge status="update-available" />);
   expect(screen.getByText(/update available/i)).toBeInTheDocument();
 });
+test("a stopped local-image container shows stopped, not local", () => {
+  expect(
+    computeStatus(svc({ image_local: true, state: "exited" }), undefined),
+  ).toBe("stopped");
+});
+test("a gone local-image container shows gone, not local", () => {
+  expect(
+    computeStatus(svc({ image_local: true, state: "gone" }), undefined),
+  ).toBe("gone");
+});
+test("a running local-image container shows local", () => {
+  expect(computeStatus(svc({ image_local: true }), { open: false })).toBe("local");
+});
+test("local wins over an update-available registry outcome", () => {
+  expect(computeStatus(svc({ image_local: true }), { open: true })).toBe("local");
+});
+test("local wins over an up-to-date registry outcome", () => {
+  expect(computeStatus(svc({ image_local: true }), { open: false })).toBe("local");
+});

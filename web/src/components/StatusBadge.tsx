@@ -60,15 +60,17 @@ export function computeStatus(
   update: { open: boolean; dismissed?: boolean; rolledBack?: boolean } | undefined,
   opts: { updating?: boolean } = {},
 ): Status {
-  // A locally built image has no registry state to compare against, so it
-  // can never be "up to date" or "have an update". Check this first, ahead
-  // of every other branch (including "updating"/"gone"/"stopped"), so a
-  // local image always renders as the distinct grey "Local" badge.
-  if (svc.image_local) return "local";
   if (opts.updating) return "updating";
   if (svc.state === "gone") return "gone";
   if (isStopped(svc.state)) return "stopped";
   if (svc.state === "restarting") return "restarting";
+  // A locally built image has no registry state to compare against, so it
+  // can never be "up to date" or "have an update". Check this after the
+  // lifecycle/liveness branches above (so a stopped/gone/restarting local
+  // container still shows its real runtime state), but before any
+  // registry-derived outcome (drifted/pinned/error/update/up-to-date), so a
+  // running local image always renders as the distinct grey "Local" badge.
+  if (svc.image_local) return "local";
   if (svc.drifted) return "drifted";
   if (svc.pinned) return "pinned";
   if (svc.state === "error") return "error";
