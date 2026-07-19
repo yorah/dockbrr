@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/yorah/dockbrr/compare/v0.5.0...v0.6.0) (2026-07-19)
+
+
+### Miscellaneous Chores
+
+* force 0.6.0 release ([#44](https://github.com/yorah/dockbrr/issues/44)) ([f6f8faa](https://github.com/yorah/dockbrr/commit/f6f8faaf393cb7570418f4a7cf4d3041b0f4b253))
+
 ## [0.5.0](https://github.com/yorah/dockbrr/compare/v0.4.2...v0.5.0) (2026-07-17)
 
 
