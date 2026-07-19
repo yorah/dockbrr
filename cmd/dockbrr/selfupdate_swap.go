@@ -36,7 +36,7 @@ func runSelfUpdateSwap(args []string) error {
 	}
 	defer func() { _ = dc.Close() }()
 
-	logf := func(s string) { fmt.Fprintln(os.Stdout, "[self-update] "+s) }
+	logf := func(s string) { _, _ = fmt.Fprintln(os.Stdout, "[self-update] "+s) }
 	time.Sleep(swapStartDelay)
 	logf("swapping " + *target + " -> " + *image)
 	if err := dc.SwapContainer(context.Background(), *target, *image, logf); err != nil {
