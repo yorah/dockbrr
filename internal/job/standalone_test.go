@@ -272,6 +272,20 @@ func newStandaloneApplierShortHealth(db *store.DB, r *fakeRecreator) *job.Standa
 	)
 }
 
+// newStandaloneApplierLongHealth uses a deliberately LONG health timeout so a
+// fail-fast test can distinguish "returned on the first poll" (milliseconds)
+// from "looped until the timeout" (seconds) by a wide, race-robust margin,
+// instead of racing a tight sub-timeout wall-clock bound.
+func newStandaloneApplierLongHealth(db *store.DB, r *fakeRecreator) *job.StandaloneApplier {
+	return job.NewStandaloneApplier(
+		store.NewJobs(db), store.NewUpdates(db), store.NewServices(db), store.NewProjects(db),
+		store.NewSnapshots(db), store.NewEvents(db),
+		fakeResolver2{digest: "sha256:new"}, r, registry.HostPlatform(),
+		func() time.Duration { return 10 * time.Second }, func() time.Duration { return 50 * time.Millisecond },
+		nil, // nil emitter: allowed, emit() nil-guards
+	)
+}
+
 func TestStandaloneApplyRestoresOnHealthGateFailure(t *testing.T) {
 	db := openJobDB(t)
 	pid, svc, _ := seedStandaloneUpdate(t, db)
@@ -565,9 +579,11 @@ func TestStandaloneApplyFailsBeforeMutationOnSnapshotError(t *testing.T) {
 // restart:always) could be sampled mid-poll while transiently "running" and
 // pass the gate, marking a broken update applied. An always-exited fake is
 // sufficient to prove the fail-fast path; it also confirms the job does not
-// hang for the full timeout (the applier's health timeout is 20ms/1ms poll,
-// so a hang would still finish quickly, but fail-fast must trigger on the
-// FIRST poll, and the old container must be restored).
+// hang for the full timeout. The applier here uses a LONG (10s) health
+// timeout on purpose: fail-fast returns on the FIRST poll (milliseconds),
+// while a regression that looped waiting for "running" would take ~10s, so
+// the 2s wall-clock bound below separates the two by a wide, race-robust
+// margin. The old container must also be restored.
 func TestStandaloneApplyHealthGateFailsFastOnExited(t *testing.T) {
 	db := openJobDB(t)
 	pid, svc, _ := seedStandaloneUpdate(t, db)
@@ -577,17 +593,19 @@ func TestStandaloneApplyHealthGateFailsFastOnExited(t *testing.T) {
 	j, _ := jobs.Get(jid)
 
 	start := time.Now()
-	newStandaloneApplierShortHealth(db, r).Handle(context.Background(), j)
+	newStandaloneApplierLongHealth(db, r).Handle(context.Background(), j)
 	elapsed := time.Since(start)
 
 	done, _ := jobs.Get(jid)
 	if done.Status != "failed" {
 		t.Fatalf("status = %q, want failed", done.Status)
 	}
-	// Fail-fast: well under the 20ms health timeout, since the first poll
-	// already observes "exited" and returns an error instead of looping.
-	if elapsed >= 20*time.Millisecond {
-		t.Fatalf("healthGate took %s, want fail-fast well under the 20ms timeout", elapsed)
+	// Fail-fast: the first poll observes "exited" and returns an error instead
+	// of looping to the 10s timeout. The 2s bound is far above any race-detector
+	// or CI scheduling overhead in the surrounding Handle, yet far below the 10s
+	// a looping regression would take.
+	if elapsed >= 2*time.Second {
+		t.Fatalf("healthGate took %s, want fail-fast well under the 10s timeout", elapsed)
 	}
 
 	var renamedBack, startedOld bool

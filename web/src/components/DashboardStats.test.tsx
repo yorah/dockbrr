@@ -6,7 +6,7 @@ import type { Project, Update } from "@/api/types";
 
 const svc = (id: number, over: Partial<Project["services"][number]> = {}) => ({
   id, name: `s${id}`, image_ref: "nginx:1", current_digest: "sha256:a", state: "running",
-  pinned: false, drifted: false, healthcheck: false, auto_update_enabled: null, check_status: "ok", last_checked: "", current_version: "",
+  pinned: false, drifted: false, healthcheck: false, auto_update_enabled: null, check_status: "ok", image_local: false, last_checked: "", current_version: "",
   ...over,
 });
 const projects: Project[] = [

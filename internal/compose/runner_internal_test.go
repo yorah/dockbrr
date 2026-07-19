@@ -22,6 +22,11 @@ func TestIsTransientProgress(t *testing.T) {
 		"5457d5da3ec8 Verifying Checksum 0B",
 		"45983244b0aa Pending 0B",
 		"3b3d036990fd Pulling fs layer 0B",
+		// docker compose indents progress lines with leading whitespace; these
+		// are verbatim captures from a real compose pull.
+		" 07683a18a1c6 Pulling fs layer 0B",
+		" 575d46df4705 Downloading 1.049MB",
+		"  f6e607ad0f52 Extracting 1B",
 	}
 	keep := []string{
 		"4f4fb700ef54 Already exists 0B",
@@ -33,6 +38,9 @@ func TestIsTransientProgress(t *testing.T) {
 		"Container smoke-cache Started",
 		"apply succeeded",
 		"",
+		// Indented terminal states must survive too.
+		" 7e0b8e884178 Download complete 0B",
+		" Image louislam/uptime-kuma:2.4.0 Pulling ",
 	}
 	for _, l := range drop {
 		if !isTransientProgress(l) {

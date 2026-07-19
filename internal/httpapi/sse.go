@@ -45,7 +45,7 @@ func (s *Server) handleJobLogs(w http.ResponseWriter, r *http.Request) {
 
 	send := func(stream, line string) {
 		payload, _ := json.Marshal(map[string]string{"stream": stream, "line": line})
-		fmt.Fprintf(w, "data: %s\n\n", payload)
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
 		flusher.Flush()
 	}
 

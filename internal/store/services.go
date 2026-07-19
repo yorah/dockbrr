@@ -23,6 +23,7 @@ type Service struct {
 	State             string
 	GoneSince         *time.Time // set on transition into "gone", cleared when seen present again
 	Healthcheck       bool
+	ImageLocal        bool  // image built from a compose build: directive (no registry to check)
 	AutoUpdateEnabled *bool // nullable per-service override
 	UpdatedAt         time.Time
 }
@@ -51,8 +52,8 @@ func (s *Services) Upsert(sv Service) (int64, error) {
 	err = s.db.QueryRow(
 		`INSERT INTO services
 		   (project_id, name, container_ids, image_ref, current_digest,
-		    current_image_id, image_version, pinned, drifted, state, gone_since, healthcheck, auto_update_enabled)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+		    current_image_id, image_version, pinned, drifted, state, gone_since, healthcheck, image_local, auto_update_enabled)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
 		 ON CONFLICT(project_id, name) DO UPDATE SET
 		   container_ids    = excluded.container_ids,
 		   image_ref        = excluded.image_ref,
@@ -64,10 +65,11 @@ func (s *Services) Upsert(sv Service) (int64, error) {
 		   state            = excluded.state,
 		   gone_since       = NULL,
 		   healthcheck      = excluded.healthcheck,
+		   image_local      = excluded.image_local,
 		   updated_at       = CURRENT_TIMESTAMP
 		 RETURNING id`,
 		sv.ProjectID, sv.Name, string(cidsJSON), sv.ImageRef, sv.CurrentDigest,
-		sv.CurrentImageID, sv.ImageVersion, sv.Pinned, sv.Drifted, sv.State, sv.Healthcheck, auto,
+		sv.CurrentImageID, sv.ImageVersion, sv.Pinned, sv.Drifted, sv.State, sv.Healthcheck, sv.ImageLocal, auto,
 	).Scan(&id)
 	return id, err
 }
@@ -75,14 +77,14 @@ func (s *Services) Upsert(sv Service) (int64, error) {
 func (s *Services) ListByProject(projectID int64) ([]Service, error) {
 	rows, err := s.db.Query(
 		`SELECT id, project_id, name, container_ids, image_ref, current_digest,
-		        current_image_id, image_version, pinned, drifted, state, gone_since, healthcheck, auto_update_enabled, updated_at
+		        current_image_id, image_version, pinned, drifted, state, gone_since, healthcheck, image_local, auto_update_enabled, updated_at
 		   FROM services WHERE project_id=? ORDER BY name`,
 		projectID,
 	)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Service
 	for rows.Next() {
 		var (
@@ -93,7 +95,7 @@ func (s *Services) ListByProject(projectID int64) ([]Service, error) {
 		)
 		if err := rows.Scan(
 			&sv.ID, &sv.ProjectID, &sv.Name, &cidsJSON, &sv.ImageRef, &sv.CurrentDigest,
-			&sv.CurrentImageID, &sv.ImageVersion, &sv.Pinned, &sv.Drifted, &sv.State, &goneSince, &sv.Healthcheck, &auto, &sv.UpdatedAt,
+			&sv.CurrentImageID, &sv.ImageVersion, &sv.Pinned, &sv.Drifted, &sv.State, &goneSince, &sv.Healthcheck, &sv.ImageLocal, &auto, &sv.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -149,12 +151,12 @@ func (s *Services) Get(id int64) (Service, error) {
 	)
 	err := s.db.QueryRow(
 		`SELECT id, project_id, name, container_ids, image_ref, current_digest,
-		        current_image_id, image_version, pinned, drifted, state, gone_since, healthcheck, auto_update_enabled, updated_at
+		        current_image_id, image_version, pinned, drifted, state, gone_since, healthcheck, image_local, auto_update_enabled, updated_at
 		   FROM services WHERE id=?`,
 		id,
 	).Scan(
 		&sv.ID, &sv.ProjectID, &sv.Name, &cidsJSON, &sv.ImageRef, &sv.CurrentDigest,
-		&sv.CurrentImageID, &sv.ImageVersion, &sv.Pinned, &sv.Drifted, &sv.State, &goneSince, &sv.Healthcheck, &auto, &sv.UpdatedAt,
+		&sv.CurrentImageID, &sv.ImageVersion, &sv.Pinned, &sv.Drifted, &sv.State, &goneSince, &sv.Healthcheck, &sv.ImageLocal, &auto, &sv.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Service{}, ErrServiceNotFound
@@ -207,6 +209,18 @@ func (s *Services) UpdateRuntime(id int64, containerIDs []string, currentDigest 
 	return err
 }
 
+// UpdateState stamps the service's runtime state (verified by a live inspect,
+// e.g. right after a lifecycle job). Discovery's event-driven reconcile remains
+// the authority; this closes the window until its next (debounced) pass, so an
+// API read immediately after a job reflects the action that just ran.
+func (s *Services) UpdateState(id int64, state string) error {
+	_, err := s.db.Exec(
+		`UPDATE services SET state=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+		state, id,
+	)
+	return err
+}
+
 // UpdateImageRef persists a service's tracked image reference (e.g. after a
 // cross-tag apply moved it to a newer tag). Discovery would re-derive it on the
 // next reconcile; this makes the dashboard reflect it immediately.
@@ -219,13 +233,13 @@ func (s *Services) UpdateImageRef(id int64, imageRef string) error {
 func (s *Services) List() ([]Service, error) {
 	rows, err := s.db.Query(
 		`SELECT id, project_id, name, container_ids, image_ref, current_digest,
-		        current_image_id, image_version, pinned, drifted, state, gone_since, healthcheck, auto_update_enabled, updated_at
+		        current_image_id, image_version, pinned, drifted, state, gone_since, healthcheck, image_local, auto_update_enabled, updated_at
 		   FROM services ORDER BY id`,
 	)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Service
 	for rows.Next() {
 		var (
@@ -236,7 +250,7 @@ func (s *Services) List() ([]Service, error) {
 		)
 		if err := rows.Scan(
 			&sv.ID, &sv.ProjectID, &sv.Name, &cidsJSON, &sv.ImageRef, &sv.CurrentDigest,
-			&sv.CurrentImageID, &sv.ImageVersion, &sv.Pinned, &sv.Drifted, &sv.State, &goneSince, &sv.Healthcheck, &auto, &sv.UpdatedAt,
+			&sv.CurrentImageID, &sv.ImageVersion, &sv.Pinned, &sv.Drifted, &sv.State, &goneSince, &sv.Healthcheck, &sv.ImageLocal, &auto, &sv.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}

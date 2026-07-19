@@ -20,7 +20,7 @@ func freeAddr(t *testing.T) string {
 		t.Fatalf("freeAddr: %v", err)
 	}
 	addr := l.Addr().String()
-	l.Close()
+	_ = l.Close()
 	return addr
 }
 
@@ -55,8 +55,8 @@ func pollHealthz(t *testing.T, addr string) bool {
 	for time.Now().Before(deadline) {
 		resp, err := http.Get("http://" + addr + "/healthz")
 		if err == nil {
-			io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
 				return true
 			}

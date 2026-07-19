@@ -36,6 +36,7 @@ function project(): Project {
         healthcheck: true,
         auto_update_enabled: null,
         check_status: "ok",
+        image_local: false,
         last_checked: new Date().toISOString(),
       },
     ],
@@ -68,5 +69,22 @@ describe("ServiceDetail past digests", () => {
     const items = section.querySelectorAll("li");
     expect(items).toHaveLength(2);
     expect(section.textContent).not.toContain("current");
+  });
+});
+
+describe("ServiceDetail local image status", () => {
+  test("shows the Local badge instead of Up to date for a locally built image", async () => {
+    const p = project();
+    p.services[0].image_local = true;
+    p.services[0].check_status = "local";
+    server.use(
+      http.get("/api/projects", () => HttpResponse.json([p])),
+      http.get("/api/services/1/events", () => HttpResponse.json([])),
+    );
+
+    renderWithClient(<ServiceDetail serviceId={1} />);
+
+    expect(await screen.findByText("Local")).toBeInTheDocument();
+    expect(screen.queryByText("Up to date")).not.toBeInTheDocument();
   });
 });

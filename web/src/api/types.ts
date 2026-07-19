@@ -9,6 +9,7 @@ export interface Service {
   healthcheck: boolean;
   auto_update_enabled: boolean | null;
   check_status: string;
+  image_local: boolean;
   last_checked: string;
   /** Reverse-resolved running release for a floating tag with no pending
    * update; "" or absent when unknown. Always emitted by the API. */
@@ -80,6 +81,10 @@ export interface JobRow extends Job {
   requested_by: string;
   created_at: string;
   finished_at: string;
+  // Resolved display names; absent/"" when the project/service was deleted
+  // or the job has no target (e.g. sync).
+  project_name?: string;
+  service_name?: string;
 }
 export interface ServiceEvent {
   id: number;

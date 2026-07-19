@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { toast } from "sonner";
+import { notify } from "@/lib/notify";
 import { useRegistries, useSettings } from "@/hooks/queries";
 import { useAddRegistry, useDeleteRegistry } from "@/hooks/mutations";
 import { useSettingsForm, type SettingKey } from "@/hooks/useSettingsForm";
@@ -29,12 +29,14 @@ export function RegistriesSettings() {
   const [githubToken, setGithubToken] = useState("");
 
   return (
-    <div className="max-w-2xl space-y-4">
+    <div className="space-y-4">
       <SettingsCard
         title="Registry credentials"
         description="Credentials dockbrr uses to query private registries."
       >
-        <div className="space-y-6">
+        {/* Cards span the full settings column like every other page; only the
+            inner content is width-capped (same pattern as Logs/Auto-update). */}
+        <div className="max-w-2xl space-y-6">
           <div className="flex items-center gap-1.5">
             <p className="text-sm text-muted-foreground">
               Credentials for private registries.
@@ -63,7 +65,7 @@ export function RegistriesSettings() {
                       disabled={deleteRegistry.isPending}
                       onClick={() =>
                         deleteRegistry.mutate(r.RegistryHost, {
-                          onSuccess: () => toast.success("Registry removed"),
+                          onSuccess: () => notify.success("Registry removed"),
                         })
                       }
                     >
@@ -84,7 +86,7 @@ export function RegistriesSettings() {
                 { host, username, password },
                 {
                   onSuccess: () => {
-                    toast.success("Registry added");
+                    notify.success("Registry added");
                     setHost("");
                     setUsername("");
                     setPassword("");

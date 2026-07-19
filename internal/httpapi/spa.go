@@ -41,7 +41,7 @@ func NewSPAHandler(dist fs.FS) http.Handler {
 		p := strings.TrimPrefix(clean, "/")
 		if p != "" {
 			if f, err := dist.Open(p); err == nil {
-				defer f.Close()
+				defer func() { _ = f.Close() }()
 				if st, serr := f.Stat(); serr == nil && !st.IsDir() {
 					serveFile(w, p, f, st.Size(), true)
 					return
@@ -62,7 +62,7 @@ func serveIndex(w http.ResponseWriter, dist fs.FS) {
 		http.Error(w, "index.html not found", http.StatusInternalServerError)
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	st, _ := f.Stat()
 	w.Header().Set("Cache-Control", "no-cache")
 	var size int64

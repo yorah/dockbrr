@@ -173,9 +173,12 @@ func (r *ExecRunner) Run(ctx context.Context, spec RunSpec, sink LogSink) (int, 
 // "<layerid> Downloading 5.243MB", "<layerid> Extracting 1B", etc. docker
 // rewrites these in place in a TTY; captured as a stream, each tick becomes a
 // separate line, so one apply persists dozens of near-duplicate job_log rows.
-// Terminal states ("Download complete", "Pull complete", "Already exists"),
-// image/container lifecycle, and all non-pull output do not match and are kept.
-var transientProgressRe = regexp.MustCompile(`^\S+\s+(?:Downloading|Extracting|Waiting|Verifying Checksum|Pending|Pulling fs layer)\b`)
+// docker compose indents each of these with leading whitespace (" 575d46df
+// Downloading 1.049MB"), hence the `\s*` anchor: without it nothing matched
+// and a single pull persisted hundreds of ticks. Terminal states ("Download
+// complete", "Pull complete", "Already exists"), image/container lifecycle,
+// and all non-pull output do not match and are kept.
+var transientProgressRe = regexp.MustCompile(`^\s*\S+\s+(?:Downloading|Extracting|Waiting|Verifying Checksum|Pending|Pulling fs layer)\b`)
 
 // isTransientProgress reports whether a line is interim docker pull progress
 // that should be dropped from the job log to keep it readable.

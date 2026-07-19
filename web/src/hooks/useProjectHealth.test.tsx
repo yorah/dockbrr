@@ -5,7 +5,7 @@ import type { JobRow, Project, Service, Update } from "@/api/types";
 const svc = (id: number, name: string): Service => ({
   id, name, image_ref: "nginx:1", current_digest: "sha256:a", state: "running",
   pinned: false, drifted: false, healthcheck: true, auto_update_enabled: null,
-  check_status: "ok", last_checked: "2026-07-12T10:00:00Z",
+  check_status: "ok", image_local: false, last_checked: "2026-07-12T10:00:00Z",
 });
 const proj = (id: number, name: string, services: Service[]): Project => ({
   id, name, kind: "compose", working_dir: `/srv/${name}`,

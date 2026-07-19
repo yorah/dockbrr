@@ -22,7 +22,7 @@ func (cl *Client) ImagePull(ctx context.Context, ref string) error {
 	if err != nil {
 		return fmt.Errorf("docker: pull %s: %w", ref, err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 	if _, err := io.Copy(io.Discard, rc); err != nil {
 		return fmt.Errorf("docker: pull %s (drain): %w", ref, err)
 	}

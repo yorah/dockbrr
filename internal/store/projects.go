@@ -70,7 +70,7 @@ func (p *Projects) List() ([]Project, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Project
 	for rows.Next() {
 		var (

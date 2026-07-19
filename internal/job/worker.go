@@ -611,15 +611,15 @@ func writePinOverride(dir, service, repo, tag, digest string) (string, func(), e
 	}
 	path := f.Name()
 	if _, err := f.WriteString(content); err != nil {
-		f.Close()
-		os.Remove(path)
+		_ = f.Close()
+		_ = os.Remove(path)
 		return "", func() {}, err
 	}
 	if err := f.Close(); err != nil {
-		os.Remove(path)
+		_ = os.Remove(path)
 		return "", func() {}, err
 	}
-	return path, func() { os.Remove(path) }, nil
+	return path, func() { _ = os.Remove(path) }, nil
 }
 
 // blobJSON encodes a pre-edit compose file for the snapshot's compose_blob so

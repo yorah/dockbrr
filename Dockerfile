@@ -16,4 +16,12 @@ ARG TARGETPLATFORM
 COPY ${TARGETPLATFORM}/dockbrr /usr/local/bin/dockbrr
 
 EXPOSE 8080
+
+# busybox wget (Alpine base). Probes the in-process health endpoint; /healthz
+# returns 503 when the DB is unreachable, flipping the container to unhealthy.
+# Assumes the default in-image bind (:8080); if you override DOCKBRR_BIND,
+# override the healthcheck to match.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -q --spider http://127.0.0.1:8080/healthz || exit 1
+
 ENTRYPOINT ["/usr/local/bin/dockbrr"]

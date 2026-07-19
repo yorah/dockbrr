@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { toast } from "sonner";
+import { notify } from "@/lib/notify";
 import { useChangePassword } from "@/hooks/mutations";
 import { ApiError } from "@/api/client";
 import { Button } from "@/components/ui/button";
@@ -35,7 +35,7 @@ export function PasswordSettings() {
             { current, new: next },
             {
               onSuccess: () => {
-                toast.success("Password changed");
+                notify.success("Password changed");
                 setCurrent("");
                 setNext("");
                 setConfirm("");

@@ -69,7 +69,15 @@ func shutdownTestServer() {
 
 func main() {
 	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "version") {
-		os.Stdout.WriteString("dockbrr " + version.Version + "\n")
+		_, _ = os.Stdout.WriteString("dockbrr " + version.Version + "\n")
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "self-update-swap" {
+		// Detached helper entry point: must not open the DB or bind the HTTP
+		// server, so it returns here instead of falling into run().
+		if err := runSelfUpdateSwap(os.Args[2:]); err != nil {
+			log.Fatal(err)
+		}
 		return
 	}
 	if err := run(os.Args[1:], os.Getenv); err != nil {
@@ -108,7 +116,7 @@ func run(args []string, getenv func(string) string) error {
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Repositories.
 	settings := store.NewSettings(db, sealer)
@@ -228,7 +236,21 @@ func run(args []string, getenv func(string) string) error {
 			jobs, updates, services, projects, snapshots, events,
 			resolver, dc, plat, healthTimeout, healthPoll, engine,
 		)
-		engine.SetHandler(job.NewDispatcher(applier, lifecycle, standalone, projects))
+		dispatcher := job.NewDispatcher(applier, lifecycle, standalone, projects, jobs)
+		if selfID := job.SelfContainerID(); selfID != "" {
+			logger.Infof("job engine: self-guard armed (own container %s)", selfID)
+			dispatcher.SetSelfGuard(selfID, services, engine)
+		}
+
+		// Self-update: pull the new image in-process, then a detached helper swaps
+		// this container. Wired only when Docker is reachable (here). Clean up any
+		// leftover helper from a prior (possibly failed) self-update first.
+		dc.RemoveLeftoverUpdater(ctx)
+		if selfID := job.SelfContainerID(); selfID != "" {
+			dispatcher.SetSelfUpdater(job.NewSelfUpdater(jobs, engine, dc, selfUpdateChecker, selfID, cfg.DockerSocket))
+		}
+
+		engine.SetHandler(dispatcher)
 		if n, rerr := engine.ResumeInterrupted(); rerr != nil {
 			logger.Errorf("job engine: resume interrupted: %v", rerr)
 		} else if n > 0 {
@@ -281,7 +303,7 @@ func run(args []string, getenv func(string) string) error {
 	var dockerProbe *docker.Client
 	if p, perr := docker.New(cfg.DockerSocket); perr == nil {
 		dockerProbe = p
-		defer dockerProbe.Close()
+		defer func() { _ = dockerProbe.Close() }()
 
 		// Log daemon up/down edges so the log says when Docker came back, not just
 		// that it was missing at boot. Edges only, steady state stays silent.
@@ -316,6 +338,13 @@ func run(args []string, getenv func(string) string) error {
 		pruneLoop(ctx, settings, jobs)
 	}()
 
+	// Session GC: ages out expired session rows. Store-only, no Docker.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		sessionGCLoop(ctx, sessions)
+	}()
+
 	// HTTP server.
 	deps := httpapi.Deps{
 		Sealer: sealer, Users: users, Sessions: sessions, Credentials: creds,
@@ -323,6 +352,7 @@ func run(args []string, getenv func(string) string) error {
 		Events: events, Jobs: jobs, JobLogs: jobLogs, RemoteStates: states,
 		Engine: engine, Checker: scanner, HostID: 1, Bus: bus,
 		SelfUpdate: selfUpdateChecker,
+		SelfID:     job.SelfContainerID(),
 		StartedAt:  time.Now(),
 		NextScan: func() time.Time {
 			sec := nextScan.Load()
@@ -359,6 +389,12 @@ func run(args []string, getenv func(string) string) error {
 		Addr:        cfg.BindAddr,
 		Handler:     srv.Handler(),
 		BaseContext: func(net.Listener) context.Context { return ctx },
+		// Slowloris guard. No ReadTimeout/WriteTimeout: SSE streams
+		// (/api/events/stream, job logs) are long-lived responses and a
+		// blanket deadline would sever them; per-request cancellation comes
+		// from BaseContext instead.
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       2 * time.Minute,
 	}
 
 	errCh := make(chan error, 1)
@@ -377,7 +413,7 @@ func run(args []string, getenv func(string) string) error {
 		dcMu.Lock()
 		defer dcMu.Unlock()
 		if dc != nil {
-			dc.Close()
+			_ = dc.Close()
 		}
 	}
 
@@ -594,6 +630,36 @@ func pruneLoop(ctx context.Context, settings *store.Settings, jobs *store.Jobs) 
 	}
 	run()
 	ticker := time.NewTicker(pruneInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			run()
+		}
+	}
+}
+
+// sessionGCInterval: how often expired session rows are swept. Expiry is
+// enforced authoritatively on read (Sessions.Get); this loop only stops dead
+// rows accumulating in the DB, so precision doesn't matter.
+const sessionGCInterval = time.Hour
+
+// sessionGCLoop ages out expired sessions. Store-only, no Docker.
+func sessionGCLoop(ctx context.Context, sessions *store.Sessions) {
+	run := func() {
+		n, err := sessions.DeleteExpired(time.Now().UTC())
+		if err != nil {
+			logger.Errorf("session gc: delete expired: %v", err)
+			return
+		}
+		if n > 0 {
+			logger.Infof("session gc: removed %d expired session(s)", n)
+		}
+	}
+	run()
+	ticker := time.NewTicker(sessionGCInterval)
 	defer ticker.Stop()
 	for {
 		select {

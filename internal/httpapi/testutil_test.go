@@ -21,7 +21,7 @@ func authedServer(t *testing.T, deps Deps) (*Server, *store.DB, string, string) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 
 	if deps.Users == nil {
 		deps.Users = store.NewUsers(db)

@@ -62,10 +62,10 @@ func TestFilesNewestFirst(t *testing.T) {
 	if _, err := Init(Config{Path: path, Level: "info", MaxSizeMB: 1, MaxBackups: 1}); err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(filepath.Join(dir, "old.log"), []byte("x"), 0o600)
-	os.WriteFile(filepath.Join(dir, "new.log"), []byte("y"), 0o600)
-	os.Chtimes(filepath.Join(dir, "old.log"), timeAt(1), timeAt(1))
-	os.Chtimes(filepath.Join(dir, "new.log"), timeAt(2), timeAt(2))
+	_ = os.WriteFile(filepath.Join(dir, "old.log"), []byte("x"), 0o600)
+	_ = os.WriteFile(filepath.Join(dir, "new.log"), []byte("y"), 0o600)
+	_ = os.Chtimes(filepath.Join(dir, "old.log"), timeAt(1), timeAt(1))
+	_ = os.Chtimes(filepath.Join(dir, "new.log"), timeAt(2), timeAt(2))
 	files, err := Files()
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +93,7 @@ func TestOpenRejectsTraversal(t *testing.T) {
 	if _, err := Init(Config{Path: path, Level: "info", MaxSizeMB: 1, MaxBackups: 1}); err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(path, []byte("data"), 0o600)
+	_ = os.WriteFile(path, []byte("data"), 0o600)
 	for _, bad := range []string{"../secret", "a/b", "/etc/passwd", "", ".."} {
 		if _, err := Open(bad); err == nil {
 			t.Errorf("Open(%q) should fail", bad)
@@ -104,7 +104,7 @@ func TestOpenRejectsTraversal(t *testing.T) {
 		t.Fatalf("Open(dockbrr.log) failed: %v", err)
 	}
 	b, _ := io.ReadAll(rc)
-	rc.Close()
+	_ = rc.Close()
 	if string(b) != "data" {
 		t.Errorf("read = %q, want data", b)
 	}

@@ -18,7 +18,7 @@ func pruneFixture(t *testing.T, ageDays int) (*store.Settings, *store.Jobs, int6
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 
 	jobs := store.NewJobs(db)
 	id, err := jobs.Enqueue(store.Job{Type: "check", Scope: "service"})

@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { notify } from "@/lib/notify";
 import { apiFetch } from "@/api/client";
 import { keys } from "@/api/keys";
 import type { Scope } from "@/api/types";
@@ -18,7 +18,7 @@ const resetAuthCaches = async (qc: QueryClient) => {
   qc.removeQueries({ predicate: (q) => q.queryKey[0] !== "me" && q.queryKey[0] !== "setup-status" });
 };
 
-const toastError = (e: unknown) => toast.error(e instanceof Error ? e.message : "Request failed");
+const toastError = (e: unknown) => notify.error(e instanceof Error ? e.message : "Request failed");
 
 export function useApply() {
   const qc = useQueryClient();
@@ -72,9 +72,9 @@ export function useCheck() {
     mutationFn: (serviceId: number) => apiFetch(`/api/services/${serviceId}/check`, { method: "POST" }),
     onSuccess: async () => {
       await invalidate(qc, keys.updates, keys.projects);
-      toast.success("Check complete");
+      notify.success("Check complete");
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Check failed"),
+    onError: (e) => notify.error(e instanceof Error ? e.message : "Check failed"),
   });
 }
 // useClearJobs purges the finished job history (success/failed/canceled) and
@@ -86,9 +86,9 @@ export function useClearJobs() {
     mutationFn: () => apiFetch<{ deleted: number }>("/api/jobs", { method: "DELETE" }),
     onSuccess: async (res) => {
       await invalidate(qc, keys.jobs);
-      toast.success(`Cleared ${res.deleted} finished job${res.deleted === 1 ? "" : "s"}`);
+      notify.success(`Cleared ${res.deleted} finished job${res.deleted === 1 ? "" : "s"}`);
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Clear failed"),
+    onError: (e) => notify.error(e instanceof Error ? e.message : "Clear failed"),
   });
 }
 export function useCheckAll() {
@@ -100,9 +100,9 @@ export function useCheckAll() {
       Promise.all(serviceIds.map((id) => apiFetch(`/api/services/${id}/check`, { method: "POST" }))),
     onSuccess: async (_res, ids) => {
       await invalidate(qc, keys.updates, keys.projects);
-      toast.success(`Checked ${ids.length} service${ids.length > 1 ? "s" : ""}`);
+      notify.success(`Checked ${ids.length} service${ids.length > 1 ? "s" : ""}`);
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Check failed"),
+    onError: (e) => notify.error(e instanceof Error ? e.message : "Check failed"),
   });
 }
 // useScanAll runs a full detection sweep via the single POST /api/scan
@@ -116,9 +116,9 @@ export function useScanAll() {
     mutationFn: () => apiFetch("/api/scan", { method: "POST" }),
     onSuccess: async () => {
       await invalidate(qc, keys.status, keys.updates, keys.projects);
-      toast.success("Scan complete");
+      notify.success("Scan complete");
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Scan failed"),
+    onError: (e) => notify.error(e instanceof Error ? e.message : "Scan failed"),
   });
 }
 export function useRollback() {
@@ -192,6 +192,19 @@ export function useCreateProject() {
     mutationFn: (v: { name: string; working_dir: string; config_files: string[] }) =>
       apiFetch<{ id: number; name: string }>("/api/projects", { method: "POST", body: v }),
     onSuccess: () => invalidate(qc, keys.projects),
+    onError: toastError,
+  });
+}
+// useApplySelfUpdate triggers the watchtower-style self-update (Task 12's
+// POST /api/updates/self/apply), which enqueues a self_update job that swaps
+// the running dockbrr binary/container. The job list (keys.jobs) is
+// invalidated so ApplyPanel/the jobs screen pick up the new job; the browser
+// connection is expected to drop mid-job when the process restarts.
+export function useApplySelfUpdate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch<{ job_id: number }>("/api/updates/self/apply", { method: "POST" }),
+    onSuccess: () => invalidate(qc, keys.jobs),
     onError: toastError,
   });
 }

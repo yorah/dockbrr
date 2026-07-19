@@ -48,7 +48,7 @@ func openScanStore(t *testing.T) *store.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
 
@@ -373,6 +373,37 @@ func TestCheckAllSweepsAllServices(t *testing.T) {
 	}
 }
 
+func TestCheckAllFreshInvalidatesEveryService(t *testing.T) {
+	db := openScanStore(t)
+	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
+	_, _ = store.NewServices(db).Upsert(store.Service{ProjectID: pid, Name: "a", ImageRef: "nginx:1.25.0"})
+	_, _ = store.NewServices(db).Upsert(store.Service{ProjectID: pid, Name: "b", ImageRef: "redis:7.2.0"})
+	spy := &spyInvalidator{}
+	s := scan.New(fakeDetector{}, &fakeChangelog{}, store.NewServices(db), store.NewUpdates(db), store.NewImages(db), spy, nil)
+	if err := s.CheckAllFresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if spy.calls != 2 {
+		t.Fatalf("Invalidate calls = %d, want 2 (one per service)", spy.calls)
+	}
+}
+
+func TestCheckAllKeepsCache(t *testing.T) {
+	// The scheduler path must not invalidate: within the cache TTL it takes the
+	// cheap digest-only route by design.
+	db := openScanStore(t)
+	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
+	_, _ = store.NewServices(db).Upsert(store.Service{ProjectID: pid, Name: "a", ImageRef: "nginx:1.25.0"})
+	spy := &spyInvalidator{}
+	s := scan.New(fakeDetector{}, &fakeChangelog{}, store.NewServices(db), store.NewUpdates(db), store.NewImages(db), spy, nil)
+	if err := s.CheckAll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if spy.calls != 0 {
+		t.Fatalf("Invalidate calls = %d, want 0 (scheduler sweep keeps the cache)", spy.calls)
+	}
+}
+
 // spyInvalidator records the (repo, tag) passed to Invalidate.
 type spyInvalidator struct {
 	repo, tag string
@@ -403,6 +434,56 @@ func TestCheckServiceFreshInvalidatesDetectCache(t *testing.T) {
 	}
 	if spy.repo != "redis" || spy.tag != "7.2.0" {
 		t.Fatalf("Invalidate(%q, %q), want (redis, 7.2.0)", spy.repo, spy.tag)
+	}
+}
+
+func TestCheckServiceFreshReopensRolledBack(t *testing.T) {
+	db := openScanStore(t)
+	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
+	sid, _ := store.NewServices(db).Upsert(store.Service{
+		ProjectID: pid, Name: "web", ImageRef: "nginx:1.25.0", CurrentDigest: "sha256:old",
+	})
+	updates := store.NewUpdates(db)
+	uid, _, err := updates.RecordDrift(store.Update{ServiceID: sid, ToDigest: "sha256:new", Status: "applied"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := updates.MarkRolledBack(sid, "sha256:new"); err != nil {
+		t.Fatal(err)
+	}
+
+	s := scan.New(fakeDetector{}, &fakeChangelog{}, store.NewServices(db), updates, store.NewImages(db), &spyInvalidator{}, nil)
+	if err := s.CheckServiceFresh(context.Background(), sid); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := updates.Get(uid); got.Status != "available" {
+		t.Fatalf("status = %q, want available (manual check lifts rolled_back suppression)", got.Status)
+	}
+}
+
+func TestCheckServiceKeepsRolledBackSuppressed(t *testing.T) {
+	// The poll path must NOT lift the suppression: that is what stops the
+	// scheduler from feeding a just-reverted target back to auto-apply.
+	db := openScanStore(t)
+	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
+	sid, _ := store.NewServices(db).Upsert(store.Service{
+		ProjectID: pid, Name: "web", ImageRef: "nginx:1.25.0", CurrentDigest: "sha256:old",
+	})
+	updates := store.NewUpdates(db)
+	uid, _, err := updates.RecordDrift(store.Update{ServiceID: sid, ToDigest: "sha256:new", Status: "applied"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := updates.MarkRolledBack(sid, "sha256:new"); err != nil {
+		t.Fatal(err)
+	}
+
+	s := scan.New(fakeDetector{}, &fakeChangelog{}, store.NewServices(db), updates, store.NewImages(db), &spyInvalidator{}, nil)
+	if err := s.CheckService(context.Background(), sid); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := updates.Get(uid); got.Status != "rolled_back" {
+		t.Fatalf("status = %q, want rolled_back (poll path keeps the suppression)", got.Status)
 	}
 }
 

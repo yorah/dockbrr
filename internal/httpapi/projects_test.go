@@ -358,3 +358,55 @@ func TestProjectsEndpointIncludesAutoNamed(t *testing.T) {
 		t.Fatalf("projects payload = %+v, want one adoring_saha with auto_named=true", out)
 	}
 }
+
+func TestProjectsImageLocal(t *testing.T) {
+	srv, db, tok, csrf := authedServer(t, Deps{})
+
+	projs := store.NewProjects(db)
+	svcs := store.NewServices(db)
+
+	projID, err := projs.Upsert(store.Project{
+		HostID: 1, Kind: "compose", Name: "build-project",
+		WorkingDir: "/srv/build",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svcs.Upsert(store.Service{
+		ProjectID: projID, Name: "built-service", ImageRef: "myapp:dev",
+		CurrentDigest: "sha256:zzz", State: "running",
+		ImageLocal: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := authReq(httptest.NewRequest(http.MethodGet, "/api/projects", nil), tok, csrf)
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	var body []map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v; body=%s", err, rec.Body.String())
+	}
+	if len(body) != 1 {
+		t.Fatalf("got %d projects, want 1", len(body))
+	}
+
+	var svcsRaw []map[string]json.RawMessage
+	if err := json.Unmarshal(body[0]["services"], &svcsRaw); err != nil || len(svcsRaw) != 1 {
+		t.Fatalf("services = %s, want 1-element array", body[0]["services"])
+	}
+
+	var imageLocal bool
+	if err := json.Unmarshal(svcsRaw[0]["image_local"], &imageLocal); err != nil {
+		t.Fatalf("image_local: %v; service=%v", err, svcsRaw[0])
+	}
+	if !imageLocal {
+		t.Errorf("image_local = false, want true")
+	}
+}

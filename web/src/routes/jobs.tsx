@@ -12,7 +12,8 @@ import {
 } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useJobs } from "@/hooks/queries";
-import { useClearJobs } from "@/hooks/mutations";
+import { useClearJobs, useRollback } from "@/hooks/mutations";
+import type { JobRow } from "@/api/types";
 
 const STATUS_VARIANT: Record<string, "default" | "success" | "warning" | "danger" | "info"> = {
   success: "success", failed: "danger", canceled: "default", running: "info", queued: "warning",
@@ -20,15 +21,44 @@ const STATUS_VARIANT: Record<string, "default" | "success" | "warning" | "danger
 
 const FINISHED = new Set(["success", "failed", "canceled"]);
 
+// Human-readable job target: "project / service" for service-scoped jobs,
+// the project name alone for project-scoped ones. Empty when the job has no
+// target (sync) or the names were deleted since.
+function jobTarget(j: JobRow): string {
+  const project = j.project_name ?? "";
+  const service = j.service_name ?? "";
+  if (j.scope === "service" && service) return project ? `${project} / ${service}` : service;
+  return project;
+}
+
+// Rollback restores the service's LATEST snapshot, so it is only offered on
+// the most recent finished apply per service: on an older row it would restore
+// a newer state than the row suggests.
+function latestApplyIds(jobs: JobRow[]): Set<number> {
+  const ids = new Set<number>();
+  const seen = new Set<number>();
+  for (const j of jobs) {
+    // newest-first list order
+    if (j.type !== "apply" || j.service_id === null || !FINISHED.has(j.status)) continue;
+    if (seen.has(j.service_id)) continue;
+    seen.add(j.service_id);
+    if (j.status !== "canceled") ids.add(j.id);
+  }
+  return ids;
+}
+
 export function JobsScreen() {
   const [openLog, setOpenLog] = useState<number | null>(null);
+  const [liveJob, setLiveJob] = useState<number | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const jobs = useJobs(100);
   const clear = useClearJobs();
+  const rollback = useRollback();
 
   // Only terminal jobs are clearable; the backend keeps queued/running ones, so
   // the button stays disabled when there is nothing it could remove.
   const finishedCount = (jobs.data ?? []).filter((j) => FINISHED.has(j.status)).length;
+  const rollbackable = latestApplyIds(jobs.data ?? []);
 
   return (
     <div>
@@ -88,10 +118,11 @@ export function JobsScreen() {
                 <TableHead>#</TableHead>
                 <TableHead>Type</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Target</TableHead>
                 <TableHead>Scope</TableHead>
                 <TableHead>Requested by</TableHead>
                 <TableHead>Created</TableHead>
-                <TableHead>Log</TableHead>
+                <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -100,17 +131,37 @@ export function JobsScreen() {
                   <TableCell>{j.id}</TableCell>
                   <TableCell>{j.type}</TableCell>
                   <TableCell><Badge variant={STATUS_VARIANT[j.status] ?? "default"}>{j.status}</Badge></TableCell>
+                  <TableCell>
+                    {jobTarget(j) || <span className="text-muted-foreground">-</span>}
+                  </TableCell>
                   <TableCell>{j.scope}</TableCell>
                   <TableCell>{j.requested_by}</TableCell>
                   <TableCell>{new Date(j.created_at).toLocaleString()}</TableCell>
                   <TableCell>
-                    <button
-                      type="button"
-                      className="text-xs text-primary hover:underline"
-                      onClick={() => setOpenLog(j.id)}
-                    >
-                      View
-                    </button>
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        className="text-xs text-primary hover:underline"
+                        onClick={() => setOpenLog(j.id)}
+                      >
+                        View log
+                      </button>
+                      {rollbackable.has(j.id) && (
+                        <button
+                          type="button"
+                          className="text-xs text-danger hover:underline disabled:opacity-50"
+                          disabled={rollback.isPending || liveJob !== null}
+                          title="Restore this service to its pre-apply snapshot"
+                          onClick={async () => {
+                            const res = await rollback.mutateAsync(j.id);
+                            setOpenLog(null);
+                            setLiveJob(res.job_id);
+                          }}
+                        >
+                          Rollback
+                        </button>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -118,7 +169,12 @@ export function JobsScreen() {
           </Table>
         </div>
       )}
-      {openLog !== null && <ApplyPanel key={openLog} jobId={openLog} readOnly onClose={() => setOpenLog(null)} />}
+      {openLog !== null && liveJob === null && (
+        <ApplyPanel key={openLog} jobId={openLog} readOnly onClose={() => setOpenLog(null)} />
+      )}
+      {/* Live (non-readOnly) panel for a rollback started from this screen:
+          streams the log, shows "Rolling back" / "Rolled back", auto-closes. */}
+      {liveJob !== null && <ApplyPanel key={liveJob} jobId={liveJob} onClose={() => setLiveJob(null)} />}
     </div>
   );
 }

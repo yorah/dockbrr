@@ -19,7 +19,7 @@ func TestHealthzDegradedWhenDBDown(t *testing.T) {
 	}
 
 	srv := New(config.Config{}, db, Deps{})
-	db.Close() // force db.Ping() to fail
+	_ = db.Close() // force db.Ping() to fail
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
@@ -45,7 +45,7 @@ func TestHealthzOK(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	srv := New(config.Config{}, db, Deps{})
 	rec := httptest.NewRecorder()

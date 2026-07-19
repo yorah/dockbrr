@@ -1,6 +1,7 @@
 import { ArrowUpCircle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useApply, useCheckAll, useScanAll } from "@/hooks/mutations";
+import { markServiceBusy, useBusyServices } from "@/hooks/useBusyServices";
 import type { Update } from "@/api/types";
 
 // Check every service in the given set. Detection is read-only (never touches
@@ -85,13 +86,19 @@ export function ApplyAllButton({
   ariaLabel?: string;
 }) {
   const apply = useApply();
+  // Job-backed per-service busy state (shared with the row buttons via the
+  // same store), so Apply-all disables while any of ITS services still has
+  // an apply/start/stop/restart job in flight, and re-enables once every one
+  // clears rather than immediately after the (sub-second) enqueue POSTs.
+  const busyMap = useBusyServices();
   const pending = updates.filter((u) => u.status === "available");
+  const anyBusy = pending.some((u) => busyMap.has(u.service_id));
   return (
     <Button
       size="sm"
       variant="ghost"
       className="h-7 gap-1 px-2 text-xs"
-      disabled={pending.length === 0 || apply.isPending}
+      disabled={pending.length === 0 || apply.isPending || anyBusy}
       aria-label={ariaLabel ?? label}
       onClick={(e) => {
         e.stopPropagation();
@@ -104,6 +111,7 @@ export function ApplyAllButton({
             { id: u.id, scope: "service" },
             {
               onSuccess: (res) => {
+                markServiceBusy(u.service_id, res.job_id, "apply");
                 if (!opened) {
                   opened = true;
                   onApplied(res.job_id);

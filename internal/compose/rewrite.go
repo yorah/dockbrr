@@ -105,23 +105,37 @@ func WriteFileAtomic(path, content string) error {
 	}
 	tmpName := tmp.Name()
 	if _, err := tmp.WriteString(content); err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
 		return err
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return err
 	}
 
 	// Preserve the existing file's permissions, or use 0644 for new files.
 	mode := os.FileMode(0o644)
+	var orig os.FileInfo
 	if info, err := os.Stat(path); err == nil {
 		mode = info.Mode().Perm()
+		orig = info
 	}
 	if err := os.Chmod(tmpName, mode); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return err
+	}
+	// The temp file is owned by our own euid. When that differs from the
+	// original file's owner (containerized dockbrr runs as root writing a
+	// bind-mounted file owned by a host user), the rename would silently flip
+	// the file to root:root on the host, so restore the original owner first
+	// (Unix only; no-op elsewhere). Same-owner writes skip the chown entirely,
+	// keeping the previous behavior on filesystems that reject chown.
+	if orig != nil {
+		if err := restoreOwner(tmpName, orig); err != nil {
+			_ = os.Remove(tmpName)
+			return err
+		}
 	}
 
 	return os.Rename(tmpName, path)

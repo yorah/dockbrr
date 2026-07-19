@@ -7,7 +7,7 @@ import type { Service, Update } from "@/api/types";
 const service: Service = {
   id: 10, name: "web", image_ref: "nginx:1.27", current_digest: "sha256:c",
   state: "running", pinned: false, drifted: false, healthcheck: false,
-  auto_update_enabled: null, check_status: "ok", last_checked: "", current_version: "",
+  auto_update_enabled: null, check_status: "ok", image_local: false, last_checked: "", current_version: "",
 };
 const update: Update = {
   id: 42, service_id: 10, from_digest: "sha256:b", to_digest: "sha256:c",

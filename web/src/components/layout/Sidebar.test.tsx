@@ -76,6 +76,19 @@ describe("Sidebar", () => {
     expect(sidebar.queryByRole("link", { name: /^media,/ })).not.toBeInTheDocument();
   });
 
+  test("hides a project whose every service is gone", async () => {
+    const goneProject = {
+      id: 3, name: "removedstack", kind: "compose", working_dir: "/srv/gone",
+      auto_update_enabled: false, unmanaged: false, auto_named: false,
+      services: [{ ...service, id: 30, name: "old", state: "gone" }],
+    };
+    server.use(http.get("/api/projects", () => HttpResponse.json([project, goneProject])));
+    renderApp("/");
+
+    expect(await screen.findByRole("link", { name: /^media,/ })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /^removedstack,/ })).not.toBeInTheDocument();
+  });
+
   test("groups auto-named projects under a collapsed Loose section", async () => {
     const loose = { id: 2, name: "adoring_saha", kind: "standalone", working_dir: "", auto_update_enabled: false, unmanaged: false, auto_named: true, services: [] };
     server.use(http.get("/api/projects", () => HttpResponse.json([project, loose])));

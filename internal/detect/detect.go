@@ -67,13 +67,27 @@ func (d *Detector) Detect(ctx context.Context, svc store.Service) (*store.Update
 	repo, tag := SplitRef(svc.ImageRef)
 	now := time.Now().UTC()
 
+	// A locally built image (compose build: directive) has no registry to check.
+	// Record it as such and skip all network resolution: the periodic scan never
+	// probes it, and the dashboard reads it as intentional rather than an error.
+	if svc.ImageLocal {
+		_ = d.states.Upsert(store.RemoteState{Repo: repo, Tag: tag, Status: "local", ResolvedAt: &now})
+		return nil, nil
+	}
+
 	// 1. Try a fresh cache hit (digest only, no labels). A cache hit
 	// intentionally skips the semver tag scan below (digest-only path) until
 	// the cache TTL expires.
 	if remoteDigest, ok := d.freshCachedDigest(repo, tag, now); ok {
 		logger.Tracef("detect: %s cache hit digest %s", svc.ImageRef, shortDigest(remoteDigest))
 		if remoteDigest == svc.CurrentDigest {
-			d.closeStaleUpdates(svc.ID)
+			// Only close updates whose target the service now RUNS. This path
+			// skipped the semver tag scan, so an open update targeting a
+			// different (newer) tag may still be perfectly current; supersede
+			// -all here would flap it closed on every cache-window re-check
+			// (e.g. a scan-all right after a manual per-service check) until
+			// the TTL expires and the full resolve re-opens it.
+			d.closeReachedUpdates(svc.ID, remoteDigest)
 			return nil, nil
 		}
 		return d.record(svc, tag, remoteDigest, "", "", "digest-only")
@@ -83,11 +97,25 @@ func (d *Detector) Detect(ctx context.Context, svc store.Service) (*store.Update
 	logger.Tracef("detect: %s resolving from registry", svc.ImageRef)
 	remote, err := d.resolver.Resolve(ctx, svc.ImageRef, d.plat)
 	if err != nil {
+		// Classify: a 404 means the repo/tag does not exist, and a 401 is how
+		// public registries answer an anonymous request for a nonexistent repo
+		// (Docker Hub hides existence behind Unauthorized). Both are the
+		// expected steady state for a locally built image, or a private image
+		// with no credentials configured, so they get their own status (the
+		// dashboard explains it) at debug log level instead of an error spammed
+		// on every scan. Anything else (network, 5xx) stays a hard error.
 		status := "error"
-		if registry.IsRateLimited(err) {
+		switch {
+		case registry.IsRateLimited(err):
 			status = "rate_limited"
+		case registry.IsUnauthorized(err) || registry.IsNotFound(err):
+			status = "not_found"
 		}
-		logger.Errorf("detect: resolve %q: %v (status=%s)", svc.ImageRef, err, status)
+		if status == "not_found" {
+			logger.Debugf("detect: resolve %q: %v (status=not_found)", svc.ImageRef, err)
+		} else {
+			logger.Errorf("detect: resolve %q: %v (status=%s)", svc.ImageRef, err, status)
+		}
 		_ = d.states.Upsert(store.RemoteState{Repo: repo, Tag: tag, Status: status, ResolvedAt: &now})
 		return nil, nil // non-fatal
 	}
@@ -305,7 +333,9 @@ func (d *Detector) reverseVersions(ctx context.Context, repo, fromDigest string,
 // from_version. This fires when a container reached its target outside the
 // apply path, e.g. dockbrr updating its own container (the recreate kills the
 // process before MarkApplied runs) or an image updated outside dockbrr.
-// Best-effort: a failure is logged, never fatal.
+// Only called from the FULL-resolve path, where the semver scan has run and
+// "up to date" is authoritative for every candidate target. Best-effort: a
+// failure is logged, never fatal.
 func (d *Detector) closeStaleUpdates(serviceID int64) {
 	if d.updates == nil {
 		return
@@ -314,6 +344,21 @@ func (d *Detector) closeStaleUpdates(serviceID int64) {
 		logger.Warnf("detect: supersede stale updates for service %d: %v", serviceID, err)
 	} else if n > 0 {
 		logger.Debugf("detect: service %d up to date, superseded %d stale update(s)", serviceID, n)
+	}
+}
+
+// closeReachedUpdates is closeStaleUpdates' narrow sibling for the digest-only
+// cache-hit path: it supersedes only updates whose target digest the service
+// now runs, leaving different-tag (semver) targets open since that path cannot
+// judge them. Best-effort: a failure is logged, never fatal.
+func (d *Detector) closeReachedUpdates(serviceID int64, reachedDigest string) {
+	if d.updates == nil {
+		return
+	}
+	if n, err := d.updates.SupersedeOpenAtDigest(serviceID, reachedDigest); err != nil {
+		logger.Warnf("detect: supersede reached updates for service %d: %v", serviceID, err)
+	} else if n > 0 {
+		logger.Debugf("detect: service %d reached %s, superseded %d update(s)", serviceID, shortDigest(reachedDigest), n)
 	}
 }
 

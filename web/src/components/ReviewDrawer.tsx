@@ -1,4 +1,4 @@
-import { toast } from "sonner";
+import { notify } from "@/lib/notify";
 import {
   Drawer,
   DrawerContent,
@@ -13,6 +13,7 @@ import { DigestShort } from "@/components/DigestShort";
 import { Changelog } from "@/components/Changelog";
 import { CommandPreview } from "@/components/CommandPreview";
 import { useApply, useDismiss, useRestore } from "@/hooks/mutations";
+import { markServiceBusy, useBusyServices } from "@/hooks/useBusyServices";
 import type { Project, Service, Update, Scope } from "@/api/types";
 
 export interface ReviewDrawerProps {
@@ -36,13 +37,21 @@ export function ReviewDrawer({ update, service, project, onClose, onApplied }: R
   // a fresh one for something that was removed. The backend rejects this too;
   // disabling here just avoids a round trip to find that out.
   const isGone = service.state === "gone";
+  // Same store the dashboard row buttons use: apply.isPending alone only
+  // covers the sub-second enqueue POST, not the async job. Keeps the drawer's
+  // Apply button disabled for the whole job, in step with the row it opened from.
+  const busyMap = useBusyServices();
+  const isBusy = busyMap.has(service.id);
 
   function handleApply() {
     apply.mutate(
       { id: update.id, scope: SCOPE },
       {
-        onSuccess: (res) => onApplied(res.job_id),
-        onError: () => toast.error("Failed to start apply. Please try again."),
+        onSuccess: (res) => {
+          markServiceBusy(service.id, res.job_id, "apply");
+          onApplied(res.job_id);
+        },
+        onError: () => notify.error("Failed to start apply. Please try again."),
       },
     );
   }
@@ -50,14 +59,14 @@ export function ReviewDrawer({ update, service, project, onClose, onApplied }: R
   function handleDismiss() {
     dismiss.mutate(update.id, {
       onSuccess: () => onClose(),
-      onError: () => toast.error("Failed to dismiss update. Please try again."),
+      onError: () => notify.error("Failed to dismiss update. Please try again."),
     });
   }
 
   function handleRestore() {
     restore.mutate(update.id, {
       onSuccess: () => onClose(),
-      onError: () => toast.error("Failed to restore update. Please try again."),
+      onError: () => notify.error("Failed to restore update. Please try again."),
     });
   }
 
@@ -149,7 +158,7 @@ export function ReviewDrawer({ update, service, project, onClose, onApplied }: R
               Dismiss
             </Button>
           )}
-          <Button onClick={handleApply} disabled={apply.isPending || isGone}>
+          <Button onClick={handleApply} disabled={apply.isPending || isGone || isBusy}>
             Apply
           </Button>
         </DrawerFooter>

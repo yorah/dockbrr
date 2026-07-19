@@ -33,6 +33,8 @@ export function SettingsLayout() {
     <div className="flex min-h-0 flex-1 flex-col gap-4 md:flex-row">
       <nav
         aria-label="Settings sections"
+        // The sibling content column scrolls, not this nav, so it stays put
+        // on its own (no sticky needed).
         className="flex shrink-0 gap-1 overflow-x-auto md:w-56 md:flex-col md:overflow-x-visible"
       >
         {SECTIONS.map(({ to, label, icon: Icon }) => (
@@ -47,7 +49,10 @@ export function SettingsLayout() {
           </Link>
         ))}
       </nav>
-      <div className="min-w-0 flex-1">
+      {/* The content column is its own scroll region (md+), so the scrollbar
+          hugs the cards instead of running down the whole pane; md:pr-4 keeps
+          the cards a step off the thumb. Below md the page scrolls as one. */}
+      <div className="min-h-0 min-w-0 flex-1 md:overflow-y-auto md:pr-4">
         <Outlet />
       </div>
     </div>

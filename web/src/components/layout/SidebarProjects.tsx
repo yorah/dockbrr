@@ -25,8 +25,17 @@ export function SidebarProjects({ collapsed }: { collapsed: boolean }) {
   const [addOpen, setAddOpen] = useState(false);
   const [looseOpen, setLooseOpen] = useState(false);
 
-  const named = projects.filter((p) => !p.auto_named);
-  const loose = projects.filter((p) => p.auto_named);
+  // Mirror the dashboard's default gone-hiding: a project whose every service
+  // is gone (all its containers were removed) has nothing left to act on, so
+  // drop it from the sidebar too instead of linking to an empty project page.
+  // It comes back if a container reappears, and the store row is hard-deleted
+  // after the gone grace anyway. Zero-service projects (a manual project just
+  // added, nothing discovered yet) stay visible.
+  const visible = projects.filter(
+    (p) => p.services.length === 0 || p.services.some((s) => s.state !== "gone"),
+  );
+  const named = visible.filter((p) => !p.auto_named);
+  const loose = visible.filter((p) => p.auto_named);
 
   function renderProject(p: Project) {
     const h = health.get(p.id) ?? { updates: 0, dot: "green" as Dot };

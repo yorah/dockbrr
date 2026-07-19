@@ -48,7 +48,7 @@ func (f *fakeChecker) CheckServiceFresh(_ context.Context, id int64) error {
 	return nil
 }
 
-func (f *fakeChecker) CheckAll(_ context.Context) error {
+func (f *fakeChecker) CheckAllFresh(_ context.Context) error {
 	f.checkAllCall++
 	return f.checkAllErr
 }

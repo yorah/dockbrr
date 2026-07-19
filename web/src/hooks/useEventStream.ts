@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { keys } from "@/api/keys";
+import { clearJobBusy } from "@/hooks/useBusyServices";
 
 type Factory = (url: string) => EventSource;
 let factory: Factory | null = null;
@@ -39,12 +40,25 @@ export function useEventStream(enabled = true) {
             void qc.invalidateQueries({ queryKey: keys.updates });
             if (ev.service_id) void qc.invalidateQueries({ queryKey: keys.serviceEvents(ev.service_id) });
             break;
-          case "job_finished":
-            void qc.invalidateQueries({ queryKey: keys.updates });
-            void qc.invalidateQueries({ queryKey: keys.projects });
-            void qc.invalidateQueries({ queryKey: keys.jobs });
-            if (ev.job_id) void qc.invalidateQueries({ queryKey: keys.job(ev.job_id) });
+          case "job_finished": {
+            // Busy state clears only AFTER the refetches land: clearing on the
+            // raw event re-enables the row while it still shows pre-job state
+            // (a Stop button for a now-stopped service), inviting a second
+            // click at exactly the wrong moment. invalidateQueries resolves
+            // when the active refetches complete, so by then the row has its
+            // real state and the right buttons.
+            const jobId = ev.job_id;
+            const refetches = [
+              qc.invalidateQueries({ queryKey: keys.updates }),
+              qc.invalidateQueries({ queryKey: keys.projects }),
+              qc.invalidateQueries({ queryKey: keys.jobs }),
+            ];
+            if (jobId) {
+              refetches.push(qc.invalidateQueries({ queryKey: keys.job(jobId) }));
+              void Promise.all(refetches).finally(() => clearJobBusy(jobId));
+            }
             break;
+          }
           case "jobs_cleared":
             void qc.invalidateQueries({ queryKey: keys.jobs });
             break;

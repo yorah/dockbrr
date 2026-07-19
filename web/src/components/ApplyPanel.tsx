@@ -21,18 +21,49 @@ export interface ApplyPanelProps {
 // rolled_back are EVENT kinds, not job statuses, so do not key off them here.)
 const FAILED_STATUSES = new Set(["failed", "canceled"]);
 const TERMINAL_STATUSES = new Set(["success", "failed", "canceled"]);
+const AUTO_CLOSE_SUCCESS_MS = 4000;
 
-function StatusLine({ status, type, error }: { status?: string; type?: string; error?: string }) {
+// Live-panel title per job type (store/jobs.go type vocabulary). The panel
+// hosts every job-backed action, not just applies.
+const TITLES: Record<string, string> = {
+  apply: "Applying update",
+  rollback: "Rolling back",
+  start: "Starting",
+  stop: "Stopping",
+  restart: "Restarting",
+  remove: "Removing",
+  self_update: "Updating dockbrr",
+};
+
+function panelTitle(readOnly: boolean, type?: string) {
+  if (readOnly) return "Job log";
+  return (type && TITLES[type]) || "Running job";
+}
+
+// Success wording per job type; rollback keeps its warning tone.
+const SUCCESS_LABELS: Record<string, string> = {
+  apply: "Applied",
+  rollback: "Rolled back",
+  start: "Started",
+  stop: "Stopped",
+  restart: "Restarted",
+  remove: "Removed",
+  self_update: "Update started",
+};
+
+function StatusLine({ status, type, error, closingIn }: { status?: string; type?: string; error?: string; closingIn?: number }) {
   if (status === "success") {
+    const suffix = closingIn !== undefined ? ` · closing in ${closingIn}s` : "";
+    const label = (type && SUCCESS_LABELS[type]) || "Done";
     if (type === "rollback") {
-      return <p className="text-sm font-medium text-warning">Rolled back</p>;
+      return <p className="text-sm font-medium text-warning">{label}{suffix}</p>;
     }
-    return <p className="text-sm font-medium text-success">Applied</p>;
+    return <p className="text-sm font-medium text-success">{label}{suffix}</p>;
   }
   if (status && FAILED_STATUSES.has(status)) {
     return (
       <p role="alert" className="text-sm font-medium text-danger">
-        {error || (status === "canceled" ? "Canceled" : "Apply failed")}
+        {error || (status === "canceled" ? "Canceled" : "Job failed")}
       </p>
     );
   }
@@ -67,6 +98,31 @@ export function ApplyPanel({ jobId: initialJobId, onClose, readOnly = false }: A
     void qc.invalidateQueries({ queryKey: keys.jobs });
   }, [readOnly, status, jobId, qc]);
 
+  // A successful job dismisses the panel on its own after a beat: long enough
+  // to read the success line, short enough that start/stop (which open this
+  // panel too) don't leave it parked over the table. Failures stay open, the
+  // error and the rollback offer must not vanish out from under the user.
+  // closingIn drives the visible "closing in Ns" countdown on the status line.
+  // State only changes inside the interval/cleanup (never synchronously in the
+  // effect body, react-hooks/set-state-in-effect); the first second's value is
+  // the render-time default below.
+  const [closingIn, setClosingIn] = useState<number | undefined>(undefined);
+  useEffect(() => {
+    if (readOnly || status !== "success") return;
+    const full = AUTO_CLOSE_SUCCESS_MS / 1000;
+    const tick = setInterval(
+      () => setClosingIn((s) => (s === undefined ? full - 1 : s > 1 ? s - 1 : s)),
+      1000,
+    );
+    const t = setTimeout(onClose, AUTO_CLOSE_SUCCESS_MS);
+    return () => {
+      clearTimeout(t);
+      clearInterval(tick);
+      setClosingIn(undefined);
+    };
+  }, [readOnly, status, onClose]);
+  const closingInShown = status === "success" && !readOnly ? (closingIn ?? AUTO_CLOSE_SUCCESS_MS / 1000) : undefined;
+
   return (
     <section
       aria-label="Apply progress"
@@ -74,14 +130,14 @@ export function ApplyPanel({ jobId: initialJobId, onClose, readOnly = false }: A
     >
       <header className="mb-2 flex items-center justify-between">
         <h2 className="text-sm font-medium">
-          {readOnly ? "Job log" : "Applying update"} (job #{jobId})
+          {panelTitle(readOnly, jobType)} (job #{jobId})
         </h2>
         <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close apply panel">
           Close
         </Button>
       </header>
 
-      <StatusLine status={status} type={jobType} error={job.data?.error} />
+      <StatusLine status={status} type={jobType} error={job.data?.error} closingIn={closingInShown} />
 
       <div
         ref={logRef}

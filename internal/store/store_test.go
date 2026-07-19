@@ -13,7 +13,7 @@ func openTemp(t *testing.T) *store.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
 
@@ -63,12 +63,12 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db1.Close()
+	_ = db1.Close()
 	db2, err := store.Open(path) // re-open must not re-apply / error
 	if err != nil {
 		t.Fatalf("second open failed: %v", err)
 	}
-	defer db2.Close()
+	defer func() { _ = db2.Close() }()
 	var n int
 	if err := db2.QueryRow(`SELECT COUNT(*) FROM hosts`).Scan(&n); err != nil {
 		t.Fatal(err)

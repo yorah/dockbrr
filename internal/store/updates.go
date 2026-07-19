@@ -83,7 +83,7 @@ func (u *Updates) ListOpen() ([]Update, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Update
 	for rows.Next() {
 		var up Update
@@ -118,7 +118,7 @@ func (u *Updates) ListVisible() ([]Update, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Update
 	for rows.Next() {
 		var up Update
@@ -166,6 +166,26 @@ func (u *Updates) SupersedeAllOpen(serviceID int64) (int64, error) {
 		`UPDATE updates SET status='superseded'
 		   WHERE service_id=? AND status='available'`,
 		serviceID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// SupersedeOpenAtDigest marks a still-available update whose to_digest equals
+// reachedDigest as superseded: the service is now RUNNING that digest, so the
+// row's target was reached outside the apply path (e.g. dockbrr's own
+// container recreated, or an out-of-band update). Unlike SupersedeAllOpen it
+// leaves updates targeting OTHER digests open; the digest-only cache-hit
+// detect path uses it because that path never runs the semver tag scan and so
+// cannot judge whether a different-tag target is still current. Returns rows
+// affected.
+func (u *Updates) SupersedeOpenAtDigest(serviceID int64, reachedDigest string) (int64, error) {
+	res, err := u.db.Exec(
+		`UPDATE updates SET status='superseded'
+		   WHERE service_id=? AND status='available' AND to_digest=?`,
+		serviceID, reachedDigest,
 	)
 	if err != nil {
 		return 0, err
@@ -289,6 +309,23 @@ func (u *Updates) MarkRolledBack(serviceID int64, toDigest string) error {
 	return err
 }
 
+// ReopenRolledBack flips a service's rolled_back updates to available.
+// RecordDrift deliberately preserves rolled_back (so the scheduler's re-detect
+// can never feed a just-reverted target back to auto-apply), which means the
+// suppression can only be lifted by an explicit user action: the manual
+// per-service check calls this before detecting, so "check again" re-surfaces
+// the update the user rolled back. Returns rows reopened.
+func (u *Updates) ReopenRolledBack(serviceID int64) (int64, error) {
+	res, err := u.db.Exec(
+		`UPDATE updates SET status='available'
+		   WHERE service_id=? AND status='rolled_back'`,
+		serviceID)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // SetChangelog persists the resolved changelog url + text on the update row and
 // clears changelog_status (a successful resolve supersedes a prior rate-limit).
 func (u *Updates) SetChangelog(updateID int64, url, text string) error {
@@ -393,7 +430,7 @@ func (u *Updates) ListLastAppliedByService() ([]Update, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Update
 	for rows.Next() {
 		var up Update

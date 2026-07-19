@@ -77,7 +77,7 @@ func newDB(t *testing.T) *store.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
 
@@ -200,6 +200,61 @@ func TestDetectUpToDateSupersedesStaleOpenUpdate(t *testing.T) {
 	}
 }
 
+// TestDetectCacheHitUpToDateKeepsSemverUpdateOpen pins the digest-only
+// cache-hit path's supersede scope: the tracked tag matching the running
+// digest says NOTHING about a semver update targeting a different tag (the
+// cache-hit path skips the tag scan), so that row must stay open. Before this
+// was narrowed, a scan-all inside the cache TTL right after a manual check
+// flapped the freshly (re)opened semver update back to superseded.
+func TestDetectCacheHitUpToDateKeepsSemverUpdateOpen(t *testing.T) {
+	db := newDB(t)
+	svc := seedSvc(t, db, "ghcr.io/acme/web:1.2.3", "sha256:old", false)
+	updates := store.NewUpdates(db)
+
+	// A semver update to a different tag's digest...
+	semverID, _, err := updates.RecordDrift(store.Update{
+		ServiceID: svc.ID, FromDigest: "sha256:old", ToDigest: "sha256:semver",
+		Tag: "1.3.0", Severity: "minor", Status: "available",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// ...and a same-tag update whose target the service has since reached
+	// (to_digest == running digest). RecordDrift's tail superseded the semver
+	// row (one-available invariant); force both open to observe the scope.
+	reachedID, _, err := updates.RecordDrift(store.Update{
+		ServiceID: svc.ID, FromDigest: "sha256:older", ToDigest: "sha256:old",
+		Tag: "1.2.3", Status: "available",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := updates.SetStatus(semverID, "available"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Fresh cache: tracked tag resolves to the running digest (up to date).
+	now := time.Now().UTC()
+	_ = store.NewRemoteStates(db).Upsert(store.RemoteState{
+		Repo: "ghcr.io/acme/web", Tag: "1.2.3", RemoteDigest: "sha256:old",
+		Status: "ok", ResolvedAt: &now,
+	})
+	r := fakeResolver{err: errors.New("resolver must not be called on a fresh cache hit")}
+	u, err := newDetector(db, r).Detect(context.Background(), svc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u != nil {
+		t.Fatalf("expected no update on cache-hit up-to-date, got %+v", u)
+	}
+	if got, _ := updates.Get(reachedID); got.Status != "superseded" {
+		t.Fatalf("reached-target row status = %q, want superseded", got.Status)
+	}
+	if got, _ := updates.Get(semverID); got.Status != "available" {
+		t.Fatalf("semver row status = %q, want available (cache-hit path must not close it)", got.Status)
+	}
+}
+
 func TestDetectMatchesOnPlatformDigest(t *testing.T) {
 	db := newDB(t)
 	// Container recorded the platform manifest digest; index digest differs.
@@ -228,6 +283,31 @@ func TestDetectRateLimitedIsNonFatal(t *testing.T) {
 	rs, _ := store.NewRemoteStates(db).Get("docker.io/library/nginx", "latest")
 	if rs.Status != "rate_limited" {
 		t.Fatalf("status = %q, want rate_limited", rs.Status)
+	}
+}
+
+// TestDetectNotFoundStatus pins the classification of "image is not in the
+// registry": a 404, or the 401 public registries answer for an anonymous
+// request to a nonexistent repo (Docker Hub hides existence behind
+// Unauthorized). Both are the steady state for a locally built image, so they
+// record status not_found (dashboard: muted "not in registry" hint) instead of
+// a hard error.
+func TestDetectNotFoundStatus(t *testing.T) {
+	for _, code := range []int{401, 404} {
+		db := newDB(t)
+		svc := seedSvc(t, db, "docker.io/library/localonly:latest", "sha256:old", false)
+		r := fakeResolver{err: &transport.Error{StatusCode: code}}
+		u, err := newDetector(db, r).Detect(context.Background(), svc)
+		if err != nil {
+			t.Fatalf("code %d must be non-fatal, got err %v", code, err)
+		}
+		if u != nil {
+			t.Fatalf("no update on code %d, got %+v", code, u)
+		}
+		rs, _ := store.NewRemoteStates(db).Get("docker.io/library/localonly", "latest")
+		if rs.Status != "not_found" {
+			t.Fatalf("code %d: status = %q, want not_found", code, rs.Status)
+		}
 	}
 }
 
@@ -735,6 +815,30 @@ func TestDetectReverseLookupUsesTagCache(t *testing.T) {
 	// The HEAD result must have been written back to the cache.
 	if dg, ok, err := store.NewTagDigests(db).Get(repo, "v1.14.1"); err != nil || !ok || dg != "sha256:v1141" {
 		t.Fatalf("cache after Detect: dg=%q ok=%v err=%v, want sha256:v1141", dg, ok, err)
+	}
+}
+
+// TestDetectSkipsLocalImage proves a locally built (compose build:) image
+// short-circuits before any registry call: Detect must return (nil, nil) and
+// record the remote state as "local" without ever invoking the resolver.
+func TestDetectSkipsLocalImage(t *testing.T) {
+	db := newDB(t)
+	svc := seedSvc(t, db, "api:dev", "sha256:x", false)
+	svc.ImageLocal = true
+	r := fakeResolver{err: errors.New("resolver must not be called for a local image")}
+	u, err := newDetector(db, r).Detect(context.Background(), svc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u != nil {
+		t.Fatalf("upd = %+v, want nil (local image)", u)
+	}
+	st, err := store.NewRemoteStates(db).Get("api", "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Status != "local" {
+		t.Fatalf("status = %q, want local", st.Status)
 	}
 }
 

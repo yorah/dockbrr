@@ -29,7 +29,7 @@ func dialDocker(ctx context.Context, socket string) (*docker.Client, error) {
 	pingCtx, cancel := context.WithTimeout(ctx, dockerDialTimeout)
 	defer cancel()
 	if err := c.Ping(pingCtx); err != nil {
-		c.Close()
+		_ = c.Close()
 		return nil, err
 	}
 	return c, nil

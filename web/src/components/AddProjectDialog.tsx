@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { toast } from "sonner";
+import { notify } from "@/lib/notify";
 import { useCreateProject } from "@/hooks/mutations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -54,7 +54,7 @@ export function AddProjectDialog({ open, onOpenChange }: AddProjectDialogProps) 
               { name, working_dir: workingDir, config_files: parseConfigFiles(configFiles) },
               {
                 onSuccess: (created) => {
-                  toast.success(`Project "${created.name}" added`);
+                  notify.success(`Project "${created.name}" added`);
                   setName("");
                   setWorkingDir("");
                   setConfigFiles("");

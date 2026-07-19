@@ -28,6 +28,14 @@ message broker, nothing else to run alongside it.
 - Optionally auto-applies updates on a schedule, per project and per service, off by
   default.
 
+## Screenshots
+
+![Dashboard: projects, pending updates with severity, per-service actions](docs/screenshots/dashboard-dark.png)
+
+| Changelog for a pending update | Live apply log with health gate |
+| --- | --- |
+| ![Changelog drawer showing release notes](docs/screenshots/changelog.png) | ![Apply panel streaming the compose pull/up log](docs/screenshots/apply.png) |
+
 ## Safety model
 
 This is the part that matters most, since dockbrr is something you give access to
@@ -98,7 +106,8 @@ volumes:
 The image bundles the Docker CLI + Compose plugin and drives your host's Docker
 through the mounted socket. To *apply* updates to a Compose project, the
 container also needs to see that project's files at the same paths they live on
-the host, so bind-mount those directories too (see the path note below).
+the host, so bind-mount those directories too; the how and why is in
+[docs/path-mapping.md](docs/path-mapping.md).
 
 ### Prebuilt binaries and packages
 
@@ -145,6 +154,59 @@ handful of values needed before a database exists:
 | `--log-level` | `DOCKBRR_LOG_LEVEL` | `info` | `trace`, `debug`, `info`, `warn`, or `error` |
 | `--log-max-size` | `DOCKBRR_LOG_MAX_SIZE` | `50` | Log file rotation size, in MB |
 | `--log-max-backups` | `DOCKBRR_LOG_MAX_BACKUPS` | `3` | Number of rotated log files to keep |
+
+## Running behind a reverse proxy
+
+dockbrr speaks plain HTTP and expects a reverse proxy to terminate TLS. Two
+things matter:
+
+- **Forward `X-Forwarded-Proto`.** dockbrr marks its cookies `Secure` only
+  when the request arrived over HTTPS, which it detects from direct TLS or
+  the `X-Forwarded-Proto: https` header. Every mainstream proxy sets this by
+  default or with one line.
+- **Login lockout is per source IP.** After 5 failed logins from one address,
+  dockbrr rejects further attempts from it for 15 minutes. dockbrr reads the
+  TCP peer address, not `X-Forwarded-For` (that header is spoofable), so
+  behind a proxy all clients share the proxy's address and the lockout is
+  effectively global. For a single-user tool that's the safe trade.
+
+Caddy example:
+
+```text
+dockbrr.example.com {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+nginx example:
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    # SSE (live updates): disable buffering so events stream through.
+    proxy_buffering off;
+    proxy_read_timeout 1h;
+}
+```
+
+## Backup and restore
+
+Everything dockbrr owns lives in the data directory (`--data-dir`, default
+`./data`):
+
+- `dockbrr.db` (+ `-wal`/`-shm` sidecars): SQLite database, settings,
+  projects, update history, jobs.
+- `secret.key`: the encryption key for registry credentials and the GitHub
+  token. **Without this file those secrets are unrecoverable**; the rest of
+  the database remains readable.
+- `logs/`: rotated log files (safe to skip).
+
+To back up: stop dockbrr (or accept a crash-consistent copy, SQLite in WAL
+mode tolerates it) and copy the directory. To restore: place the directory
+back and start dockbrr; there is no import step. Snapshots taken before
+updates live in the database, so restoring the directory restores rollback
+history too.
 
 ## GitHub token and changelogs
 

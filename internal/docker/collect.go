@@ -28,6 +28,7 @@ type Container struct {
 	State       string   // State.Status (running|exited|...)
 	Healthcheck bool     // State.Health != nil
 	Health      string   // State.Health.Status ("" if no healthcheck)
+	SelfUpdate  bool     // carries SelfUpdateLabel: the ephemeral self-update helper, never a workload
 }
 
 // containerFromInspect maps a Docker container inspect response and an image
@@ -85,6 +86,8 @@ func containerFromInspect(ct dcontainer.InspectResponse, img dimage.InspectRespo
 		}
 	}
 
+	_, selfUpdate := labels[SelfUpdateLabel]
+
 	return Container{
 		ID:          ct.ID,
 		Project:     project,
@@ -100,6 +103,7 @@ func containerFromInspect(ct dcontainer.InspectResponse, img dimage.InspectRespo
 		State:       state,
 		Healthcheck: healthcheck,
 		Health:      health,
+		SelfUpdate:  selfUpdate,
 	}
 }
 

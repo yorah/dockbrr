@@ -61,7 +61,7 @@ describe("useCheck", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(invalidated).toContainEqual(keys.updates);
     expect(invalidated).toContainEqual(keys.projects);
-    expect(toast.success).toHaveBeenCalledWith("Check complete");
+    expect(toast.success).toHaveBeenCalledWith(expect.stringMatching(/^Check complete/), expect.anything());
   });
 
   test("surfaces errors as toasts", async () => {
@@ -72,7 +72,7 @@ describe("useCheck", () => {
     const { result } = renderHook(() => useCheck(), { wrapper: W });
     result.current.mutate(7);
     await waitFor(() => expect(result.current.isError).toBe(true));
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("registry down"));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/^registry down/), expect.anything()));
   });
 });
 

@@ -1,10 +1,21 @@
-import { expect, test } from "vitest";
+import { afterEach, expect, test } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { server } from "@/test/msw";
 import { renderWithClient } from "@/test/utils";
 import { JobsScreen } from "./jobs";
+import { __setEventSourceFactory } from "@/hooks/useJobLog";
+
+class FakeES {
+  onmessage: ((e: MessageEvent) => void) | null = null;
+  onerror: ((e: Event) => void) | null = null;
+  url: string;
+  constructor(url: string) { this.url = url; }
+  close() {}
+}
+
+afterEach(() => __setEventSourceFactory(null));
 
 const finishedJob = {
   id: 2, type: "apply", status: "success", scope: "service", exit_code: 0, error: "",
@@ -24,6 +35,7 @@ test("renders jobs rows with status badges", async () => {
         {
           id: 2, type: "apply", status: "success", scope: "service", exit_code: 0, error: "",
           project_id: 1, service_id: 10, requested_by: "user",
+          project_name: "smoke", service_name: "web",
           created_at: "2026-07-06T10:00:00Z", finished_at: "2026-07-06T10:00:05Z",
         },
         {
@@ -43,6 +55,9 @@ test("renders jobs rows with status badges", async () => {
   expect(screen.getByText("failed")).toBeInTheDocument();
   expect(screen.getByText("user")).toBeInTheDocument();
   expect(screen.getByText("scheduler")).toBeInTheDocument();
+  // Target column: "project / service" when names are resolved, "-" otherwise.
+  expect(screen.getByText("smoke / web")).toBeInTheDocument();
+  expect(screen.getByText("-")).toBeInTheDocument();
 });
 
 test("shows the empty state when there are no jobs", async () => {
@@ -82,6 +97,58 @@ test("Clear finished confirms before issuing the DELETE", async () => {
   // The list refetches: the finished job is gone, the running one survives.
   await waitFor(() => expect(screen.queryByText("apply")).toBeNull());
   expect(screen.getByText("check")).toBeInTheDocument();
+});
+
+test("Rollback appears only on the latest finished apply per service", async () => {
+  server.use(
+    http.get("/api/jobs", () =>
+      HttpResponse.json([
+        // newest-first: id 5 is the latest apply for service 10
+        { id: 5, type: "apply", status: "success", scope: "service", exit_code: 0, error: "",
+          project_id: 1, service_id: 10, requested_by: "user",
+          created_at: "2026-07-06T12:00:00Z", finished_at: "2026-07-06T12:00:05Z" },
+        { id: 4, type: "check", status: "success", scope: "service", exit_code: 0, error: "",
+          project_id: 1, service_id: 10, requested_by: "scheduler",
+          created_at: "2026-07-06T11:30:00Z", finished_at: "2026-07-06T11:30:02Z" },
+        // older apply for the same service: no rollback offered
+        { id: 2, type: "apply", status: "success", scope: "service", exit_code: 0, error: "",
+          project_id: 1, service_id: 10, requested_by: "user",
+          created_at: "2026-07-06T10:00:00Z", finished_at: "2026-07-06T10:00:05Z" },
+        // apply without a service (project scope): not rollbackable
+        { id: 1, type: "apply", status: "success", scope: "project", exit_code: 0, error: "",
+          project_id: 1, service_id: null, requested_by: "user",
+          created_at: "2026-07-06T09:00:00Z", finished_at: "2026-07-06T09:00:05Z" },
+      ]),
+    ),
+  );
+
+  renderWithClient(<JobsScreen />);
+
+  await waitFor(() => expect(screen.getAllByText("apply").length).toBe(3));
+  expect(screen.getAllByRole("button", { name: /rollback/i })).toHaveLength(1);
+});
+
+test("Rollback enqueues the job and opens the live panel", async () => {
+  __setEventSourceFactory((url) => new FakeES(url) as unknown as EventSource);
+  let posted = false;
+  server.use(
+    http.get("/api/jobs", () => HttpResponse.json([finishedJob])),
+    http.post("/api/jobs/2/rollback", () => {
+      posted = true;
+      return HttpResponse.json({ job_id: 42 });
+    }),
+    http.get("/api/jobs/:id", () =>
+      HttpResponse.json({ id: 42, type: "rollback", status: "running", scope: "service", exit_code: null, error: "" }),
+    ),
+  );
+
+  renderWithClient(<JobsScreen />);
+
+  await userEvent.click(await screen.findByRole("button", { name: /rollback/i }));
+
+  await waitFor(() => expect(posted).toBe(true));
+  // The live panel opened on the new rollback job.
+  await waitFor(() => expect(screen.getByText(/rolling back \(job #42\)/i)).toBeInTheDocument());
 });
 
 test("cancelling the confirm dialog issues no DELETE", async () => {

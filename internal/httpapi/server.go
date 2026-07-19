@@ -27,11 +27,13 @@ type JobService interface {
 
 // Checker triggers read-only detection, either a fresh check of one service
 // (invalidating its detect cache first, so a manual check always does a full
-// re-scan) or a sweep of every service. *scan.Scanner satisfies it. Detection
-// does not go through the Job Engine (read-only).
+// re-scan) or a fresh sweep of every service (same cache invalidation,
+// per service). Both endpoints are manual/user-initiated, hence fresh; the
+// scheduler's cache-keeping sweep never comes through the API. *scan.Scanner
+// satisfies it. Detection does not go through the Job Engine (read-only).
 type Checker interface {
 	CheckServiceFresh(ctx context.Context, serviceID int64) error
-	CheckAll(ctx context.Context) error
+	CheckAllFresh(ctx context.Context) error
 }
 
 // DockerPinger re-probes daemon liveness on each /api/status request so the
@@ -93,19 +95,23 @@ type Deps struct {
 	// SelfUpdate reports whether a newer dockbrr release is available. Optional:
 	// nil (as in tests) degrades /api/updates/self to update_available:false.
 	SelfUpdate *selfupdate.Checker
+	// SelfID is dockbrr's own container id ("" on a host install). Gates the
+	// self-update apply endpoint; injected so it stays testable.
+	SelfID string
 }
 
 type Server struct {
-	cfg  config.Config
-	db   *store.DB
-	deps Deps
-	mux  *chi.Mux
+	cfg     config.Config
+	db      *store.DB
+	deps    Deps
+	mux     *chi.Mux
+	limiter *loginLimiter
 }
 
 // New builds the API server. deps carries the wired repos + engine/checker;
 // pass Deps{} in tests that exercise only /healthz or /api/projects.
 func New(cfg config.Config, db *store.DB, deps Deps) *Server {
-	s := &Server{cfg: cfg, db: db, deps: deps, mux: chi.NewRouter()}
+	s := &Server{cfg: cfg, db: db, deps: deps, mux: chi.NewRouter(), limiter: newLoginLimiter(time.Now)}
 	s.routes()
 	return s
 }
@@ -127,6 +133,8 @@ func (s *Server) serviceName(id int64) string {
 }
 
 func (s *Server) routes() {
+	s.mux.Use(secureHeaders)
+
 	s.mux.Get("/healthz", s.handleHealth)
 
 	// Open (pre-auth) routes.
@@ -142,6 +150,7 @@ func (s *Server) routes() {
 		r.Post("/api/auth/password", s.handleChangePassword)
 		r.Get("/api/status", s.handleStatus)
 		r.Get("/api/updates/self", s.handleSelfUpdate)
+		r.Post("/api/updates/self/apply", s.handleSelfUpdateApply)
 		r.Get("/api/system/info", s.handleSystemInfo)
 		r.Get("/api/projects", s.handleProjects)
 		r.Get("/api/projects/{id}/compose", s.handleProjectCompose)

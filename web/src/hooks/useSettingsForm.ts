@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
+import { notify } from "@/lib/notify";
 import { useSettings } from "@/hooks/queries";
 import { useSaveSettings } from "@/hooks/mutations";
 import type { Settings } from "@/api/types";
@@ -82,8 +82,8 @@ export function useSettingsForm(editableKeys: SettingKey[]) {
       if (Object.keys(patch).length === 0) return;
       save.mutate(patch, {
         onSuccess: () => {
-          toast.success("Settings saved");
-          if ("concurrency" in patch) toast.info("Concurrency applies after restart");
+          notify.success("Settings saved");
+          if ("concurrency" in patch) notify.info("Concurrency applies after restart");
           onSaved?.();
         },
       });

@@ -13,7 +13,7 @@ func (r *RemoteStates) All() (map[[2]string]RemoteState, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make(map[[2]string]RemoteState)
 	for rows.Next() {
 		var (

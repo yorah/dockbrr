@@ -27,7 +27,7 @@ func Open(path string) (*DB, error) {
 	}
 	sqlDB.SetMaxOpenConns(1) // single-writer invariant
 	if err := runMigrations(sqlDB); err != nil {
-		sqlDB.Close()
+		_ = sqlDB.Close()
 		return nil, err
 	}
 	return &DB{sqlDB}, nil

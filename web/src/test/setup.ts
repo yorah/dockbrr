@@ -22,5 +22,8 @@ beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
   cleanup();
   server.resetHandlers();
+  // Components persist UI state (dashboard collapse) in sessionStorage; clear
+  // it so one test's expand/collapse choices never leak into the next.
+  sessionStorage.clear();
 });
 afterAll(() => server.close());

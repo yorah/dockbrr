@@ -90,11 +90,11 @@ func (s *Server) handleEventStream(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-beat.C:
 			// SSE comment line: keeps the socket warm, ignored by EventSource.
-			fmt.Fprint(w, ": heartbeat\n\n")
+			_, _ = fmt.Fprint(w, ": heartbeat\n\n")
 			flusher.Flush()
 		case e := <-ch:
 			payload, _ := json.Marshal(e)
-			fmt.Fprintf(w, "data: %s\n\n", payload)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
 			flusher.Flush()
 		}
 	}

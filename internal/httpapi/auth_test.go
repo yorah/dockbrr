@@ -18,7 +18,7 @@ func freshServer(t *testing.T) (*Server, *store.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 	deps := Deps{Users: store.NewUsers(db), Sessions: store.NewSessions(db)}
 	return New(config.Config{}, db, deps), db
 }
@@ -120,4 +120,86 @@ func hasCookie(cs []*http.Cookie, name string) bool {
 		}
 	}
 	return false
+}
+
+// TestLoginRateLimited drives failLimit bad logins through the real handler
+// and asserts the next attempt is rejected 429 with Retry-After, even with
+// CORRECT credentials (lockout is unconditional once tripped).
+func TestLoginRateLimited(t *testing.T) {
+	srv, db, _, _ := authedServer(t, Deps{})
+	_ = db
+
+	doLogin := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(body))
+		req.RemoteAddr = "192.0.2.9:40000"
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+
+	for i := 0; i < failLimit; i++ {
+		if rec := doLogin(`{"username":"admin","password":"wrong"}`); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: code = %d, want 401", i, rec.Code)
+		}
+	}
+	rec := doLogin(`{"username":"admin","password":"wrong"}`)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("post-limit code = %d, want 429", rec.Code)
+	}
+	if rec.Header().Get("Retry-After") == "" {
+		t.Fatal("429 response missing Retry-After header")
+	}
+
+	// A different IP is unaffected.
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"admin","password":"wrong"}`))
+	req.RemoteAddr = "192.0.2.10:40000"
+	other := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(other, req)
+	if other.Code != http.StatusUnauthorized {
+		t.Fatalf("other-IP code = %d, want 401", other.Code)
+	}
+}
+
+// TestLoginLockoutFreezesCounter asserts that once an IP is locked out, its
+// 429-rejected attempts neither increment the failure count nor move the
+// window start (the handler returns before limiter.fail), so hammering a
+// locked-out address cannot extend its own lockout.
+func TestLoginLockoutFreezesCounter(t *testing.T) {
+	srv, _, _, _ := authedServer(t, Deps{})
+
+	doLogin := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"admin","password":"wrong"}`))
+		req.RemoteAddr = "192.0.2.11:40000"
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+
+	for i := 0; i < failLimit; i++ {
+		if rec := doLogin(); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: code = %d, want 401", i, rec.Code)
+		}
+	}
+	srv.limiter.mu.Lock()
+	entry := srv.limiter.m["192.0.2.11"]
+	count, first := entry.count, entry.first
+	srv.limiter.mu.Unlock()
+	if count != failLimit {
+		t.Fatalf("count = %d after failLimit failures, want %d", count, failLimit)
+	}
+
+	for i := 0; i < 3; i++ {
+		if rec := doLogin(); rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("locked-out attempt %d: code = %d, want 429", i, rec.Code)
+		}
+	}
+	srv.limiter.mu.Lock()
+	entry = srv.limiter.m["192.0.2.11"]
+	srv.limiter.mu.Unlock()
+	if entry.count != count {
+		t.Fatalf("count moved %d -> %d during lockout; 429s must not count", count, entry.count)
+	}
+	if !entry.first.Equal(first) {
+		t.Fatalf("window start moved %v -> %v during lockout", first, entry.first)
+	}
 }

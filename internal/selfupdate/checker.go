@@ -124,7 +124,7 @@ func (c *Checker) fetchLatest(ctx context.Context) (tag, htmlURL string, err err
 	if err != nil {
 		return "", "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return "", "", fmt.Errorf("github releases/latest: status %d", resp.StatusCode)
 	}

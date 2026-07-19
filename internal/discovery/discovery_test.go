@@ -30,7 +30,7 @@ func openDB(t *testing.T) *store.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
 
@@ -186,6 +186,19 @@ func TestGroupComposeEmptyServiceSkipped(t *testing.T) {
 	}
 }
 
+func TestGroupSkipsSelfUpdateHelper(t *testing.T) {
+	// The detached self-update helper container carries docker.SelfUpdateLabel
+	// (surfaced on docker.Container as SelfUpdate). It is an ephemeral internal
+	// artifact, never a user workload, and must never be grouped into a project.
+	cs := []docker.Container{
+		{ID: "h1", Project: "", Name: "dockbrr-self-update", ImageRef: "dockbrr:latest", State: "exited", SelfUpdate: true},
+	}
+	groups := discovery.Group(cs)
+	if len(groups) != 0 {
+		t.Fatalf("len(groups) = %d, want 0 (self-update helper must be excluded)", len(groups))
+	}
+}
+
 func TestGroupDeterministicOrder(t *testing.T) {
 	// Multiple projects and services in reverse alphabetical order as input.
 	cs := []docker.Container{
@@ -295,6 +308,45 @@ func TestReconcilePopulatesStore(t *testing.T) {
 	}
 	if len(redisSvcs) != 1 || redisSvcs[0].Name != "redis" {
 		t.Fatalf("redis service = %+v", redisSvcs)
+	}
+}
+
+func TestReconcileIgnoresSelfUpdateHelper(t *testing.T) {
+	db := openDB(t)
+	projects := store.NewProjects(db)
+	services := store.NewServices(db)
+
+	fc := &fakeCollector{
+		containers: []docker.Container{
+			{ID: "c1", Project: "app", Service: "web", Name: "app_web_1", ImageRef: "nginx:latest", State: "running"},
+			{ID: "h1", Project: "", Name: "dockbrr-self-update", ImageRef: "dockbrr:latest", State: "exited", SelfUpdate: true},
+		},
+	}
+
+	r := discovery.NewReconciler(fc, projects, services, 1, nil, nil)
+	if _, err := r.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := projects.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("project count = %d, want 1 (self-update helper must not create a project)", len(all))
+	}
+	if all[0].Name != "app" {
+		t.Fatalf("project[0].Name = %q, want app", all[0].Name)
+	}
+
+	svcs, err := services.ListByProject(all[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range svcs {
+		if s.Name == "dockbrr-self-update" {
+			t.Fatalf("self-update helper reconciled as service: %+v", s)
+		}
 	}
 }
 
@@ -816,6 +868,53 @@ func TestReconcileDriftOddNameNotDriftedWhenImageMatchesDeclared(t *testing.T) {
 	}
 	if svcs[0].Drifted {
 		t.Fatal("Drifted = true, want false (declared matches running for service with underscore in name)")
+	}
+}
+
+func TestReconcileMarksBuildServiceLocal(t *testing.T) {
+	db := openDB(t)
+	projects := store.NewProjects(db)
+	services := store.NewServices(db)
+
+	dir := t.TempDir()
+	cfgPath := writeComposeFile(t, dir, "services:\n  api:\n    build: .\n  cache:\n    image: redis:7.2.0\n")
+
+	fc := &fakeCollector{
+		containers: []docker.Container{
+			{
+				ID: "c1", Project: "app", Service: "api",
+				WorkingDir: dir, ConfigFiles: []string{cfgPath},
+				Name: "app_api_1", ImageRef: "app_api", State: "running",
+			},
+			{
+				ID: "c2", Project: "app", Service: "cache",
+				WorkingDir: dir, ConfigFiles: []string{cfgPath},
+				Name: "app_cache_1", ImageRef: "redis:7.2.0", State: "running",
+			},
+		},
+	}
+	r := discovery.NewReconciler(fc, projects, services, 1, nil, nil)
+	if _, err := r.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := projects.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	svcs, err := services.ListByProject(all[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, s := range svcs {
+		got[s.Name] = s.ImageLocal
+	}
+	if !got["api"] {
+		t.Errorf("api ImageLocal = false, want true")
+	}
+	if got["cache"] {
+		t.Errorf("cache ImageLocal = true, want false")
 	}
 }
 

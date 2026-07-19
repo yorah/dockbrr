@@ -1,11 +1,14 @@
-import { expect, test, vi } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { server } from "@/test/msw";
 import { renderWithClient } from "@/test/utils";
+import { __resetBusyServices } from "@/hooks/useBusyServices";
 import { ReviewDrawer } from "./ReviewDrawer";
 import type { Project, Service, Update } from "@/api/types";
+
+beforeEach(() => __resetBusyServices());
 
 const update: Update = {
   id: 7,
@@ -32,6 +35,7 @@ const service: Service = {
   healthcheck: true,
   auto_update_enabled: null,
   check_status: "ok",
+  image_local: false,
   last_checked: "",
 };
 const project: Project = {

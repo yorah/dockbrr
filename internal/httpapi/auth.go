@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"dockbrr/internal/auth"
@@ -61,8 +62,15 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]string{"username": body.Username})
 }
 
-// handleLogin verifies credentials and issues a session.
+// handleLogin verifies credentials and issues a session. Failed attempts feed
+// the per-IP lockout; a locked-out IP gets 429 before any credential work.
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	ip := clientIP(r)
+	if retry, blocked := s.limiter.blocked(ip); blocked {
+		w.Header().Set("Retry-After", strconv.Itoa(retry))
+		writeJSONError(w, http.StatusTooManyRequests, errTooManyAttempts)
+		return
+	}
 	var body credsBody
 	if err := decodeJSON(r, &body); err != nil {
 		writeJSONError(w, http.StatusBadRequest, errBadCredentials)
@@ -71,14 +79,17 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	u, err := s.deps.Users.GetByUsername(body.Username)
 	if err != nil {
 		_, _ = auth.VerifyPassword(dummyHash, body.Password) // constant-ish time
+		s.limiter.fail(ip)
 		writeJSONError(w, http.StatusUnauthorized, errBadCredentials)
 		return
 	}
 	ok, err := auth.VerifyPassword(u.PasswordHash, body.Password)
 	if err != nil || !ok {
+		s.limiter.fail(ip)
 		writeJSONError(w, http.StatusUnauthorized, errBadCredentials)
 		return
 	}
+	s.limiter.success(ip)
 	if err := s.issueSession(w, r, u.ID); err != nil {
 		writeInternalError(w, "login: issue session", err)
 		return

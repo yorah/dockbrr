@@ -223,3 +223,31 @@ services:
 		t.Fatalf("project name starts with %q: %s", string(proj.Name[0]), proj.Name)
 	}
 }
+
+func TestParseMarksBuildServiceLocal(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "compose.yml")
+	if err := os.WriteFile(file, []byte(`
+services:
+  api:
+    build: .
+  cache:
+    image: redis:7.2.0
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	proj, err := compose.Parse(context.Background(), dir, []string{file})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, s := range proj.Services {
+		got[s.Name] = s.Build
+	}
+	if !got["api"] {
+		t.Errorf("api: Build = false, want true (has build:)")
+	}
+	if got["cache"] {
+		t.Errorf("cache: Build = true, want false (image only)")
+	}
+}
