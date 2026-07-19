@@ -120,6 +120,56 @@ func TestSelfUpdateApplyNoUpdate409(t *testing.T) {
 	if len(eng.enqueued) != 0 {
 		t.Fatalf("enqueued %d jobs, want 0", len(eng.enqueued))
 	}
+	if msg := errorBody(t, rec); msg != "no dockbrr update is available" {
+		t.Errorf("error message = %q", msg)
+	}
+}
+
+// errorBody decodes the {"error": "..."} body writeJSONError produces.
+func errorBody(t *testing.T, rec *httptest.ResponseRecorder) string {
+	t.Helper()
+	var out map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	return out["error"]
+}
+
+// erroringGHServer always 500s, so the checker returns a genuine error (as
+// opposed to a soft "no update" verdict) when there's no cache to fall back on.
+func erroringGHServer(t *testing.T) string {
+	t.Helper()
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	t.Cleanup(gh.Close)
+	return gh.URL
+}
+
+func TestSelfUpdateApplyCheckError409(t *testing.T) {
+	srv, db, tok, csrf := authedServer(t, Deps{})
+	eng := &fakeEngine{}
+	d := selfUpdateDeps(t, db, erroringGHServer(t), "0.4.2")
+	d.Engine = eng
+	d.SelfID = "abc123def456"
+	srv.deps = mergeDeps(srv.deps, d)
+
+	req := authReq(httptest.NewRequest(http.MethodPost, "/api/updates/self/apply", nil), tok, csrf)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("apply with checker error = %d, want 409", rec.Code)
+	}
+	if len(eng.enqueued) != 0 {
+		t.Fatalf("enqueued %d jobs, want 0", len(eng.enqueued))
+	}
+	msg := errorBody(t, rec)
+	if msg != "could not check for updates, try again later" {
+		t.Errorf("error message = %q", msg)
+	}
+	if msg == "no dockbrr update is available" {
+		t.Error("checker-error body must differ from the genuine no-update body")
+	}
 }
 
 func TestSelfUpdateApplyEnqueues(t *testing.T) {
@@ -148,6 +198,41 @@ func TestSelfUpdateApplyEnqueues(t *testing.T) {
 	}
 	if out["job_id"] != float64(1) {
 		t.Errorf("job_id = %v, want 1", out["job_id"])
+	}
+}
+
+func TestSelfUpdateApplySingleFlight(t *testing.T) {
+	srv, db, tok, csrf := authedServer(t, Deps{})
+	eng := &fakeEngine{}
+	d := selfUpdateDeps(t, db, ghLatestServer(t, "v9.0.0"), "0.4.2")
+	d.Engine = eng
+	d.SelfID = "abc123def456"
+	d.Jobs = store.NewJobs(db)
+	srv.deps = mergeDeps(srv.deps, d)
+
+	// A self_update job is already queued (e.g. from an earlier request, or
+	// enqueued directly by another path). The apply endpoint must not stack a
+	// second one on top of it.
+	existingID, err := d.Jobs.Enqueue(store.Job{Type: "self_update", RequestedBy: "user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := authReq(httptest.NewRequest(http.MethodPost, "/api/updates/self/apply", nil), tok, csrf)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("apply with in-flight self_update = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if len(eng.enqueued) != 0 {
+		t.Fatalf("enqueued %d new jobs via Engine, want 0 (single-flight)", len(eng.enqueued))
+	}
+	var out map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out["job_id"] != float64(existingID) {
+		t.Errorf("job_id = %v, want existing id %d", out["job_id"], existingID)
 	}
 }
 

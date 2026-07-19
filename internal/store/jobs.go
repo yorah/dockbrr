@@ -111,6 +111,27 @@ func (j *Jobs) Get(id int64) (Job, error) {
 	return job, err
 }
 
+// ActiveByType returns the most recent queued or running job of the given
+// type, or ok=false if none exists. Used for single-flight enqueue guards
+// (e.g. self_update): callers check this before Enqueue to avoid stacking a
+// second job of the same type while one is already in flight.
+func (j *Jobs) ActiveByType(jobType string) (Job, bool, error) {
+	row := j.db.QueryRow(
+		`SELECT `+jobColumns+` FROM jobs
+		  WHERE type=? AND status IN ('queued','running')
+		  ORDER BY id DESC LIMIT 1`,
+		jobType,
+	)
+	job, err := scanJob(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Job{}, false, nil
+	}
+	if err != nil {
+		return Job{}, false, err
+	}
+	return job, true, nil
+}
+
 // JobListRow is a Job plus the display names the Jobs history screen shows.
 // LEFT JOINed, so a job whose service/project has since been deleted comes
 // back with an empty name rather than dropping off the list.
