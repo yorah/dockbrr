@@ -125,7 +125,7 @@ func NewRemoteStates(db *DB) *RemoteStates { return &RemoteStates{db: db.DB} }
 
 // Upsert inserts or fully replaces the remote-state row for (repo, tag).
 // An empty Status is promoted to "ok"; callers should pass an explicit status
-// from the enum ok|rate_limited|error.
+// from the enum ok|rate_limited|error|not_found|local.
 func (r *RemoteStates) Upsert(s RemoteState) error {
 	labels := s.ManifestLabels
 	if labels == "" {
