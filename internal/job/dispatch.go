@@ -19,27 +19,32 @@ type Dispatcher struct {
 	standalone *StandaloneApplier
 	projects   *store.Projects
 
+	// jobs is required and wired at construction time (not gated on
+	// containerization), so it is always available to mark a job failed: both
+	// refuseSelfTarget's guard and the self_update nil-updater fallback below
+	// depend on it, and the fallback in particular must work on a host install
+	// (SelfContainerID() == "", so SetSelfGuard is never called there).
+	jobs *store.Jobs
+
 	// Self-guard wiring (SetSelfGuard). Empty selfID disables the guard.
 	selfID   string
 	services *store.Services
-	jobs     *store.Jobs
 	emitter  Emitter
 
 	selfUpdater *SelfUpdater
 }
 
-func NewDispatcher(applier *Applier, lifecycle *Lifecycle, standalone *StandaloneApplier, projects *store.Projects) *Dispatcher {
-	return &Dispatcher{applier: applier, lifecycle: lifecycle, standalone: standalone, projects: projects}
+func NewDispatcher(applier *Applier, lifecycle *Lifecycle, standalone *StandaloneApplier, projects *store.Projects, jobs *store.Jobs) *Dispatcher {
+	return &Dispatcher{applier: applier, lifecycle: lifecycle, standalone: standalone, projects: projects, jobs: jobs}
 }
 
 // SetSelfGuard arms the guard that refuses mutating jobs whose target includes
 // dockbrr's own container: the mutation would kill this process mid-job, leave
 // the job stuck at "running", and ResumeInterrupted would re-run it against
 // ourselves on every boot. Call before the engine starts.
-func (d *Dispatcher) SetSelfGuard(selfID string, services *store.Services, jobs *store.Jobs, emitter Emitter) {
+func (d *Dispatcher) SetSelfGuard(selfID string, services *store.Services, emitter Emitter) {
 	d.selfID = selfID
 	d.services = services
-	d.jobs = jobs
 	d.emitter = emitter
 }
 
@@ -57,6 +62,8 @@ func (d *Dispatcher) Handle(ctx context.Context, job store.Job) {
 			}
 			if d.jobs != nil {
 				_ = d.jobs.Finish(job.ID, "failed", nil, msg)
+			} else {
+				logger.Errorf("job: self_update (job %d) fallback: no jobs store wired, cannot mark failed", job.ID)
 			}
 			return
 		}

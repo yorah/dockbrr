@@ -50,8 +50,8 @@ func TestDispatcherRoutesLifecycleAndApply(t *testing.T) {
 	lc := newLifecycle(db, m)
 
 	// A lifecycle job routes to the Lifecycle runner (observed via the mutator).
-	d := job.NewDispatcher(nil, lc, nil, store.NewProjects(db)) // applier nil: this test only drives a lifecycle kind
 	jobs := store.NewJobs(db)
+	d := job.NewDispatcher(nil, lc, nil, store.NewProjects(db), jobs) // applier nil: this test only drives a lifecycle kind
 	jid, _ := jobs.Enqueue(store.Job{Type: "stop", ServiceID: &dbSvc.ID, ProjectID: &pid, Scope: "service"})
 	j, _ := jobs.Get(jid)
 	d.Handle(context.Background(), j)
@@ -74,8 +74,8 @@ func TestDispatcherSelfGuardRefusesOwnContainer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	d := job.NewDispatcher(nil, lc, nil, store.NewProjects(db))
-	d.SetSelfGuard("abcdef123456", services, jobs, nil)
+	d := job.NewDispatcher(nil, lc, nil, store.NewProjects(db), jobs)
+	d.SetSelfGuard("abcdef123456", services, nil)
 
 	// Service-scoped restart on self: refused, mutator never touched.
 	jid, _ := jobs.Enqueue(store.Job{Type: "restart", ServiceID: &dbSvc.ID, ProjectID: &pid, Scope: "service"})
@@ -109,8 +109,8 @@ func TestDispatcherSelfGuardPassesOtherContainers(t *testing.T) {
 	jobs := store.NewJobs(db)
 
 	// Guard armed, but the target ("db-cid") is not our container.
-	d := job.NewDispatcher(nil, lc, nil, store.NewProjects(db))
-	d.SetSelfGuard("abcdef123456", store.NewServices(db), jobs, nil)
+	d := job.NewDispatcher(nil, lc, nil, store.NewProjects(db), jobs)
+	d.SetSelfGuard("abcdef123456", store.NewServices(db), nil)
 
 	jid, _ := jobs.Enqueue(store.Job{Type: "stop", ServiceID: &dbSvc.ID, ProjectID: &pid, Scope: "service"})
 	j, _ := jobs.Get(jid)
@@ -127,8 +127,8 @@ func TestDispatcherRoutesStandaloneApplyToSDK(t *testing.T) {
 	sa := newStandaloneApplier(db, r)
 
 	// applier nil + lifecycle nil: this test only drives a standalone apply.
-	d := job.NewDispatcher(nil, nil, sa, store.NewProjects(db))
 	jobs := store.NewJobs(db)
+	d := job.NewDispatcher(nil, nil, sa, store.NewProjects(db), jobs)
 	jid, _ := jobs.Enqueue(store.Job{Type: "apply", ServiceID: &svc.ID, ProjectID: &pid, Scope: "service"})
 	j, _ := jobs.Get(jid)
 	d.Handle(context.Background(), j)
@@ -145,7 +145,7 @@ func TestDispatcherRoutesSelfUpdateToUpdater(t *testing.T) {
 	ck := fakeDispatchChecker{res: selfupdate.Result{Latest: "v1.2.0", UpdateAvailable: true}}
 	u := job.NewSelfUpdater(jobs, nil, fd, ck, "abc123def456", "/var/run/docker.sock")
 
-	d := job.NewDispatcher(nil, nil, nil, nil)
+	d := job.NewDispatcher(nil, nil, nil, nil, jobs)
 	d.SetSelfUpdater(u)
 
 	jid, err := jobs.Enqueue(store.Job{Type: "self_update", RequestedBy: "test"})
@@ -166,15 +166,16 @@ func TestDispatcherRoutesSelfUpdateToUpdater(t *testing.T) {
 
 func TestDispatchSelfUpdateWithoutUpdaterFails(t *testing.T) {
 	// A dispatcher with no SelfUpdater wired must fail a self_update job cleanly
-	// (not panic, not route it to the compose applier). d.jobs must be populated
-	// for the fallback to mark the job failed; SetSelfGuard wires it.
+	// (not panic, not route it to the compose applier). d.jobs is wired at
+	// construction time now, so this stays green regardless of whether
+	// SetSelfGuard (the containerized path) is ever called.
 	db := openJobDB(t)
 	jobs := store.NewJobs(db)
 	services := store.NewServices(db)
 	var lines []string
 	emitter := recordingDispatchEmitter{lines: &lines}
-	d := job.NewDispatcher(nil, nil, nil, nil)
-	d.SetSelfGuard("abc123def456", services, jobs, emitter) // populates d.jobs and d.emitter
+	d := job.NewDispatcher(nil, nil, nil, nil, jobs)
+	d.SetSelfGuard("abc123def456", services, emitter) // populates d.emitter; d.jobs already set above
 
 	jid, err := jobs.Enqueue(store.Job{Type: "self_update", RequestedBy: "test"})
 	if err != nil {
@@ -198,5 +199,34 @@ func TestDispatchSelfUpdateWithoutUpdaterFails(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("lines = %v, want a self-update-unavailable line", lines)
+	}
+}
+
+func TestDispatchSelfUpdateFallbackFailsOnHostInstall(t *testing.T) {
+	// Host installs never call SetSelfGuard: SelfContainerID() returns "" outside
+	// a container, so main.go never arms the guard, and previously d.jobs (only
+	// ever populated by SetSelfGuard) stayed nil. A resumed/stranded self_update
+	// job would then hit the nil-updater fallback, be unable to call
+	// d.jobs.Finish, and busy-loop as "running" forever. d.jobs is now wired at
+	// construction time (NewDispatcher), independent of containerization, so
+	// this must mark the job failed even with SetSelfGuard and SetSelfUpdater
+	// both never called.
+	db := openJobDB(t)
+	jobs := store.NewJobs(db)
+	d := job.NewDispatcher(nil, nil, nil, nil, jobs)
+
+	jid, err := jobs.Enqueue(store.Job{Type: "self_update", RequestedBy: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	j, _ := jobs.Get(jid)
+	d.Handle(context.Background(), j)
+
+	got, _ := jobs.Get(jid)
+	if got.Status != "failed" {
+		t.Fatalf("status = %q, want failed (host-install nil-updater fallback must still mark the job failed)", got.Status)
+	}
+	if got.Error == "" || !strings.Contains(got.Error, "self-update is not available") {
+		t.Fatalf("error = %q, want self-update-unavailable message", got.Error)
 	}
 }

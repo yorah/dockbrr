@@ -236,10 +236,10 @@ func run(args []string, getenv func(string) string) error {
 			jobs, updates, services, projects, snapshots, events,
 			resolver, dc, plat, healthTimeout, healthPoll, engine,
 		)
-		dispatcher := job.NewDispatcher(applier, lifecycle, standalone, projects)
+		dispatcher := job.NewDispatcher(applier, lifecycle, standalone, projects, jobs)
 		if selfID := job.SelfContainerID(); selfID != "" {
 			logger.Infof("job engine: self-guard armed (own container %s)", selfID)
-			dispatcher.SetSelfGuard(selfID, services, jobs, engine)
+			dispatcher.SetSelfGuard(selfID, services, engine)
 		}
 
 		// Self-update: pull the new image in-process, then a detached helper swaps
