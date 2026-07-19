@@ -39,6 +39,15 @@ func (cl *Client) ContainerRemove(ctx context.Context, id string) error {
 	return nil
 }
 
+// ContainerForceRemove removes a container even if it is still running. Used
+// by the self-update swap rollback path to free a name held by a container
+// left over from a failed create (see rollback's idempotency note in
+// selfupdate.go); unlike ContainerRemove, the caller does not guarantee the
+// container is stopped.
+func (cl *Client) ContainerForceRemove(ctx context.Context, id string) error {
+	return cl.c.ContainerRemove(ctx, id, dcontainer.RemoveOptions{Force: true})
+}
+
 // ContainerRename renames a container (used by the Phase 2 recreate path to free
 // a name, and available to lifecycle callers).
 func (cl *Client) ContainerRename(ctx context.Context, id, newName string) error {

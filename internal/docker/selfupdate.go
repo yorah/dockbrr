@@ -116,6 +116,20 @@ func (cl *Client) removeLeftoverUpdater(ctx context.Context) {
 // dockbrr exit (successful or not).
 func (cl *Client) RemoveLeftoverUpdater(ctx context.Context) { cl.removeLeftoverUpdater(ctx) }
 
+// swapOps lists exactly the Client methods SwapContainer and rollback call.
+// It exists purely as a test seam: a fake implementing this interface lets
+// the stop/remove/create/start/rollback sequencing be exercised without a
+// live Docker daemon. *Client satisfies it with no adapter.
+type swapOps interface {
+	InspectStatus(ctx context.Context, containerID string) (ContainerStatus, error)
+	ContainerStop(ctx context.Context, id string) error
+	ContainerRemove(ctx context.Context, id string) error
+	ContainerForceRemove(ctx context.Context, id string) error
+	ContainerCreateFromInspect(ctx context.Context, inspectJSON, newImage, name string) (string, error)
+	ContainerStart(ctx context.Context, id string) error
+	ContainerIDByName(ctx context.Context, name string) (string, bool, error)
+}
+
 // SwapContainer replaces the target container with newImage, preserving its
 // full config via ContainerCreateFromInspect. It is executed by the detached
 // updater helper (the target is dockbrr itself, so the process calling this
@@ -123,11 +137,18 @@ func (cl *Client) RemoveLeftoverUpdater(ctx context.Context) { cl.removeLeftover
 // AFTER the old container was removed, it best-effort recreates the old
 // container from the same captured inspect with its original image, so a
 // failed swap lands back on a running old version rather than nothing.
+//
+// This is a thin wrapper around swapContainer, which operates on the swapOps
+// interface so the sequencing can be unit-tested with a fake.
 func (cl *Client) SwapContainer(ctx context.Context, targetID, newImage string, logf func(string)) error {
+	return swapContainer(ctx, cl, targetID, newImage, logf)
+}
+
+func swapContainer(ctx context.Context, ops swapOps, targetID, newImage string, logf func(string)) error {
 	if logf == nil {
 		logf = func(string) {}
 	}
-	st, err := cl.InspectStatus(ctx, targetID)
+	st, err := ops.InspectStatus(ctx, targetID)
 	if err != nil {
 		return fmt.Errorf("swap: inspect target: %w", err)
 	}
@@ -137,24 +158,24 @@ func (cl *Client) SwapContainer(ctx context.Context, targetID, newImage string, 
 	}
 
 	logf("stopping " + name)
-	if err := cl.ContainerStop(ctx, targetID); err != nil {
+	if err := ops.ContainerStop(ctx, targetID); err != nil {
 		return fmt.Errorf("swap: stop target: %w", err)
 	}
 	logf("removing " + name)
-	if err := cl.ContainerRemove(ctx, targetID); err != nil {
+	if err := ops.ContainerRemove(ctx, targetID); err != nil {
 		return fmt.Errorf("swap: remove target: %w", err)
 	}
 
 	logf("creating " + name + " from " + newImage)
-	newID, err := cl.ContainerCreateFromInspect(ctx, st.RawJSON, newImage, name)
+	newID, err := ops.ContainerCreateFromInspect(ctx, st.RawJSON, newImage, name)
 	if err != nil {
 		logf("create failed, rolling back to " + oldImage + ": " + err.Error())
-		return rollback(ctx, cl, st.RawJSON, oldImage, name, logf, fmt.Errorf("create new container: %w", err))
+		return rollback(ctx, ops, st.RawJSON, oldImage, name, logf, fmt.Errorf("create new container: %w", err))
 	}
-	if err := cl.ContainerStart(ctx, newID); err != nil {
+	if err := ops.ContainerStart(ctx, newID); err != nil {
 		logf("start failed, rolling back to " + oldImage + ": " + err.Error())
-		_ = cl.ContainerRemove(ctx, newID)
-		return rollback(ctx, cl, st.RawJSON, oldImage, name, logf, fmt.Errorf("start new container: %w", err))
+		_ = ops.ContainerRemove(ctx, newID)
+		return rollback(ctx, ops, st.RawJSON, oldImage, name, logf, fmt.Errorf("start new container: %w", err))
 	}
 	logf("started " + name + " (" + newID + ") on " + newImage)
 	return nil
@@ -172,32 +193,24 @@ func (cl *Client) SwapContainer(ctx context.Context, targetID, newImage string, 
 // here would collide on the name and dockbrr would be left dead. So any
 // container currently holding `name` is force-removed first, mirroring the
 // leftover-handling SpawnUpdater does for its own fixed name.
-//
-// Untested at the unit level: Client wraps the concrete Docker SDK client
-// (*dockerclient.Client) directly rather than an interface, so there is no
-// seam in this package to stub ContainerIDByName/ContainerCreateFromInspect
-// failures without a live daemon. This sequencing is exercised only by the
-// live-daemon integration path (see client_test.go's skip-if-no-socket
-// pattern); introducing an interface seam purely to unit-test this would be a
-// larger refactor than this fix warrants.
-func rollback(ctx context.Context, cl *Client, rawJSON, oldImage, name string, logf func(string), cause error) error {
-	if id, ok, err := cl.ContainerIDByName(ctx, name); err != nil {
+func rollback(ctx context.Context, ops swapOps, rawJSON, oldImage, name string, logf func(string), cause error) error {
+	if id, ok, err := ops.ContainerIDByName(ctx, name); err != nil {
 		logf("rollback: check for name collision failed: " + err.Error())
 		return fmt.Errorf("swap failed (%w) and rollback failed: check for name collision: %v", cause, err)
 	} else if ok {
 		logf("rollback: freeing name " + name + " held by " + id)
-		if err := cl.c.ContainerRemove(ctx, id, dcontainer.RemoveOptions{Force: true}); err != nil {
+		if err := ops.ContainerForceRemove(ctx, id); err != nil {
 			logf("rollback: force-remove of colliding container failed: " + err.Error())
 			return fmt.Errorf("swap failed (%w) and rollback failed: free name %s: %v", cause, name, err)
 		}
 	}
 
-	id, err := cl.ContainerCreateFromInspect(ctx, rawJSON, oldImage, name)
+	id, err := ops.ContainerCreateFromInspect(ctx, rawJSON, oldImage, name)
 	if err != nil {
 		logf("rollback create failed: " + err.Error())
 		return fmt.Errorf("swap failed (%w) and rollback failed: %v", cause, err)
 	}
-	if err := cl.ContainerStart(ctx, id); err != nil {
+	if err := ops.ContainerStart(ctx, id); err != nil {
 		logf("rollback start failed: " + err.Error())
 		return fmt.Errorf("swap failed (%w) and rollback start failed: %v", cause, err)
 	}
