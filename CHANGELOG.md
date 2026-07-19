@@ -3,9 +3,25 @@
 ## [0.6.0](https://github.com/yorah/dockbrr/compare/v0.5.0...v0.6.0) (2026-07-19)
 
 
-### Miscellaneous Chores
+### Features
 
-* force 0.6.0 release ([#44](https://github.com/yorah/dockbrr/issues/44)) ([f6f8faa](https://github.com/yorah/dockbrr/commit/f6f8faaf393cb7570418f4a7cf4d3041b0f4b253))
+* **self-update:** update dockbrr's own container from the UI. A detached helper runs dockbrr's image with a `self-update-swap` subcommand; the pull happens in-process (dockbrr stays up if it fails) and the swap rolls back to the old image on failure ([#42](https://github.com/yorah/dockbrr/issues/42))
+* **local images:** compose `build:` services are classified `local`, skip registry probes, and show a grey "Local" badge excluded from the update tallies ([#42](https://github.com/yorah/dockbrr/issues/42))
+* refuse mutating jobs that target dockbrr's own container ([#42](https://github.com/yorah/dockbrr/issues/42))
+* show the target project/service in the Jobs list and add a rollback action for the latest finished apply ([#42](https://github.com/yorah/dockbrr/issues/42))
+* manual check-all bypasses the detect cache and re-surfaces rolled-back updates ([#42](https://github.com/yorah/dockbrr/issues/42))
+* `not_found` check status with tooltips; persist the dashboard collapse state ([#42](https://github.com/yorah/dockbrr/issues/42))
+* actionable hint when compose files are unreachable; live countdowns on auto-dismissing toasts and the apply panel ([#42](https://github.com/yorah/dockbrr/issues/42))
+
+
+### Bug Fixes
+
+* **compose:** preserve file ownership on write-back; fix the pull-progress filter for compose's indented output ([#42](https://github.com/yorah/dockbrr/issues/42))
+* **detect:** cache-hit path no longer closes semver updates it can't judge ([#42](https://github.com/yorah/dockbrr/issues/42))
+* **web:** keep job-backed action buttons disabled until the job finishes; clear busy state after refetch; auto-close the apply panel on success ([#42](https://github.com/yorah/dockbrr/issues/42))
+* **web:** hide all-gone projects from the sidebar; settings and shell scroll polish ([#42](https://github.com/yorah/dockbrr/issues/42))
+* **web:** job panel title and success label follow the job type ([#42](https://github.com/yorah/dockbrr/issues/42))
+* stamp live-inspected container state after lifecycle jobs ([#42](https://github.com/yorah/dockbrr/issues/42))
 
 ## [0.5.0](https://github.com/yorah/dockbrr/compare/v0.4.2...v0.5.0) (2026-07-17)
 
