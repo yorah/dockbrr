@@ -65,6 +65,13 @@ func Group(cs []docker.Container) []DiscoveredProject {
 	index := make(map[string]*projectMeta)
 
 	for _, c := range cs {
+		// The detached self-update helper (docker.SelfUpdateLabel) is an
+		// ephemeral internal artifact, not a user workload. A failed-swap
+		// leftover can survive until the next boot prune; it must never be
+		// grouped into a project/service in the meantime.
+		if c.SelfUpdate {
+			continue
+		}
 		if c.Project != "" {
 			// Compose project.
 			meta, ok := index[c.Project]
