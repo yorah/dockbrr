@@ -44,3 +44,32 @@ func TestParseInspectNameImageNoLeadingSlash(t *testing.T) {
 		t.Errorf("image = %q", image)
 	}
 }
+
+// FINAL-1: the helper must not inherit dockbrr's image HEALTHCHECK (it runs
+// self-update-swap, not the HTTP server, so the probe would always fail and
+// mark a failed-swap leftover "unhealthy" in `docker ps`).
+func TestUpdaterContainerConfigDisablesHealthcheck(t *testing.T) {
+	cfg, _ := updaterContainerConfig("ghcr.io/yorah/dockbrr:1.1.0", []string{"self-update-swap"}, "/var/run/docker.sock")
+	if cfg.Healthcheck == nil {
+		t.Fatal("expected Healthcheck to be set (disabled), got nil")
+	}
+	if len(cfg.Healthcheck.Test) != 1 || cfg.Healthcheck.Test[0] != "NONE" {
+		t.Fatalf("Healthcheck.Test = %v, want [NONE]", cfg.Healthcheck.Test)
+	}
+}
+
+// FINAL-2: the helper carries a distinguishing label so a later discovery-side
+// change can filter it out of user-managed services.
+func TestUpdaterContainerConfigCarriesSelfUpdateLabel(t *testing.T) {
+	cfg, _ := updaterContainerConfig("ghcr.io/yorah/dockbrr:1.1.0", []string{"self-update-swap"}, "/var/run/docker.sock")
+	if cfg.Labels[SelfUpdateLabel] != "1" {
+		t.Fatalf("Labels[%q] = %q, want \"1\"", SelfUpdateLabel, cfg.Labels[SelfUpdateLabel])
+	}
+}
+
+func TestUpdaterContainerConfigMountsSocket(t *testing.T) {
+	_, host := updaterContainerConfig("img", nil, "/var/run/docker.sock")
+	if len(host.Mounts) != 1 || host.Mounts[0].Source != "/var/run/docker.sock" || host.Mounts[0].Target != "/var/run/docker.sock" {
+		t.Fatalf("expected the socket path bind-mounted at itself, got %+v", host.Mounts)
+	}
+}

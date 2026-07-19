@@ -16,6 +16,10 @@ import (
 // helper (from a failed swap) on its next boot.
 const UpdaterContainerName = "dockbrr-self-update"
 
+// SelfUpdateLabel marks the detached self-update helper container so
+// discovery can identify and ignore it (it is not a user-managed service).
+const SelfUpdateLabel = "dockbrr.self-update"
+
 // ContainerImageRef returns a container's configured image reference (Config.Image).
 // Read-only.
 func (cl *Client) ContainerImageRef(ctx context.Context, id string) (string, error) {
@@ -50,7 +54,35 @@ func (cl *Client) SpawnUpdater(ctx context.Context, image string, cmd []string, 
 		}
 	}
 
-	cfg := &dcontainer.Config{Image: image, Cmd: cmd}
+	cfg, host := updaterContainerConfig(image, cmd, socketPath)
+	resp, err := cl.c.ContainerCreate(ctx, cfg, host, nil, nil, UpdaterContainerName)
+	if err != nil {
+		return "", fmt.Errorf("docker: create updater: %w", err)
+	}
+	if err := cl.c.ContainerStart(ctx, resp.ID, dcontainer.StartOptions{}); err != nil {
+		return "", fmt.Errorf("docker: start updater: %w", err)
+	}
+	return resp.ID, nil
+}
+
+// updaterContainerConfig builds the Config and HostConfig for the detached
+// self-update helper container. Pure: no Docker calls, so it is the primary
+// unit under test for the helper's container config (mirrors
+// createArgsFromInspect's role for the recreate path).
+func updaterContainerConfig(image string, cmd []string, socketPath string) (*dcontainer.Config, *dcontainer.HostConfig) {
+	cfg := &dcontainer.Config{
+		Image: image,
+		Cmd:   cmd,
+		Labels: map[string]string{
+			SelfUpdateLabel: "1",
+		},
+		// The helper runs `self-update-swap`, not dockbrr's HTTP server, so
+		// the image's baked-in healthcheck (which probes the HTTP server)
+		// would always fail and show a failed-swap leftover as "unhealthy"
+		// in `docker ps`, potentially tripping external alerting. Disable it
+		// explicitly rather than inheriting the image's HEALTHCHECK.
+		Healthcheck: &dcontainer.HealthConfig{Test: []string{"NONE"}},
+	}
 	host := &dcontainer.HostConfig{
 		Mounts: []mount.Mount{{
 			Type:   mount.TypeBind,
@@ -62,14 +94,7 @@ func (cl *Client) SpawnUpdater(ctx context.Context, image string, cmd []string, 
 		// are available via `docker logs` for post-mortem.
 		AutoRemove: false,
 	}
-	resp, err := cl.c.ContainerCreate(ctx, cfg, host, nil, nil, UpdaterContainerName)
-	if err != nil {
-		return "", fmt.Errorf("docker: create updater: %w", err)
-	}
-	if err := cl.c.ContainerStart(ctx, resp.ID, dcontainer.StartOptions{}); err != nil {
-		return "", fmt.Errorf("docker: start updater: %w", err)
-	}
-	return resp.ID, nil
+	return cfg, host
 }
 
 // removeLeftoverUpdater best-effort removes a stopped leftover helper
