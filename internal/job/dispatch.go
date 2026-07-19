@@ -50,8 +50,11 @@ func (d *Dispatcher) SetSelfUpdater(u *SelfUpdater) { d.selfUpdater = u }
 func (d *Dispatcher) Handle(ctx context.Context, job store.Job) {
 	if job.Type == "self_update" {
 		if d.selfUpdater == nil {
-			const msg = "self-update is not available (no updater wired)"
+			const msg = "self-update is not available: not running in a container"
 			logger.Warnf("job: self_update (job %d) with no updater wired; failing", job.ID)
+			if d.emitter != nil {
+				d.emitter.Emit(job.ID, "system", msg)
+			}
 			if d.jobs != nil {
 				_ = d.jobs.Finish(job.ID, "failed", nil, msg)
 			}

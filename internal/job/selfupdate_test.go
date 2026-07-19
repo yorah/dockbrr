@@ -3,6 +3,7 @@ package job
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"dockbrr/internal/selfupdate"
@@ -17,6 +18,7 @@ func TestTargetSelfImage(t *testing.T) {
 		{"ghcr.io/yorah/dockbrr@sha256:deadbeef", "v1.2.0", "ghcr.io/yorah/dockbrr:1.2.0"},        // pure digest, moved off pin
 		{"ghcr.io/yorah/dockbrr:latest@sha256:deadbeef", "v1.2.0", "ghcr.io/yorah/dockbrr:1.2.0"}, // tag+digest, latest was pinned
 		{"ghcr.io/yorah/dockbrr:1.1.0@sha256:deadbeef", "v1.2.0", "ghcr.io/yorah/dockbrr:1.2.0"},  // tag+digest, semver pinned
+		{"ghcr.io/yorah/dockbrr:1.1.0", "v", "ghcr.io/yorah/dockbrr:1.1.0"},                       // degenerate latestTag "v" normalizes to "", currentRef kept
 	}
 	for _, c := range cases {
 		if got := targetSelfImage(c.ref, c.latest); got != c.want {
@@ -73,7 +75,9 @@ func enqueueSelfUpdate(t *testing.T, jobs *store.Jobs) store.Job {
 }
 
 func TestSelfUpdaterNoUpdateAvailable(t *testing.T) {
-	jobs, emitter := newJobFixture(t)
+	jobs, _ := newJobFixture(t)
+	var lines []string
+	emitter := recordingEmitter{lines: &lines}
 	fd := &fakeSelfDocker{imageRef: "ghcr.io/yorah/dockbrr:1.1.0"}
 	ck := fakeChecker{res: selfupdate.Result{Latest: "1.1.0", UpdateAvailable: false}}
 	u := NewSelfUpdater(jobs, emitter, fd, ck, "abc123def456", "/var/run/docker.sock")
@@ -88,8 +92,17 @@ func TestSelfUpdaterNoUpdateAvailable(t *testing.T) {
 		t.Errorf("helper spawned despite no update available: %v", fd.spawnedCmd)
 	}
 	got, _ := jobs.Get(j.ID)
-	if got.Status != "failed" {
-		t.Errorf("job status = %q, want failed (no-op)", got.Status)
+	if got.Status != "success" {
+		t.Errorf("job status = %q, want success (no-op)", got.Status)
+	}
+	found := false
+	for _, l := range lines {
+		if strings.Contains(l, "already up to date") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("lines = %v, want an explanatory already-up-to-date line", lines)
 	}
 }
 

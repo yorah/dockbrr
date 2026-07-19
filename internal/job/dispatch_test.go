@@ -32,6 +32,17 @@ type fakeDispatchChecker struct{ res selfupdate.Result }
 
 func (f fakeDispatchChecker) Check(_ context.Context) (selfupdate.Result, error) { return f.res, nil }
 
+// recordingDispatchEmitter captures emitted lines so dispatch tests can assert
+// a live line was sent (dispatch_test.go is package job_test, so it can't
+// reuse the internal recordingEmitter defined for package job's own tests).
+type recordingDispatchEmitter struct {
+	lines *[]string
+}
+
+func (r recordingDispatchEmitter) Emit(_ int64, _ string, line string) {
+	*r.lines = append(*r.lines, line)
+}
+
 func TestDispatcherRoutesLifecycleAndApply(t *testing.T) {
 	db := openJobDB(t)
 	pid, dbSvc, _ := seedComposeProject(t, db)
@@ -160,8 +171,10 @@ func TestDispatchSelfUpdateWithoutUpdaterFails(t *testing.T) {
 	db := openJobDB(t)
 	jobs := store.NewJobs(db)
 	services := store.NewServices(db)
+	var lines []string
+	emitter := recordingDispatchEmitter{lines: &lines}
 	d := job.NewDispatcher(nil, nil, nil, nil)
-	d.SetSelfGuard("abc123def456", services, jobs, nil) // populates d.jobs
+	d.SetSelfGuard("abc123def456", services, jobs, emitter) // populates d.jobs and d.emitter
 
 	jid, err := jobs.Enqueue(store.Job{Type: "self_update", RequestedBy: "test"})
 	if err != nil {
@@ -173,5 +186,17 @@ func TestDispatchSelfUpdateWithoutUpdaterFails(t *testing.T) {
 	got, _ := jobs.Get(jid)
 	if got.Status != "failed" {
 		t.Fatalf("status = %q, want failed", got.Status)
+	}
+	if len(lines) == 0 {
+		t.Fatal("no live line emitted for nil-updater self_update fallback")
+	}
+	found := false
+	for _, l := range lines {
+		if strings.Contains(l, "self-update is not available") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("lines = %v, want a self-update-unavailable line", lines)
 	}
 }

@@ -64,7 +64,11 @@ func (u *SelfUpdater) Handle(ctx context.Context, job store.Job) {
 		return
 	}
 	if !res.UpdateAvailable {
-		fail("no dockbrr update is available")
+		// Reachable only on a rare race: the HTTP endpoint pre-checks update
+		// availability before enqueuing, but the answer can change in the gap.
+		// Not an error: nothing to do, so the job succeeds as a no-op.
+		emit("dockbrr is already up to date, nothing to do")
+		_ = u.jobs.Finish(job.ID, "success", nil, "")
 		return
 	}
 	currentRef, err := u.docker.ContainerImageRef(ctx, u.selfID)
@@ -105,10 +109,13 @@ func targetSelfImage(currentRef, latestTag string) string {
 	hasDigest := strings.Contains(currentRef, "@")
 	repo, tag := detect.SplitRef(currentRef)
 	norm := strings.TrimPrefix(latestTag, "v")
+	// Degenerate guard: only reachable if latestTag is literally "v" or ""
+	// (GitHub never publishes either); without it, the fallthrough below would
+	// produce a malformed "repo:" ref, so keep currentRef unchanged instead.
 	if norm == "" {
 		return currentRef
 	}
-	if !hasDigest && (tag == "" || tag == "latest") {
+	if !hasDigest && tag == "latest" {
 		return currentRef
 	}
 	return repo + ":" + norm
