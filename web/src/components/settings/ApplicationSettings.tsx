@@ -1,10 +1,12 @@
 import { useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
+import { cn } from "@/lib/cn";
 import { notify } from "@/lib/notify";
 import { apiFetch } from "@/api/client";
 import { keys } from "@/api/keys";
-import { useSystemInfo } from "@/hooks/queries";
+import { useSystemInfo, useSelfUpdate } from "@/hooks/queries";
+import { useCheckForUpdates } from "@/hooks/mutations";
 import { useNow } from "@/hooks/useNow";
 import { Button } from "@/components/ui/button";
 import { SettingsCard } from "@/components/settings/SettingsCard";
@@ -37,12 +39,29 @@ function formatDate(iso: string): string {
   return Number.isNaN(d.getTime()) ? DASH : d.toLocaleString();
 }
 
+// checkedAgo renders "just now" / "5m ago" / "3h ago" / "2d ago" from an ISO
+// timestamp against a ticking clock, so the last-checked line ages on screen.
+function checkedAgo(iso: string | undefined, now: Date): string {
+  if (!iso) return "";
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return "";
+  const s = Math.max(0, Math.floor((now.getTime() - t) / 1000));
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
 function Rows({ children }: { children: React.ReactNode }) {
   return <dl className="divide-y divide-border border-t border-border">{children}</dl>;
 }
 
 export function ApplicationSettings() {
   const { data, isLoading, refetch, isFetching } = useSystemInfo();
+  const selfUpdate = useSelfUpdate();
+  const check = useCheckForUpdates();
   const now = useNow(1_000);
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -53,20 +72,36 @@ export function ApplicationSettings() {
 
   const commit = data.commit ? data.commit.slice(0, 7) : DASH;
 
+  const su = selfUpdate.data;
+  const rel = checkedAgo(su?.checked_at, now);
+  // Only assert a verdict once a check has actually run (checked_at present);
+  // otherwise show nothing rather than claiming "up to date" with no basis.
+  const versionSub = su?.checked_at
+    ? su.update_available
+      ? `${su.latest} available${rel ? ` (checked ${rel})` : ""}`
+      : `Up to date${rel ? ` (checked ${rel})` : ""}`
+    : undefined;
+
   return (
     <div className="space-y-4">
       <SettingsCard
         title="Build"
         description="Version and build details."
         action={
-          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Refresh
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Refresh
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => check.mutate()} disabled={check.isPending}>
+              <RefreshCw className={cn("mr-2 h-4 w-4", check.isPending && "animate-spin")} />
+              {check.isPending ? "Checking..." : "Check for updates"}
+            </Button>
+          </div>
         }
       >
         <Rows>
-          <InfoRow label="Version" value={data.version} />
+          <InfoRow label="Version" value={data.version} sub={versionSub} />
           <InfoRow label="Commit" value={commit} sub={data.commit_dirty ? "working tree was dirty at build time" : undefined} />
           <InfoRow label="Build date" value={formatDate(data.build_date)} />
         </Rows>
