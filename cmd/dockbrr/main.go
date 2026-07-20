@@ -237,7 +237,10 @@ func run(args []string, getenv func(string) string) error {
 			resolver, dc, plat, healthTimeout, healthPoll, engine,
 		)
 		dispatcher := job.NewDispatcher(applier, lifecycle, standalone, projects, jobs)
-		if selfID := job.SelfContainerID(); selfID != "" {
+		// dockbrr's own container id (probes /proc, invariant at startup): arms both
+		// the self-guard and the self-updater below. "" on a host install.
+		selfID := job.SelfContainerID()
+		if selfID != "" {
 			logger.Infof("job engine: self-guard armed (own container %s)", selfID)
 			dispatcher.SetSelfGuard(selfID, services, engine)
 		}
@@ -246,7 +249,7 @@ func run(args []string, getenv func(string) string) error {
 		// this container. Wired only when Docker is reachable (here). Clean up any
 		// leftover helper from a prior (possibly failed) self-update first.
 		dc.RemoveLeftoverUpdater(ctx)
-		if selfID := job.SelfContainerID(); selfID != "" {
+		if selfID != "" {
 			dispatcher.SetSelfUpdater(job.NewSelfUpdater(jobs, engine, dc, selfUpdateChecker, selfID, cfg.DockerSocket))
 		}
 
