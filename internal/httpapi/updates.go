@@ -23,6 +23,7 @@ type updateDTO struct {
 	ChangelogStatus string `json:"changelog_status"`
 	Status          string `json:"status"`
 	DetectedAt      string `json:"detected_at"`
+	IsSelf          bool   `json:"is_self"`
 }
 
 func (s *Server) handleListUpdates(w http.ResponseWriter, r *http.Request) {
@@ -33,12 +34,17 @@ func (s *Server) handleListUpdates(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]updateDTO, 0, len(ups))
 	for _, u := range ups {
+		isSelf := false
+		if svc, err := s.deps.Services.Get(u.ServiceID); err == nil {
+			isSelf = s.serviceIsSelf(svc)
+		}
 		out = append(out, updateDTO{
 			ID: u.ID, ServiceID: u.ServiceID, FromDigest: u.FromDigest, ToDigest: u.ToDigest,
 			FromVersion: u.FromVersion, ToVersion: u.ToVersion,
 			Tag: u.Tag, Severity: u.Severity,
 			ChangelogURL: u.ChangelogURL, ChangelogText: u.ChangelogText, ChangelogStatus: u.ChangelogStatus,
 			Status: u.Status, DetectedAt: u.DetectedAt.UTC().Format(time.RFC3339),
+			IsSelf: isSelf,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -56,12 +62,17 @@ func (s *Server) handleListLastApplied(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]updateDTO, 0, len(ups))
 	for _, u := range ups {
+		isSelf := false
+		if svc, err := s.deps.Services.Get(u.ServiceID); err == nil {
+			isSelf = s.serviceIsSelf(svc)
+		}
 		out = append(out, updateDTO{
 			ID: u.ID, ServiceID: u.ServiceID, FromDigest: u.FromDigest, ToDigest: u.ToDigest,
 			FromVersion: u.FromVersion, ToVersion: u.ToVersion,
 			Tag: u.Tag, Severity: u.Severity,
 			ChangelogURL: u.ChangelogURL, ChangelogText: u.ChangelogText, ChangelogStatus: u.ChangelogStatus,
 			Status: u.Status, DetectedAt: u.DetectedAt.UTC().Format(time.RFC3339),
+			IsSelf: isSelf,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
