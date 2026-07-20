@@ -156,6 +156,60 @@ func TestCheckGitHubErrorNoCache(t *testing.T) {
 	}
 }
 
+func TestCheckFreshBypassesYoungCache(t *testing.T) {
+	var hits int
+	gh := ghServer(t, "v0.5.0", "https://x/y", &hits)
+	c := selfupdate.NewChecker(gh.Client(), newSettings(t), "0.4.2", gh.URL, time.Hour, nil)
+
+	if _, err := c.Check(context.Background()); err != nil { // warms a fresh cache
+		t.Fatal(err)
+	}
+	res, err := c.CheckFresh(context.Background()) // must refetch despite young cache
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hits != 2 {
+		t.Errorf("CheckFresh must bypass the young cache; hits=%d, want 2", hits)
+	}
+	if res.Latest != "v0.5.0" || !res.UpdateAvailable {
+		t.Errorf("verdict: %+v", res)
+	}
+}
+
+func TestCheckFreshErrorServesStaleCache(t *testing.T) {
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	t.Cleanup(gh.Close)
+	s := newSettings(t)
+	seedCache(t, s, "v0.5.0", "https://stale", time.Now().Add(-2*time.Hour).UTC())
+	c := selfupdate.NewChecker(gh.Client(), s, "0.4.2", gh.URL, time.Hour, nil)
+
+	res, err := c.CheckFresh(context.Background())
+	if err != nil {
+		t.Fatalf("stale fallback should not error: %v", err)
+	}
+	if res.Latest != "v0.5.0" || !res.UpdateAvailable {
+		t.Errorf("want stale v0.5.0 served, got %+v", res)
+	}
+}
+
+func TestCheckFreshErrorNoCache(t *testing.T) {
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	t.Cleanup(gh.Close)
+	c := selfupdate.NewChecker(gh.Client(), newSettings(t), "0.4.2", gh.URL, time.Hour, nil)
+
+	res, err := c.CheckFresh(context.Background())
+	if err == nil {
+		t.Error("want soft error when no cache and GitHub fails")
+	}
+	if res.UpdateAvailable {
+		t.Errorf("no cache + error must not claim an update: %+v", res)
+	}
+}
+
 func TestUpdateAvailableMatrix(t *testing.T) {
 	cases := []struct {
 		name, current, latest string
