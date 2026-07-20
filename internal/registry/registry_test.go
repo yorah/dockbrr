@@ -205,3 +205,44 @@ func TestResolveCredsOn401Retry(t *testing.T) {
 		t.Fatalf("IsUnauthorized(%v) = false, want true", err)
 	}
 }
+
+func TestResolveAndConfigDigestPopulateConfigDigest(t *testing.T) {
+	// Push a fixture inline so we can capture its config digest directly.
+	srv := httptest.NewServer(ggcrregistry.New())
+	t.Cleanup(srv.Close)
+	host := strings.TrimPrefix(srv.URL, "http://")
+
+	img, err := random.Image(256, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := name.ParseReference(host + "/acme/web:1.2.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.Write(ref, img); err != nil {
+		t.Fatal(err)
+	}
+	wantCfg, err := img.ConfigName() // the config digest
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r := registry.NewResolver(nil)
+
+	got, err := r.Resolve(context.Background(), ref.String(), registry.HostPlatform())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ConfigDigest != wantCfg.String() {
+		t.Fatalf("Resolve ConfigDigest = %q, want %q", got.ConfigDigest, wantCfg.String())
+	}
+
+	cd, err := r.ConfigDigest(context.Background(), ref.String(), registry.HostPlatform())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cd != wantCfg.String() {
+		t.Fatalf("ConfigDigest = %q, want %q", cd, wantCfg.String())
+	}
+}
