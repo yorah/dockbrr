@@ -760,12 +760,19 @@ func TestDetectFloatingTagNamesFromViaRunningImageLabel(t *testing.T) {
 
 // TestDetectFloatingReverseLookupNonFatal proves the reverse scan is best-effort:
 // a tag-list failure leaves the version strings blank and the update is still
-// recorded as a plain digest-only drift.
+// recorded as a plain digest-only drift. Both svc.CurrentImageID and the
+// target's ConfigDigest must be non-empty here, otherwise
+// matchVersionByDigest's configDigest=="" early-return fires before
+// d.resolver.ListTags is ever called and tagsErr goes unconsulted (see
+// task-3-review.md: this test used to genuinely exercise the ListTags-failure
+// path under the pre-refactor reverseVersions, then silently stopped doing so
+// once matchVersionByDigest gained the config-digest empty-guard).
 func TestDetectFloatingReverseLookupNonFatal(t *testing.T) {
 	db := newDB(t)
 	svc := seedSvc(t, db, "docker.io/garethgeorge/backrest:latest", "sha256:v1130", false)
+	svc.CurrentImageID = "sha256:cfg-v1130" // non-empty so the "from" match reaches ListTags
 	r := fakeResolver{
-		img:     registry.RemoteImage{Digest: "sha256:v1141", PlatformDigest: "sha256:v1141"},
+		img:     registry.RemoteImage{Digest: "sha256:v1141", PlatformDigest: "sha256:v1141", ConfigDigest: "sha256:cfg-v1141"},
 		tagsErr: errors.New("list tags: boom"),
 	}
 	u, err := newDetector(db, r).Detect(context.Background(), svc)
@@ -1008,5 +1015,74 @@ func TestResolveCurrentVersionNegativeCache(t *testing.T) {
 	}
 	if listCalls != first {
 		t.Fatalf("ListTags called again (%d -> %d); negative cache did not short-circuit", first, listCalls)
+	}
+}
+
+// TestResolveCurrentVersionInconclusiveScanNotPersisted is the mirror image of
+// TestResolveCurrentVersionNegativeCache: it drives matchVersionByDigest to
+// conclusive=false (via a rate-limited per-tag ConfigDigest lookup, distinct
+// from TestDetectFloatingReverseLookupNonFatal's ListTags-failure trigger) and
+// proves resolveCurrentVersion's `if tagName == "" && !conclusive { return }`
+// guard holds: a transient abort must NOT set version_resolved, or a
+// rate-limit would permanently poison the negative cache and the image would
+// never get a real version name once the registry recovers.
+func TestResolveCurrentVersionInconclusiveScanNotPersisted(t *testing.T) {
+	db := newDB(t)
+	svc := seedSvc(t, db, "acme/floaty:latest", "sha256:list3", false)
+	svc.CurrentImageID = "sha256:cfg-head3" // non-empty: skip the configDigest=="" early-return
+
+	seen := map[string]int{}
+	r := fakeResolver{
+		// latest resolves to the SAME digest the container runs (up to date),
+		// so Detect takes the resolveCurrentVersion path (step 4), not the
+		// drift/record path.
+		img:  registry.RemoteImage{Digest: "sha256:list3", PlatformDigest: "sha256:list3"},
+		tags: []string{"1.0.0"},
+		// Every per-tag ConfigDigest call is rate-limited, aborting the loop on
+		// the first candidate (matchVersionByDigest's IsRateLimited branch).
+		headErr:    &transport.Error{StatusCode: 429},
+		configSeen: seen,
+	}
+	det := newDetector(db, r)
+
+	if _, err := det.Detect(context.Background(), svc); err != nil {
+		t.Fatalf("rate-limited reverse scan must be non-fatal, got %v", err)
+	}
+	img, err := store.NewImages(db).GetByDigest("acme/floaty", "sha256:list3")
+	if err != nil {
+		t.Fatalf("image row: %v", err)
+	}
+	if img.VersionResolved {
+		t.Fatal("VersionResolved = true after an inconclusive (rate-limited) scan, want false (must not poison the negative cache)")
+	}
+	if n := seen["acme/floaty:1.0.0"]; n != 1 {
+		t.Fatalf("ConfigDigest calls = %d, want 1 (loop aborts on first rate-limited candidate)", n)
+	}
+
+	// Force the remote-state cache row stale so a second Detect takes the full
+	// resolve path again rather than a cheap digest-only cache hit (which
+	// never calls resolveCurrentVersion at all).
+	stale := time.Now().UTC().Add(-2 * time.Minute)
+	if err := store.NewRemoteStates(db).Upsert(store.RemoteState{
+		Repo: "acme/floaty", Tag: "latest", RemoteDigest: "sha256:list3",
+		Status: "ok", ResolvedAt: &stale,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second detect: since VersionResolved is still false, the scan must
+	// retry (not be short-circuited by the "already attempted" guard).
+	if _, err := det.Detect(context.Background(), svc); err != nil {
+		t.Fatalf("second detect: rate-limited reverse scan must be non-fatal, got %v", err)
+	}
+	if n := seen["acme/floaty:1.0.0"]; n != 2 {
+		t.Fatalf("ConfigDigest calls after 2nd detect = %d, want 2 (inconclusive scan must retry, not be skipped)", n)
+	}
+	img, err = store.NewImages(db).GetByDigest("acme/floaty", "sha256:list3")
+	if err != nil {
+		t.Fatalf("image row after 2nd detect: %v", err)
+	}
+	if img.VersionResolved {
+		t.Fatal("VersionResolved = true after a second inconclusive scan, want false (still not poisoned)")
 	}
 }
