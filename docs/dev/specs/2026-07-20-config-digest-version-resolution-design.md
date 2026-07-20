@@ -242,7 +242,7 @@ once and pick up the correct version.
 ## Out of scope
 
 - No change to the exact-semver pin auto-suggest path (`NewerSemverTag`); it
-  keeps using the served-digest cache column.
+  compares tag names directly and does not touch the tag-digest cache.
 - No change to apply behavior: a floating tag still floats the same tag. Version
   naming is cosmetic + informational (display, severity, changelog keying).
 - No cross-registry config-digest normalization beyond what `go-containerregistry`
