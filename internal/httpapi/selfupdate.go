@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"dockbrr/internal/selfupdate"
 	"dockbrr/internal/store"
 )
 
@@ -16,7 +17,14 @@ func (s *Server) handleSelfUpdate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"update_available": false})
 		return
 	}
-	res, _ := s.deps.SelfUpdate.Check(r.Context()) // soft error: res is still a valid verdict
+	// ?force=true (or 1) bypasses the cache TTL for the manual "Check for
+	// updates" action; the default poll keeps serving the cached verdict.
+	var res selfupdate.Result
+	if force := r.URL.Query().Get("force"); force == "true" || force == "1" {
+		res, _ = s.deps.SelfUpdate.CheckFresh(r.Context()) // soft error: res is still a valid verdict
+	} else {
+		res, _ = s.deps.SelfUpdate.Check(r.Context()) // soft error: res is still a valid verdict
+	}
 	out := map[string]any{
 		"current":          res.Current,
 		"latest":           res.Latest,
