@@ -24,7 +24,10 @@ export function useApply() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (v: { id: number; scope: Scope }) =>
-      apiFetch<{ job_id: number }>(`/api/updates/${v.id}/apply`, { method: "POST", body: { scope: v.scope } }),
+      apiFetch<{ job_id: number; self_update?: boolean }>(`/api/updates/${v.id}/apply`, {
+        method: "POST",
+        body: { scope: v.scope },
+      }),
     onSuccess: () => invalidate(qc, keys.updates, keys.projects),
     onError: toastError,
   });

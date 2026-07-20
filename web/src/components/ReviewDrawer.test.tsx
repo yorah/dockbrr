@@ -23,6 +23,7 @@ const update: Update = {
   changelog_text: "",
   status: "available",
   detected_at: "2026-07-04T00:00:00Z",
+  is_self: false,
 };
 const service: Service = {
   id: 10,
