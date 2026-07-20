@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/yorah/dockbrr/compare/v0.6.0...v0.6.1) (2026-07-20)
+
+
+### Bug Fixes
+
+* **detect:** resolve floating-tag version by config digest ([#46](https://github.com/yorah/dockbrr/issues/46)) ([bce28d2](https://github.com/yorah/dockbrr/commit/bce28d298ccbc425c582b878eb1d72678d7dcbde))
+
 ## [0.6.0](https://github.com/yorah/dockbrr/compare/v0.5.0...v0.6.0) (2026-07-19)
 
 
