@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/yorah/dockbrr/compare/v0.7.0...v0.8.0) (2026-07-20)
+
+
+### Features
+
+* check for new dockbrr version on container startup ([#52](https://github.com/yorah/dockbrr/issues/52)) ([0d930de](https://github.com/yorah/dockbrr/commit/0d930def94dcb5f8ad732d8b8f4c1f611846f04a))
+
 ## [0.7.0](https://github.com/yorah/dockbrr/compare/v0.6.1...v0.7.0) (2026-07-20)
 
 
