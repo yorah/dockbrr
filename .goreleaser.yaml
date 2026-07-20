@@ -28,6 +28,12 @@ builds:
     ldflags:
       - -s -w
       - -X dockbrr/internal/version.Version={{ .Version }}
+      # Stamp commit/date explicitly. Go's auto vcs.modified is unreliable here:
+      # the before-hook `npm run build` clobbers the tracked dist/index.html
+      # placeholder, dirtying the tree at compile time. CommitDirty is left unset
+      # (defaults to clean) because goreleaser refuses to release a dirty tree.
+      - -X dockbrr/internal/version.Commit={{ .FullCommit }}
+      - -X dockbrr/internal/version.BuildDate={{ .CommitDate }}
 
 archives:
   - id: default
