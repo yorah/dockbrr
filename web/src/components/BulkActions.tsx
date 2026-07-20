@@ -1,46 +1,51 @@
 import { ArrowUpCircle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useApply, useCheckAll, useScanAll } from "@/hooks/mutations";
+import { useApply, useProjectScan, useScanAll } from "@/hooks/mutations";
 import { markServiceBusy, useBusyServices } from "@/hooks/useBusyServices";
+import { useScanRun } from "@/hooks/useScanRun";
 import type { Update } from "@/api/types";
 
-// Check every service in the given set. Detection is read-only (never touches
-// Docker), so no confirm, just one click that fans out per-service checks.
-// Scoped use (e.g. one project); for the dashboard-wide sweep use ScanAllButton,
-// which also refreshes the "Last scan" tile.
+// Check every service in a project via a single scoped scan-run (POST
+// /api/scan {project_id}), not a per-service fan-out. Disables while ANY
+// scan-run is in flight (global, another project, or a single-row check),
+// since the backend only allows one at a time; ScanProgress shows overall
+// progress.
 export function CheckAllButton({
+  projectId,
   serviceIds,
   label = "Check all",
   ariaLabel,
 }: {
+  projectId: number;
   serviceIds: number[];
   label?: string;
   ariaLabel?: string;
 }) {
-  const check = useCheckAll();
+  const scan = useProjectScan();
+  const { running } = useScanRun();
   return (
     <Button
       size="sm"
       variant="ghost"
       className="h-7 gap-1 px-2 text-xs"
-      disabled={serviceIds.length === 0 || check.isPending}
+      disabled={serviceIds.length === 0 || running}
       aria-label={ariaLabel ?? label}
       onClick={(e) => {
         e.stopPropagation();
         if (serviceIds.length === 0) return;
-        check.mutate(serviceIds);
+        scan.mutate(projectId);
       }}
     >
-      <RefreshCw className={check.isPending ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
+      <RefreshCw className={running ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
       {label}
     </Button>
   );
 }
 
 // Run a full detection sweep (POST /api/scan), the dashboard-wide "Check
-// all". Unlike CheckAllButton's per-service fan-out, this also stamps
-// last_check_all and pushes a "scanned" SSE hint, so the "Last scan" tile
-// updates immediately instead of waiting for its 60s poll or a page reload.
+// all". Also stamps last_check_all and pushes a "scanned" SSE hint, so the
+// "Last scan" tile updates immediately instead of waiting for its 60s poll or
+// a page reload. Disables while any scan-run is in flight.
 export function ScanAllButton({
   label = "Check all",
   ariaLabel,
@@ -49,19 +54,20 @@ export function ScanAllButton({
   ariaLabel?: string;
 }) {
   const scan = useScanAll();
+  const { running } = useScanRun();
   return (
     <Button
       size="sm"
       variant="ghost"
       className="h-7 gap-1 px-2 text-xs"
-      disabled={scan.isPending}
+      disabled={running}
       aria-label={ariaLabel ?? label}
       onClick={(e) => {
         e.stopPropagation();
         scan.mutate();
       }}
     >
-      <RefreshCw className={scan.isPending ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
+      <RefreshCw className={running ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
       {label}
     </Button>
   );

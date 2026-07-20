@@ -4,6 +4,7 @@ import { Filters } from "@/components/Filters";
 import { ApplyAllButton, ScanAllButton } from "@/components/BulkActions";
 import { DashboardStats } from "@/components/DashboardStats";
 import { DashboardTable } from "@/components/DashboardTable";
+import { ScanProgress } from "@/components/ScanProgress";
 import { ReviewDrawer } from "@/components/ReviewDrawer";
 import { ChangelogDrawer } from "@/components/ChangelogDrawer";
 import { LogsDrawer } from "@/components/LogsDrawer";
@@ -64,6 +65,7 @@ export function DashboardRoute() {
         onChange={setFilters}
         actions={
           <>
+            <ScanProgress />
             <ScanAllButton ariaLabel="Check all services" />
             <ApplyAllButton
               updates={applicableUpdates}

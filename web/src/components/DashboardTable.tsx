@@ -42,12 +42,13 @@ import { ProjectHealthIndicator } from "@/components/ProjectHealthIndicator";
 import { useProjectHealth } from "@/hooks/useProjectHealth";
 import {
   useApply,
-  useCheck,
   useLifecycle,
   useRemoveContainer,
+  useServiceCheck,
   useToggleProjectAuto,
 } from "@/hooks/mutations";
 import { markServiceBusy, useBusyServices } from "@/hooks/useBusyServices";
+import { useScanRun } from "@/hooks/useScanRun";
 import { ApplyAllButton, CheckAllButton } from "@/components/BulkActions";
 import type { Row } from "@/hooks/useDashboardRows";
 import type { Project, Service, Update } from "@/api/types";
@@ -128,7 +129,8 @@ function ActionsCell({
   removing: boolean;
   onRemove: (serviceId: number) => void;
 }) {
-  const check = useCheck();
+  const check = useServiceCheck();
+  const { running: scanRunning } = useScanRun();
   const apply = useApply();
   const lifecycle = useLifecycle();
   // A gone service has no container to recreate. Applying would just create
@@ -226,14 +228,14 @@ function ActionsCell({
               size="sm"
               variant="ghost"
               className="h-7 w-7 p-0"
-              disabled={check.isPending}
+              disabled={scanRunning}
               aria-label={`Check ${service.name} now`}
               onClick={(e) => {
                 e.stopPropagation();
                 check.mutate(service.id);
               }}
             >
-              <RefreshCw className={check.isPending ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+              <RefreshCw className={scanRunning ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
             </Button>
           </TooltipTrigger>
           <TooltipContent>Check now</TooltipContent>
@@ -407,6 +409,7 @@ function ProjectBulkActions({
   return (
     <>
       <CheckAllButton
+        projectId={project.id}
         serviceIds={project.services.map((s) => s.id)}
         ariaLabel={`Check all services in ${project.name}`}
       />

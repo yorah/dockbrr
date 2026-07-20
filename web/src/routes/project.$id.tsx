@@ -4,6 +4,7 @@ import { Filters } from "@/components/Filters";
 import { ApplyAllButton, CheckAllButton } from "@/components/BulkActions";
 import { DashboardStats } from "@/components/DashboardStats";
 import { DashboardTable } from "@/components/DashboardTable";
+import { ScanProgress } from "@/components/ScanProgress";
 import { ReviewDrawer } from "@/components/ReviewDrawer";
 import { ChangelogDrawer } from "@/components/ChangelogDrawer";
 import { LogsDrawer } from "@/components/LogsDrawer";
@@ -80,7 +81,9 @@ export function ProjectRoute() {
         onChange={setFilters}
         actions={
           <>
+            <ScanProgress />
             <CheckAllButton
+              projectId={project.id}
               serviceIds={project.services.map((s) => s.id)}
               ariaLabel={`Check all services in "${project.name}"`}
             />
