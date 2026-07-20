@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { notify } from "@/lib/notify";
-import { apiFetch } from "@/api/client";
+import { apiFetch, ApiError } from "@/api/client";
 import { keys } from "@/api/keys";
 import type { Scope, SelfUpdate } from "@/api/types";
 
@@ -66,17 +66,40 @@ export function useRestore() {
     onError: toastError,
   });
 }
-export function useCheck() {
-  const qc = useQueryClient();
+// A 409 means a scan-run is already in flight (buttons are disabled, so this
+// is only a race). Swallow it; surface anything else.
+const scanError = (e: unknown) => {
+  if (e instanceof ApiError && e.status === 409) return;
+  notify.error(e instanceof Error ? e.message : "Check failed");
+};
+
+// Global sweep: scope "all". Progress + completion arrive over SSE; the
+// scan-run store drives the UI, so there is no onSuccess refetch here.
+export function useScanAll() {
   return useMutation({
-    mutationFn: (serviceId: number) => apiFetch(`/api/services/${serviceId}/check`, { method: "POST" }),
-    onSuccess: async () => {
-      await invalidate(qc, keys.updates, keys.projects);
-      notify.success("Check complete");
-    },
-    onError: (e) => notify.error(e instanceof Error ? e.message : "Check failed"),
+    mutationFn: () => apiFetch<{ running: boolean; total: number }>("/api/scan", { method: "POST" }),
+    onError: scanError,
   });
 }
+
+// Scoped sweep of one project (single request, not a per-service fan-out).
+export function useProjectScan() {
+  return useMutation({
+    mutationFn: (projectId: number) =>
+      apiFetch<{ running: boolean; total: number }>("/api/scan", { method: "POST", body: { project_id: projectId } }),
+    onError: scanError,
+  });
+}
+
+// Single-service check, routed through the same scan-run.
+export function useServiceCheck() {
+  return useMutation({
+    mutationFn: (serviceId: number) =>
+      apiFetch<{ running: boolean; total: number }>(`/api/services/${serviceId}/check`, { method: "POST" }),
+    onError: scanError,
+  });
+}
+
 // useClearJobs purges the finished job history (success/failed/canceled) and
 // their logs. Queued and running jobs are kept by the backend, so the list is
 // never emptied out from under an in-flight job.
@@ -89,36 +112,6 @@ export function useClearJobs() {
       notify.success(`Cleared ${res.deleted} finished job${res.deleted === 1 ? "" : "s"}`);
     },
     onError: (e) => notify.error(e instanceof Error ? e.message : "Clear failed"),
-  });
-}
-export function useCheckAll() {
-  const qc = useQueryClient();
-  return useMutation({
-    // Scoped (e.g. one project): fan out one check per service. The global
-    // sweep uses useScanAll instead, which also stamps last_check_all.
-    mutationFn: (serviceIds: number[]) =>
-      Promise.all(serviceIds.map((id) => apiFetch(`/api/services/${id}/check`, { method: "POST" }))),
-    onSuccess: async (_res, ids) => {
-      await invalidate(qc, keys.updates, keys.projects);
-      notify.success(`Checked ${ids.length} service${ids.length > 1 ? "s" : ""}`);
-    },
-    onError: (e) => notify.error(e instanceof Error ? e.message : "Check failed"),
-  });
-}
-// useScanAll runs a full detection sweep via the single POST /api/scan
-// endpoint (unlike useCheckAll's per-service fan-out). The backend stamps
-// last_check_all and publishes a "scanned" SSE event, so the dashboard's
-// "Last scan" tile updates immediately, the reason this exists separately
-// from useCheckAll, whose per-service checks never touch last_check_all.
-export function useScanAll() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => apiFetch("/api/scan", { method: "POST" }),
-    onSuccess: async () => {
-      await invalidate(qc, keys.status, keys.updates, keys.projects);
-      notify.success("Scan complete");
-    },
-    onError: (e) => notify.error(e instanceof Error ? e.message : "Scan failed"),
   });
 }
 export function useRollback() {

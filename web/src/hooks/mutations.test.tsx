@@ -6,7 +6,7 @@ import { http, HttpResponse } from "msw";
 import { server } from "@/test/msw";
 import { makeQueryClient } from "@/api/queryClient";
 import { keys } from "@/api/keys";
-import { useApply, useCheck, useLifecycle, useRemoveContainer } from "./mutations";
+import { useApply, useLifecycle, useProjectScan, useRemoveContainer, useScanAll, useServiceCheck } from "./mutations";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() }, Toaster: () => null }));
 import { toast } from "sonner";
@@ -48,20 +48,14 @@ describe("useApply", () => {
   });
 });
 
-describe("useCheck", () => {
-  test("invalidates updates + projects and toasts success", async () => {
-    server.use(http.post("/api/services/7/check", () => HttpResponse.json({ status: "checked" })));
-    const { W, client } = wrapper();
-    const invalidated: unknown[][] = [];
-    const orig = client.invalidateQueries.bind(client);
-    client.invalidateQueries = ((arg: any) => { invalidated.push(arg?.queryKey); return orig(arg); }) as typeof client.invalidateQueries;
-
-    const { result } = renderHook(() => useCheck(), { wrapper: W });
+describe("useServiceCheck", () => {
+  test("posts to the service check endpoint, no success toast (SSE drives the UI)", async () => {
+    server.use(http.post("/api/services/7/check", () => HttpResponse.json({ running: true, total: 1 })));
+    const { W } = wrapper();
+    const { result } = renderHook(() => useServiceCheck(), { wrapper: W });
     result.current.mutate(7);
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(invalidated).toContainEqual(keys.updates);
-    expect(invalidated).toContainEqual(keys.projects);
-    expect(toast.success).toHaveBeenCalledWith(expect.stringMatching(/^Check complete/), expect.anything());
+    expect(toast.success).not.toHaveBeenCalled();
   });
 
   test("surfaces errors as toasts", async () => {
@@ -69,10 +63,56 @@ describe("useCheck", () => {
       http.post("/api/services/7/check", () => HttpResponse.json({ error: "registry down" }, { status: 502 })),
     );
     const { W } = wrapper();
-    const { result } = renderHook(() => useCheck(), { wrapper: W });
+    const { result } = renderHook(() => useServiceCheck(), { wrapper: W });
     result.current.mutate(7);
     await waitFor(() => expect(result.current.isError).toBe(true));
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/^registry down/), expect.anything()));
+  });
+
+  test("swallows a 409 (a scan-run is already in flight) without an error toast", async () => {
+    server.use(
+      http.post("/api/services/7/check", () => HttpResponse.json({ error: "scan already running" }, { status: 409 })),
+    );
+    const { W } = wrapper();
+    const { result } = renderHook(() => useServiceCheck(), { wrapper: W });
+    result.current.mutate(7);
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+});
+
+describe("useProjectScan", () => {
+  test("posts project_id to /api/scan", async () => {
+    let body: unknown;
+    server.use(
+      http.post("/api/scan", async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json({ running: true, total: 2 });
+      }),
+    );
+    const { W } = wrapper();
+    const { result } = renderHook(() => useProjectScan(), { wrapper: W });
+    result.current.mutate(3);
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(body).toEqual({ project_id: 3 });
+  });
+});
+
+describe("useScanAll", () => {
+  test("posts to /api/scan with no body", async () => {
+    let sawBody = false;
+    server.use(
+      http.post("/api/scan", async ({ request }) => {
+        const text = await request.text();
+        sawBody = text.length > 0;
+        return HttpResponse.json({ running: true, total: 5 });
+      }),
+    );
+    const { W } = wrapper();
+    const { result } = renderHook(() => useScanAll(), { wrapper: W });
+    result.current.mutate();
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(sawBody).toBe(false);
   });
 });
 
