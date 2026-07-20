@@ -267,39 +267,69 @@ func TestRollbackEnqueuesJob(t *testing.T) {
 	}
 }
 
-// TestCheckIsSynchronous asserts the handler awaits CheckService before
-// writing its response, returns 200 {"status":"checked"}, and routes the
-// correct service id to the checker. fakeChecker.calledSync is only set after
-// a 10ms sleep inside CheckService, so if the handler returned before the call
-// completed (the old detached-goroutine behavior) this flag would still be
-// false when the response comes back.
-func TestCheckIsSynchronous(t *testing.T) {
-	s, db, tok, csrf := authedServer(t, Deps{})
-	chk := &fakeChecker{called: make(chan int64, 1)}
-	s.deps = mergeDeps(s.deps, actionDeps(db, &fakeEngine{}, chk))
-	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
-	sid, _ := store.NewServices(db).Upsert(store.Service{ProjectID: pid, Name: "app"})
+// TestCheckStartsScanRunAndReports202 asserts the handler starts a
+// service-scoped scan-run and returns 202 immediately (progress + completion
+// now arrive over SSE, not in the response). s.scan is built inside New from
+// the deps present at construction, so the checker must be passed into
+// authedServer directly rather than merged in afterward.
+func TestCheckStartsScanRunAndReports202(t *testing.T) {
+	db, pid, sids := seedProjectServices(t, 1)
+	sid := sids[0]
+	bus := NewBus()
+	chk := &fakeChecker{}
+	deps := mergeDeps(actionDeps(db, &fakeEngine{}, chk), Deps{Bus: bus})
+	s, _, tok, csrf := authedServer(t, deps)
+	_ = pid
+
+	sub, cancel := bus.Subscribe()
+	defer cancel()
 
 	req := authReq(httptest.NewRequest(http.MethodPost, pathf("/api/services/%d/check", sid), nil), tok, csrf)
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("check = %d, want 200", rec.Code)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("check = %d, want 202; body=%s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), `"checked"`) {
-		t.Fatalf("check body = %s, want status=checked", rec.Body.String())
+	var got struct {
+		Running bool `json:"running"`
+		Total   int  `json:"total"`
 	}
-	if !chk.calledSync {
-		t.Fatal("CheckService was not awaited before the handler wrote its response")
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
 	}
-	// The handler has returned, so a synchronous CheckService already sent the
-	// id, no wait needed. default (not time.After) proves it happened before return.
-	select {
-	case got := <-chk.called:
-		if got != sid {
-			t.Fatalf("checked service %d, want %d", got, sid)
-		}
-	default:
-		t.Fatal("checker was not invoked with the service id")
+	if !got.Running || got.Total != 1 {
+		t.Fatalf("snapshot = %+v, want running=true total=1", got)
 	}
+
+	waitForEvent(t, sub, "scan_finished", time.Second)
+
+	if len(chk.servicesFreshCalls) != 1 || len(chk.servicesFreshCalls[0]) != 1 || chk.servicesFreshCalls[0][0] != sid {
+		t.Fatalf("servicesFreshCalls = %+v, want a single call with [%d]", chk.servicesFreshCalls, sid)
+	}
+}
+
+// TestCheckBusyReturns409 asserts a service check started while another
+// scan-run is already in flight is rejected with 409, not queued or dropped.
+func TestCheckBusyReturns409(t *testing.T) {
+	db, _, sids := seedProjectServices(t, 1)
+	sid := sids[0]
+	bc := &blockingChecker{release: make(chan struct{}), started: make(chan struct{})}
+	deps := mergeDeps(actionDeps(db, &fakeEngine{}, &fakeChecker{}), Deps{Checker: bc, Bus: NewBus()})
+	s, _, tok, csrf := authedServer(t, deps)
+
+	first := authReq(httptest.NewRequest(http.MethodPost, pathf("/api/services/%d/check", sid), nil), tok, csrf)
+	firstRec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(firstRec, first)
+	if firstRec.Code != http.StatusAccepted {
+		t.Fatalf("first check = %d, want 202", firstRec.Code)
+	}
+	<-bc.started
+
+	second := authReq(httptest.NewRequest(http.MethodPost, pathf("/api/services/%d/check", sid), nil), tok, csrf)
+	secondRec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(secondRec, second)
+	if secondRec.Code != http.StatusConflict {
+		t.Fatalf("second check = %d, want 409; body=%s", secondRec.Code, secondRec.Body.String())
+	}
+	close(bc.release)
 }

@@ -107,12 +107,14 @@ type Server struct {
 	deps    Deps
 	mux     *chi.Mux
 	limiter *loginLimiter
+	scan    *ScanRunner
 }
 
 // New builds the API server. deps carries the wired repos + engine/checker;
 // pass Deps{} in tests that exercise only /healthz or /api/projects.
 func New(cfg config.Config, db *store.DB, deps Deps) *Server {
 	s := &Server{cfg: cfg, db: db, deps: deps, mux: chi.NewRouter(), limiter: newLoginLimiter(time.Now)}
+	s.scan = NewScanRunner(deps.Checker, deps.Services, deps.Settings, deps.Bus)
 	s.routes()
 	return s
 }
@@ -176,6 +178,7 @@ func (s *Server) routes() {
 		r.Post("/api/services/{id}/remove", s.handleRemove)
 		r.Get("/api/services/{id}/logs", s.handleLogs)
 		r.Post("/api/scan", s.handleScanAll)
+		r.Get("/api/scan", s.handleScanStatus)
 		r.Get("/api/services/{id}/events", s.handleServiceEvents)
 		r.Get("/api/jobs", s.handleListJobs)
 		r.Delete("/api/jobs", s.handleClearJobs)

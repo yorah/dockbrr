@@ -1,33 +1,42 @@
 package httpapi
 
 import (
-	"context"
+	"errors"
 	"net/http"
-	"time"
 
 	"dockbrr/internal/logger"
 )
 
-// handleScanAll runs a fresh detection sweep over every service, then stamps
-// last_check_all and publishes a "scanned" refresh hint, the same two side
-// effects the scheduler performs on its own tick (cmd/dockbrr/main.go
-// schedulerLoop). Without this, a manual "Check all" only fanned out
-// per-service checks and never touched last_check_all, so the dashboard's
-// "Last scan" tile never reflected a manual sweep.
+// handleScanAll starts a background scan-run. With no body it sweeps every
+// service (scope "all", which stamps last_check_all + publishes "scanned").
+// With {"project_id": N} it sweeps that project only. Returns 202 immediately;
+// progress streams over SSE. A scan already in flight returns 409.
 func (s *Server) handleScanAll(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
-	defer cancel()
-	logger.Infof("scan: manual check-all requested")
-	if err := s.deps.Checker.CheckAllFresh(ctx); err != nil {
-		writeJSONError(w, http.StatusBadGateway, err)
+	var body struct {
+		ProjectID int64 `json:"project_id"`
+	}
+	_ = decodeJSON(r, &body) // optional
+
+	scope, projectID := "all", int64(0)
+	if body.ProjectID > 0 {
+		scope, projectID = "project", body.ProjectID
+	}
+	logger.Infof("scan: manual check-all requested (scope=%s project=%d)", scope, projectID)
+
+	st, err := s.scan.Start(scope, projectID, 0)
+	if errors.Is(err, ErrScanBusy) {
+		writeJSONError(w, http.StatusConflict, err)
 		return
 	}
-	now := time.Now().UTC().Format(time.RFC3339)
-	if err := s.deps.Settings.Set("last_check_all", now); err != nil {
-		logger.Errorf("scan: record last_check_all: %v", err)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err)
+		return
 	}
-	if s.deps.Bus != nil {
-		s.deps.Bus.Publish(Event{Type: "scanned"})
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "checked", "last_check_all": now})
+	writeJSON(w, http.StatusAccepted, st)
+}
+
+// handleScanStatus returns the authoritative scan-run snapshot so a freshly
+// mounted (or reconnected) client can seed/resync its progress state.
+func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.scan.Snapshot())
 }
