@@ -2,8 +2,10 @@ package scan_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -50,6 +52,27 @@ func openScanStore(t *testing.T) *store.DB {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	return db
+}
+
+// newScannerWithServices builds a Scanner backed by a fresh store seeded with
+// n up-to-date services (so CheckService is a fast no-drift no-op), returning
+// the scanner and the seeded service ids in insertion order.
+func newScannerWithServices(t *testing.T, n int) (*scan.Scanner, []int64) {
+	t.Helper()
+	db := openScanStore(t)
+	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
+	ids := make([]int64, n)
+	for i := 0; i < n; i++ {
+		sid, err := store.NewServices(db).Upsert(store.Service{
+			ProjectID: pid, Name: fmt.Sprintf("svc%d", i), ImageRef: "nginx:1.25.0",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids[i] = sid
+	}
+	s := scan.New(fakeDetector{}, &fakeChangelog{}, store.NewServices(db), store.NewUpdates(db), store.NewImages(db), &spyInvalidator{}, nil)
+	return s, ids
 }
 
 func TestCheckServicePersistsChangelogFromStoredLabels(t *testing.T) {
@@ -401,6 +424,34 @@ func TestCheckAllKeepsCache(t *testing.T) {
 	}
 	if spy.calls != 0 {
 		t.Fatalf("Invalidate calls = %d, want 0 (scheduler sweep keeps the cache)", spy.calls)
+	}
+}
+
+func TestCheckServicesFreshReportsProgressPerService(t *testing.T) {
+	sc, svcIDs := newScannerWithServices(t, 3) // helper mirrors existing scan_test setup; returns 3 seeded service ids
+	var got [][2]int
+	err := sc.CheckServicesFresh(context.Background(), svcIDs, func(done, total int) {
+		got = append(got, [2]int{done, total})
+	})
+	if err != nil {
+		t.Fatalf("CheckServicesFresh: %v", err)
+	}
+	want := [][2]int{{1, 3}, {2, 3}, {3, 3}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("progress = %v, want %v", got, want)
+	}
+}
+
+func TestCheckServicesFreshContinuesPastMissingService(t *testing.T) {
+	sc, svcIDs := newScannerWithServices(t, 2)
+	ids := append([]int64{999999}, svcIDs...) // 999999 does not exist
+	var calls int
+	err := sc.CheckServicesFresh(context.Background(), ids, func(done, total int) { calls++ })
+	if err != nil {
+		t.Fatalf("want nil error (per-service errors are logged, not returned), got %v", err)
+	}
+	if calls != len(ids) {
+		t.Fatalf("onDone calls = %d, want %d (fires even for the missing id)", calls, len(ids))
 	}
 }
 

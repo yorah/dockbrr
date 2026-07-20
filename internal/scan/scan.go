@@ -255,7 +255,40 @@ func (s *Scanner) CheckAll(ctx context.Context) error {
 // contract as the per-service check button. It does NOT lift the rolled_back
 // suppression; only the targeted per-service check does that.
 func (s *Scanner) CheckAllFresh(ctx context.Context) error {
-	return s.checkAll(ctx, true)
+	svcs, err := s.services.List()
+	if err != nil {
+		return err
+	}
+	ids := make([]int64, len(svcs))
+	for i, sv := range svcs {
+		ids[i] = sv.ID
+	}
+	logger.Infof("scan: checking %d service(s)", len(ids))
+	return s.CheckServicesFresh(ctx, ids, nil)
+}
+
+// CheckServicesFresh invalidates each service's detect cache and checks it,
+// invoking onDone(done, total) after every service completes (whether it
+// detected drift, found nothing, or errored). Per-service errors are logged
+// and the sweep continues, matching checkAll. onDone may be nil.
+func (s *Scanner) CheckServicesFresh(ctx context.Context, ids []int64, onDone func(done, total int)) error {
+	total := len(ids)
+	for i, id := range ids {
+		if svc, err := s.services.Get(id); err != nil {
+			logger.Errorf("scan: load service %d: %v", id, err)
+		} else {
+			if s.states != nil {
+				s.invalidateFor(svc)
+			}
+			if err := s.CheckService(ctx, id); err != nil {
+				logger.Errorf("scan: check service %d (%s): %v", id, svc.Name, err)
+			}
+		}
+		if onDone != nil {
+			onDone(i+1, total)
+		}
+	}
+	return nil
 }
 
 func (s *Scanner) checkAll(ctx context.Context, fresh bool) error {
