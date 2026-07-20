@@ -125,6 +125,14 @@ func (s *GitHubSource) Resolve(ctx context.Context, in Input) (Result, error) {
 		return ok && !detect.CoreLess(fromCore, c) // oldest <= from: span covered
 	})
 	if err != nil {
+		// Releases API failed (commonly an unauthenticated rate-limit). The raw
+		// CHANGELOG.md probe hits raw.githubusercontent.com, which is not subject
+		// to that limit and does not need the releases list, so try it before
+		// giving up. A hit returns a link (dropping the error); a miss propagates
+		// the original error so a genuine rate-limit still surfaces.
+		if link, ok, lerr := s.changelogLink(ctx, owner, name, tgt.tags(in.Version)); lerr == nil && ok {
+			return Result{URL: link}, nil
+		}
 		return Result{}, err
 	}
 	// Persist the resolution only on a cache miss: a positive hit already fetched
