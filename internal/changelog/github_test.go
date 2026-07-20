@@ -727,3 +727,60 @@ func TestGitHubChangelogLinkTokenSent(t *testing.T) {
 		t.Fatalf("URL = %q, want blob CHANGELOG link", res.URL)
 	}
 }
+
+func TestGitHubReleasesErrorFallsBackToRawChangelog(t *testing.T) {
+	// Releases API is rate-limited (403 + X-RateLimit-Remaining: 0), but a raw
+	// CHANGELOG.md exists at the v-prefixed tag. The source must recover the
+	// GitHub blob link and drop the rate-limit error.
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	mux.HandleFunc("/repos/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.WriteHeader(http.StatusForbidden)
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// raw CHANGELOG.md only at foo/bar/v1.2.3
+		if r.URL.Path == "/foo/bar/v1.2.3/CHANGELOG.md" {
+			_, _ = w.Write([]byte("# Changelog"))
+			return
+		}
+		http.NotFound(w, r)
+	})
+
+	s := changelog.NewGitHubSource(srv.Client(), srv.URL, srv.URL, func() string { return "" }, nil, time.Hour)
+	res, err := s.Resolve(context.Background(), ghInput("ghcr.io/foo/bar:latest", "1.2.3"))
+	if err != nil {
+		t.Fatalf("err = %v, want nil (raw fallback should drop the rate-limit error)", err)
+	}
+	if res.URL != "https://github.com/foo/bar/blob/v1.2.3/CHANGELOG.md" {
+		t.Fatalf("URL = %q, want the GitHub blob CHANGELOG link", res.URL)
+	}
+	if res.Text != "" {
+		t.Fatalf("Text = %q, want empty (CHANGELOG fallback is link-only)", res.Text)
+	}
+}
+
+func TestGitHubReleasesErrorNoRawChangelogPreservesError(t *testing.T) {
+	// Releases API rate-limited AND no raw CHANGELOG.md anywhere: the original
+	// ErrRateLimited must still surface (not be swallowed by the fallback).
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	mux.HandleFunc("/repos/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.WriteHeader(http.StatusForbidden)
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	})
+
+	s := changelog.NewGitHubSource(srv.Client(), srv.URL, srv.URL, func() string { return "" }, nil, time.Hour)
+	res, err := s.Resolve(context.Background(), ghInput("ghcr.io/foo/bar:latest", "1.2.3"))
+	if !errors.Is(err, changelog.ErrRateLimited) {
+		t.Fatalf("err = %v, want ErrRateLimited preserved", err)
+	}
+	if res.URL != "" || res.Text != "" {
+		t.Fatalf("res = %+v, want empty when nothing resolved", res)
+	}
+}
