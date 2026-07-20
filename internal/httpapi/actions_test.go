@@ -33,10 +33,12 @@ func (f *fakeEngine) Stream(id int64) (<-chan job.LogLine, error) { return f.ch,
 // CheckServiceFresh before writing its response (a detached goroutine would race
 // this and fail intermittently at best).
 type fakeChecker struct {
-	called       chan int64
-	calledSync   bool
-	checkAllErr  error
-	checkAllCall int
+	called             chan int64
+	calledSync         bool
+	checkAllErr        error
+	checkAllCall       int
+	servicesFreshCalls [][]int64
+	servicesFreshErr   error
 }
 
 func (f *fakeChecker) CheckServiceFresh(_ context.Context, id int64) error {
@@ -51,6 +53,16 @@ func (f *fakeChecker) CheckServiceFresh(_ context.Context, id int64) error {
 func (f *fakeChecker) CheckAllFresh(_ context.Context) error {
 	f.checkAllCall++
 	return f.checkAllErr
+}
+
+func (f *fakeChecker) CheckServicesFresh(_ context.Context, ids []int64, onDone func(done, total int)) error {
+	f.servicesFreshCalls = append(f.servicesFreshCalls, ids)
+	for i := range ids {
+		if onDone != nil {
+			onDone(i+1, len(ids))
+		}
+	}
+	return f.servicesFreshErr
 }
 
 func actionDeps(db *store.DB, eng *fakeEngine, chk *fakeChecker) Deps {

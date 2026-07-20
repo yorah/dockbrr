@@ -34,6 +34,7 @@ type JobService interface {
 type Checker interface {
 	CheckServiceFresh(ctx context.Context, serviceID int64) error
 	CheckAllFresh(ctx context.Context) error
+	CheckServicesFresh(ctx context.Context, ids []int64, onDone func(done, total int)) error
 }
 
 // DockerPinger re-probes daemon liveness on each /api/status request so the
