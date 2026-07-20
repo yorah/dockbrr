@@ -27,14 +27,18 @@ type JobService interface {
 
 // Checker triggers read-only detection, either a fresh check of one service
 // (invalidating its detect cache first, so a manual check always does a full
-// re-scan) or a fresh sweep of every service (same cache invalidation,
+// re-scan) or a fresh sweep of a set of services (same cache invalidation,
 // per service). Both endpoints are manual/user-initiated, hence fresh; the
 // scheduler's cache-keeping sweep never comes through the API. *scan.Scanner
 // satisfies it. Detection does not go through the Job Engine (read-only).
 type Checker interface {
 	CheckServiceFresh(ctx context.Context, serviceID int64) error
 	CheckAllFresh(ctx context.Context) error
-	CheckServicesFresh(ctx context.Context, ids []int64, onDone func(done, total int)) error
+	// CheckServicesFresh checks each id fresh, reporting progress via onDone.
+	// reopen lifts the rolled_back auto-apply suppression per service (the
+	// manual "look again" gesture) and must only be true for scoped
+	// (service/project) runs, never for an all-services sweep.
+	CheckServicesFresh(ctx context.Context, ids []int64, reopen bool, onDone func(done, total int)) error
 }
 
 // DockerPinger re-probes daemon liveness on each /api/status request so the

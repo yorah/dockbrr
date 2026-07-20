@@ -39,6 +39,9 @@ type fakeChecker struct {
 	checkAllCall       int
 	servicesFreshCalls [][]int64
 	servicesFreshErr   error
+	// servicesFreshReopen records the reopen flag from the most recent
+	// CheckServicesFresh call, so tests can assert scope->reopen wiring.
+	servicesFreshReopen bool
 }
 
 func (f *fakeChecker) CheckServiceFresh(_ context.Context, id int64) error {
@@ -55,8 +58,9 @@ func (f *fakeChecker) CheckAllFresh(_ context.Context) error {
 	return f.checkAllErr
 }
 
-func (f *fakeChecker) CheckServicesFresh(_ context.Context, ids []int64, onDone func(done, total int)) error {
+func (f *fakeChecker) CheckServicesFresh(_ context.Context, ids []int64, reopen bool, onDone func(done, total int)) error {
 	f.servicesFreshCalls = append(f.servicesFreshCalls, ids)
+	f.servicesFreshReopen = reopen
 	for i := range ids {
 		if onDone != nil {
 			onDone(i+1, len(ids))

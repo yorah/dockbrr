@@ -1,8 +1,10 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -140,6 +142,83 @@ func TestScanAllBusyReturns409(t *testing.T) {
 		t.Fatalf("second POST /api/scan = %d, want 409; body=%s", secondRec.Code, secondRec.Body.String())
 	}
 	close(bc.release)
+}
+
+// TestScanReopenFlagByScope asserts the reopen flag passed to
+// Checker.CheckServicesFresh matches the old per-endpoint semantics: scoped
+// (service/project) manual checks reopen rolled_back updates (the "look
+// again" gesture); an all-services sweep must not (reopening there would make
+// every just-rolled-back update auto-apply-eligible again).
+func TestScanReopenFlagByScope(t *testing.T) {
+	t.Run("service scope reopens", func(t *testing.T) {
+		db, _, svcIDs := seedProjectServices(t, 1)
+		chk := &fakeChecker{}
+		bus := NewBus()
+		deps := mergeDeps(settingsDeps(t, db), Deps{Checker: chk, Bus: bus})
+		s, _, tok, csrf := authedServer(t, deps)
+
+		sub, cancel := bus.Subscribe()
+		defer cancel()
+
+		req := authReq(httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/services/%d/check", svcIDs[0]), nil), tok, csrf)
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("POST check = %d body=%s", rec.Code, rec.Body.String())
+		}
+		waitForEvent(t, sub, "scan_finished", time.Second)
+
+		if !chk.servicesFreshReopen {
+			t.Fatalf("service scope: reopen = false, want true")
+		}
+	})
+
+	t.Run("project scope reopens", func(t *testing.T) {
+		db, projectID, _ := seedProjectServices(t, 1)
+		chk := &fakeChecker{}
+		bus := NewBus()
+		deps := mergeDeps(settingsDeps(t, db), Deps{Checker: chk, Bus: bus})
+		s, _, tok, csrf := authedServer(t, deps)
+
+		sub, cancel := bus.Subscribe()
+		defer cancel()
+
+		body, _ := json.Marshal(map[string]int64{"project_id": projectID})
+		req := authReq(httptest.NewRequest(http.MethodPost, "/api/scan", bytes.NewReader(body)), tok, csrf)
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("POST /api/scan (project) = %d body=%s", rec.Code, rec.Body.String())
+		}
+		waitForEvent(t, sub, "scan_finished", time.Second)
+
+		if !chk.servicesFreshReopen {
+			t.Fatalf("project scope: reopen = false, want true")
+		}
+	})
+
+	t.Run("all scope does not reopen", func(t *testing.T) {
+		db, _, _ := seedProjectServices(t, 1)
+		chk := &fakeChecker{}
+		bus := NewBus()
+		deps := mergeDeps(settingsDeps(t, db), Deps{Checker: chk, Bus: bus})
+		s, _, tok, csrf := authedServer(t, deps)
+
+		sub, cancel := bus.Subscribe()
+		defer cancel()
+
+		req := authReq(httptest.NewRequest(http.MethodPost, "/api/scan", nil), tok, csrf)
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("POST /api/scan (all) = %d body=%s", rec.Code, rec.Body.String())
+		}
+		waitForEvent(t, sub, "scan_finished", time.Second)
+
+		if chk.servicesFreshReopen {
+			t.Fatalf("all scope: reopen = true, want false")
+		}
+	})
 }
 
 // TestScanAllFinishesDespiteCheckerError proves a background checker error is

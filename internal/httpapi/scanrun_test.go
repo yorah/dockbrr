@@ -75,7 +75,7 @@ type blockingChecker struct {
 
 func (b *blockingChecker) CheckServiceFresh(context.Context, int64) error { return nil }
 func (b *blockingChecker) CheckAllFresh(context.Context) error            { return nil }
-func (b *blockingChecker) CheckServicesFresh(_ context.Context, ids []int64, onDone func(done, total int)) error {
+func (b *blockingChecker) CheckServicesFresh(_ context.Context, ids []int64, _ bool, onDone func(done, total int)) error {
 	close(b.started)
 	<-b.release
 	for i := range ids {

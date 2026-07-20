@@ -430,7 +430,7 @@ func TestCheckAllKeepsCache(t *testing.T) {
 func TestCheckServicesFreshReportsProgressPerService(t *testing.T) {
 	sc, svcIDs := newScannerWithServices(t, 3) // helper mirrors existing scan_test setup; returns 3 seeded service ids
 	var got [][2]int
-	err := sc.CheckServicesFresh(context.Background(), svcIDs, func(done, total int) {
+	err := sc.CheckServicesFresh(context.Background(), svcIDs, false, func(done, total int) {
 		got = append(got, [2]int{done, total})
 	})
 	if err != nil {
@@ -446,7 +446,7 @@ func TestCheckServicesFreshContinuesPastMissingService(t *testing.T) {
 	sc, svcIDs := newScannerWithServices(t, 2)
 	ids := append([]int64{999999}, svcIDs...) // 999999 does not exist
 	var calls int
-	err := sc.CheckServicesFresh(context.Background(), ids, func(done, total int) { calls++ })
+	err := sc.CheckServicesFresh(context.Background(), ids, false, func(done, total int) { calls++ })
 	if err != nil {
 		t.Fatalf("want nil error (per-service errors are logged, not returned), got %v", err)
 	}
@@ -535,6 +535,58 @@ func TestCheckServiceKeepsRolledBackSuppressed(t *testing.T) {
 	}
 	if got, _ := updates.Get(uid); got.Status != "rolled_back" {
 		t.Fatalf("status = %q, want rolled_back (poll path keeps the suppression)", got.Status)
+	}
+}
+
+func TestCheckServicesFreshReopenTrueLiftsRolledBack(t *testing.T) {
+	// A scoped (service/project) manual sweep must reopen rolled_back updates,
+	// same as the single-service CheckServiceFresh gesture.
+	db := openScanStore(t)
+	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
+	sid, _ := store.NewServices(db).Upsert(store.Service{
+		ProjectID: pid, Name: "web", ImageRef: "nginx:1.25.0", CurrentDigest: "sha256:old",
+	})
+	updates := store.NewUpdates(db)
+	uid, _, err := updates.RecordDrift(store.Update{ServiceID: sid, ToDigest: "sha256:new", Status: "applied"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := updates.MarkRolledBack(sid, "sha256:new"); err != nil {
+		t.Fatal(err)
+	}
+
+	s := scan.New(fakeDetector{}, &fakeChangelog{}, store.NewServices(db), updates, store.NewImages(db), &spyInvalidator{}, nil)
+	if err := s.CheckServicesFresh(context.Background(), []int64{sid}, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := updates.Get(uid); got.Status != "available" {
+		t.Fatalf("status = %q, want available (reopen=true lifts rolled_back suppression)", got.Status)
+	}
+}
+
+func TestCheckServicesFreshReopenFalseKeepsRolledBack(t *testing.T) {
+	// An all-services sweep must NOT reopen: that would make a just-rolled-back
+	// update auto-apply-eligible again, a safety regression.
+	db := openScanStore(t)
+	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
+	sid, _ := store.NewServices(db).Upsert(store.Service{
+		ProjectID: pid, Name: "web", ImageRef: "nginx:1.25.0", CurrentDigest: "sha256:old",
+	})
+	updates := store.NewUpdates(db)
+	uid, _, err := updates.RecordDrift(store.Update{ServiceID: sid, ToDigest: "sha256:new", Status: "applied"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := updates.MarkRolledBack(sid, "sha256:new"); err != nil {
+		t.Fatal(err)
+	}
+
+	s := scan.New(fakeDetector{}, &fakeChangelog{}, store.NewServices(db), updates, store.NewImages(db), &spyInvalidator{}, nil)
+	if err := s.CheckServicesFresh(context.Background(), []int64{sid}, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := updates.Get(uid); got.Status != "rolled_back" {
+		t.Fatalf("status = %q, want rolled_back (reopen=false keeps the suppression)", got.Status)
 	}
 }
 

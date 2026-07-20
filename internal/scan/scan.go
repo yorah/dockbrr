@@ -264,17 +264,30 @@ func (s *Scanner) CheckAllFresh(ctx context.Context) error {
 		ids[i] = sv.ID
 	}
 	logger.Infof("scan: checking %d service(s)", len(ids))
-	return s.CheckServicesFresh(ctx, ids, nil)
+	return s.CheckServicesFresh(ctx, ids, false, nil)
 }
 
 // CheckServicesFresh invalidates each service's detect cache and checks it,
 // invoking onDone(done, total) after every service completes (whether it
 // detected drift, found nothing, or errored). Per-service errors are logged
 // and the sweep continues, matching checkAll. onDone may be nil.
-func (s *Scanner) CheckServicesFresh(ctx context.Context, ids []int64, onDone func(done, total int)) error {
+//
+// reopen controls whether each service also gets the rolled_back suppression
+// lifted (the "manual look-again" gesture): when true, each id goes through
+// CheckServiceFresh (invalidate + ReopenRolledBack + CheckService); when
+// false, it's invalidate + CheckService only, matching the historic
+// CheckAllFresh behavior. A sweep across every service must NEVER reopen: that
+// would make a just-rolled-back update auto-apply-eligible again service-wide.
+// Scoped (single-service or single-project) manual checks must reopen, so
+// they match the original per-service "Check now" contract.
+func (s *Scanner) CheckServicesFresh(ctx context.Context, ids []int64, reopen bool, onDone func(done, total int)) error {
 	total := len(ids)
 	for i, id := range ids {
-		if svc, err := s.services.Get(id); err != nil {
+		if reopen {
+			if err := s.CheckServiceFresh(ctx, id); err != nil {
+				logger.Errorf("scan: check service %d: %v", id, err)
+			}
+		} else if svc, err := s.services.Get(id); err != nil {
 			logger.Errorf("scan: load service %d: %v", id, err)
 		} else {
 			if s.states != nil {

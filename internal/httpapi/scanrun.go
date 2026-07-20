@@ -93,7 +93,12 @@ func (sr *ScanRunner) run(scope string, ids []int64) {
 	ctx, cancel := context.WithTimeout(context.Background(), scanRunTimeout)
 	defer cancel()
 
-	_ = sr.checker.CheckServicesFresh(ctx, ids, func(done, total int) {
+	// Scoped (service/project) runs are the explicit "look again" gesture, so
+	// they also lift the rolled_back auto-apply suppression, same as the old
+	// per-service check button. An all-services sweep must never reopen: that
+	// would make every just-rolled-back update auto-apply-eligible again.
+	reopen := scope != "all" && scope != ""
+	_ = sr.checker.CheckServicesFresh(ctx, ids, reopen, func(done, total int) {
 		sr.mu.Lock()
 		sr.state.Done = done
 		sr.mu.Unlock()
@@ -101,6 +106,9 @@ func (sr *ScanRunner) run(scope string, ids []int64) {
 	})
 
 	if scope == "all" || scope == "" {
+		// Stamp last_check_all regardless of per-service outcome above: the
+		// "Last scan" tile reflects that a sweep completed even if it hit
+		// per-service errors along the way.
 		now := time.Now().UTC().Format(time.RFC3339)
 		if err := sr.settings.Set("last_check_all", now); err != nil {
 			logger.Errorf("scan: record last_check_all: %v", err)
