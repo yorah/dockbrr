@@ -5,15 +5,16 @@ import (
 	"errors"
 )
 
-// TagDigests caches immutable tag->digest resolutions. It backs the detector's
-// floating-tag reverse version-naming scan so the same exact-semver tags are not
-// re-HEADed every detect cycle. Unlike image_remote_state it has NO TTL: a
-// published release tag's served digest is permanent, so a hit never expires.
+// TagDigests caches immutable tag->config-digest resolutions (image identity).
+// It backs the detector's floating-tag reverse version-naming scan so the same
+// exact-semver tags are not re-HEADed every detect cycle. Unlike
+// image_remote_state it has NO TTL: a published release tag's platform config
+// digest is permanent (the image identity), so a hit never expires.
 type TagDigests struct{ db *sql.DB }
 
 func NewTagDigests(db *DB) *TagDigests { return &TagDigests{db: db.DB} }
 
-// Get returns the cached digest for (repo, tag). ok is false when no row exists.
+// Get returns the cached platform config digest for (repo, tag). ok is false when no row exists.
 func (t *TagDigests) Get(repo, tag string) (digest string, ok bool, err error) {
 	err = t.db.QueryRow(
 		`SELECT digest FROM tag_digest_cache WHERE repo=? AND tag=?`, repo, tag,
@@ -27,8 +28,9 @@ func (t *TagDigests) Get(repo, tag string) (digest string, ok bool, err error) {
 	return digest, true, nil
 }
 
-// Put records digest for (repo, tag). An empty digest is ignored (never cache a
-// non-answer). Re-recording is idempotent since the mapping is immutable.
+// Put records the platform config digest for (repo, tag). An empty digest is
+// ignored (never cache a non-answer). Re-recording is idempotent since the
+// mapping is immutable.
 func (t *TagDigests) Put(repo, tag, digest string) error {
 	if digest == "" {
 		return nil

@@ -27,14 +27,20 @@ type fakeResolver struct {
 	// tracked tag's same-tag resolve).
 	byRef map[string]registry.RemoteImage
 
-	// head/headErr back Head, consulted by the floating-tag reverse
-	// version-naming scan. A missing ref falls back to img.Digest.
-	head    map[string]string
+	// configByRef backs ConfigDigest, keyed by "repo:tag". A missing ref falls
+	// back to img.ConfigDigest.
+	configByRef map[string]string
+
+	// headErr, when set, is returned by ConfigDigest for every ref (simulates a
+	// registry error, e.g. rate-limit, during the reverse version-naming scan).
 	headErr error
 
-	// headSeen, when non-nil, counts Head calls per ref (maps are reference
-	// types, so a value-receiver method still mutates the shared map).
-	headSeen map[string]int
+	// configSeen, when non-nil, counts ConfigDigest calls per ref (maps are
+	// reference types, so a value-receiver method still mutates the shared
+	// map). Adaptation over the brief: needed to migrate
+	// TestDetectReverseLookupUsesTagCache's call-count assertions from Head to
+	// ConfigDigest.
+	configSeen map[string]int
 }
 
 func (f fakeResolver) Resolve(_ context.Context, ref string, _ registry.Platform) (registry.RemoteImage, error) {
@@ -56,19 +62,19 @@ func (f fakeResolver) ListTags(_ context.Context, _ string) ([]string, error) {
 	return f.tags, f.tagsErr
 }
 
-func (f fakeResolver) Head(_ context.Context, ref string) (string, error) {
-	if f.headSeen != nil {
-		f.headSeen[ref]++
+func (f fakeResolver) ConfigDigest(_ context.Context, ref string, _ registry.Platform) (string, error) {
+	if f.configSeen != nil {
+		f.configSeen[ref]++
 	}
 	if f.headErr != nil {
 		return "", f.headErr
 	}
-	if f.head != nil {
-		if d, ok := f.head[ref]; ok {
-			return d, nil
+	if f.configByRef != nil {
+		if cd, ok := f.configByRef[ref]; ok {
+			return cd, nil
 		}
 	}
-	return f.img.Digest, nil
+	return f.img.ConfigDigest, nil
 }
 
 func newDB(t *testing.T) *store.DB {
@@ -580,7 +586,7 @@ func (c countingResolver) ListTags(_ context.Context, _ string) ([]string, error
 	return nil, nil
 }
 
-func (c countingResolver) Head(_ context.Context, _ string) (string, error) {
+func (c countingResolver) ConfigDigest(_ context.Context, _ string, _ registry.Platform) (string, error) {
 	return c.digest, nil
 }
 
@@ -648,15 +654,16 @@ func TestDetectCacheTTLReadPerCall(t *testing.T) {
 func TestDetectFloatingTagNamesVersionsViaReverseLookup(t *testing.T) {
 	db := newDB(t)
 	svc := seedSvc(t, db, "docker.io/garethgeorge/backrest:latest", "sha256:v1130", false)
+	svc.CurrentImageID = "sha256:cfg-v1130" // running container's config digest
 	r := fakeResolver{
 		// latest resolves to the newest release digest (drift vs running), no
 		// version label (mirrors backrest, which sets only image.source).
-		img:  registry.RemoteImage{Digest: "sha256:v1141", PlatformDigest: "sha256:v1141"},
+		img:  registry.RemoteImage{Digest: "sha256:v1141", PlatformDigest: "sha256:v1141", ConfigDigest: "sha256:cfg-v1141"},
 		tags: []string{"v1.13.0", "v1.14.0", "v1.14.1", "v1.14.1-rc1", "latest"},
-		head: map[string]string{
-			"docker.io/garethgeorge/backrest:v1.13.0": "sha256:v1130",
-			"docker.io/garethgeorge/backrest:v1.14.0": "sha256:v1140",
-			"docker.io/garethgeorge/backrest:v1.14.1": "sha256:v1141",
+		configByRef: map[string]string{
+			"docker.io/garethgeorge/backrest:v1.13.0": "sha256:cfg-v1130",
+			"docker.io/garethgeorge/backrest:v1.14.0": "sha256:cfg-v1140",
+			"docker.io/garethgeorge/backrest:v1.14.1": "sha256:cfg-v1141",
 		},
 	}
 	u, err := newDetector(db, r).Detect(context.Background(), svc)
@@ -689,15 +696,17 @@ func TestDetectFloatingTagNamesVersionsViaReverseLookup(t *testing.T) {
 func TestDetectUpToDateFloatingTagResolvesCurrentVersion(t *testing.T) {
 	db := newDB(t)
 	svc := seedSvc(t, db, "ghcr.io/gethomepage/homepage:latest", "sha256:v1132", false)
+	// svc.CurrentImageID left blank: exercises resolveCurrentVersion's fallback
+	// to the up-to-date remote's own ConfigDigest as the running image's config.
 	r := fakeResolver{
 		// latest resolves to the SAME digest the container runs (up to date),
 		// with no version label (homepage ships none).
-		img:  registry.RemoteImage{Digest: "sha256:v1132", PlatformDigest: "sha256:v1132"},
+		img:  registry.RemoteImage{Digest: "sha256:v1132", PlatformDigest: "sha256:v1132", ConfigDigest: "sha256:cfg-v1132"},
 		tags: []string{"v1.13.0", "v1.13.1", "v1.13.2", "latest"},
-		head: map[string]string{
-			"ghcr.io/gethomepage/homepage:v1.13.0": "sha256:v1130",
-			"ghcr.io/gethomepage/homepage:v1.13.1": "sha256:v1131",
-			"ghcr.io/gethomepage/homepage:v1.13.2": "sha256:v1132",
+		configByRef: map[string]string{
+			"ghcr.io/gethomepage/homepage:v1.13.0": "sha256:cfg-v1130",
+			"ghcr.io/gethomepage/homepage:v1.13.1": "sha256:cfg-v1131",
+			"ghcr.io/gethomepage/homepage:v1.13.2": "sha256:cfg-v1132",
 		},
 	}
 	u, err := newDetector(db, r).Detect(context.Background(), svc)
@@ -751,12 +760,19 @@ func TestDetectFloatingTagNamesFromViaRunningImageLabel(t *testing.T) {
 
 // TestDetectFloatingReverseLookupNonFatal proves the reverse scan is best-effort:
 // a tag-list failure leaves the version strings blank and the update is still
-// recorded as a plain digest-only drift.
+// recorded as a plain digest-only drift. Both svc.CurrentImageID and the
+// target's ConfigDigest must be non-empty here, otherwise
+// matchVersionByDigest's configDigest=="" early-return fires before
+// d.resolver.ListTags is ever called and tagsErr goes unconsulted (see
+// task-3-review.md: this test used to genuinely exercise the ListTags-failure
+// path under the pre-refactor reverseVersions, then silently stopped doing so
+// once matchVersionByDigest gained the config-digest empty-guard).
 func TestDetectFloatingReverseLookupNonFatal(t *testing.T) {
 	db := newDB(t)
 	svc := seedSvc(t, db, "docker.io/garethgeorge/backrest:latest", "sha256:v1130", false)
+	svc.CurrentImageID = "sha256:cfg-v1130" // non-empty so the "from" match reaches ListTags
 	r := fakeResolver{
-		img:     registry.RemoteImage{Digest: "sha256:v1141", PlatformDigest: "sha256:v1141"},
+		img:     registry.RemoteImage{Digest: "sha256:v1141", PlatformDigest: "sha256:v1141", ConfigDigest: "sha256:cfg-v1141"},
 		tagsErr: errors.New("list tags: boom"),
 	}
 	u, err := newDetector(db, r).Detect(context.Background(), svc)
@@ -777,26 +793,28 @@ func TestDetectFloatingReverseLookupNonFatal(t *testing.T) {
 	}
 }
 
-// TestDetectReverseLookupUsesTagCache proves the permanent tag->digest cache
-// spares a re-HEAD: a pre-cached version tag is matched from the cache (no Head
-// call), while an uncached tag is HEADed once and then cached.
+// TestDetectReverseLookupUsesTagCache proves the permanent tag->config-digest
+// cache spares a re-lookup: a pre-cached version tag is matched from the cache
+// (no ConfigDigest call), while an uncached tag is looked up once and then
+// cached.
 func TestDetectReverseLookupUsesTagCache(t *testing.T) {
 	db := newDB(t)
 	const repo = "docker.io/garethgeorge/backrest"
-	// Pre-cache the running release's digest so its HEAD is unnecessary.
-	if err := store.NewTagDigests(db).Put(repo, "v1.13.0", "sha256:v1130"); err != nil {
+	// Pre-cache the running release's config digest so its lookup is unnecessary.
+	if err := store.NewTagDigests(db).Put(repo, "v1.13.0", "sha256:cfg-v1130"); err != nil {
 		t.Fatal(err)
 	}
 	svc := seedSvc(t, db, repo+":latest", "sha256:v1130", false)
+	svc.CurrentImageID = "sha256:cfg-v1130" // running container's config digest
 	seen := map[string]int{}
 	r := fakeResolver{
-		img:  registry.RemoteImage{Digest: "sha256:v1141", PlatformDigest: "sha256:v1141"},
+		img:  registry.RemoteImage{Digest: "sha256:v1141", PlatformDigest: "sha256:v1141", ConfigDigest: "sha256:cfg-v1141"},
 		tags: []string{"v1.13.0", "v1.14.0", "v1.14.1", "latest"},
-		head: map[string]string{
-			repo + ":v1.14.0": "sha256:v1140",
-			repo + ":v1.14.1": "sha256:v1141",
+		configByRef: map[string]string{
+			repo + ":v1.14.0": "sha256:cfg-v1140",
+			repo + ":v1.14.1": "sha256:cfg-v1141",
 		},
-		headSeen: seen,
+		configSeen: seen,
 	}
 	u, err := newDetector(db, r).Detect(context.Background(), svc)
 	if err != nil {
@@ -805,16 +823,84 @@ func TestDetectReverseLookupUsesTagCache(t *testing.T) {
 	if u == nil || u.FromVersion != "v1.13.0" || u.ToVersion != "v1.14.1" {
 		t.Fatalf("versions = %+v, want v1.13.0 -> v1.14.1", u)
 	}
-	// The cached tag must not have been HEADed; the uncached target tag must.
+	// The cached tag must not have been looked up; the uncached target tag must.
 	if n := seen[repo+":v1.13.0"]; n != 0 {
-		t.Fatalf("v1.13.0 HEAD count = %d, want 0 (served from cache)", n)
+		t.Fatalf("v1.13.0 ConfigDigest count = %d, want 0 (served from cache)", n)
 	}
 	if n := seen[repo+":v1.14.1"]; n != 1 {
-		t.Fatalf("v1.14.1 HEAD count = %d, want 1", n)
+		t.Fatalf("v1.14.1 ConfigDigest count = %d, want 1", n)
 	}
-	// The HEAD result must have been written back to the cache.
-	if dg, ok, err := store.NewTagDigests(db).Get(repo, "v1.14.1"); err != nil || !ok || dg != "sha256:v1141" {
-		t.Fatalf("cache after Detect: dg=%q ok=%v err=%v, want sha256:v1141", dg, ok, err)
+	// The lookup result must have been written back to the cache.
+	if dg, ok, err := store.NewTagDigests(db).Get(repo, "v1.14.1"); err != nil || !ok || dg != "sha256:cfg-v1141" {
+		t.Fatalf("cache after Detect: dg=%q ok=%v err=%v, want sha256:cfg-v1141", dg, ok, err)
+	}
+}
+
+// TestDetectFloatingTagNamesVersionByConfigDigestOverBogusLabel is the reported
+// bug: technitium/dns-server:latest labels org.opencontainers.image.version as
+// the base-OS version ("24.04") while shipping app version 15.x, and multi-arch
+// manifest-list digests differ per tag even for the same platform image (so a
+// list-digest match can never work here). Matching on the PLATFORM CONFIG
+// digest instead finds the real repo tag and must win over the bogus label.
+func TestDetectFloatingTagNamesVersionByConfigDigestOverBogusLabel(t *testing.T) {
+	db := newDB(t)
+
+	const (
+		runImageID = "sha256:cfg-1520" // running container's image id (config digest)
+		runList    = "sha256:list-old" // running RepoDigest (manifest-list)
+		newList    = "sha256:list-new" // remote latest served (manifest-list) digest
+		cfg1540    = "sha256:cfg-1540" // config digest shared by latest and 15.4.0
+	)
+
+	// Seed a :latest service whose running image id is 15.2.0's config digest.
+	pid, err := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := store.NewServices(db).Upsert(store.Service{
+		ProjectID: pid, Name: "dns", ImageRef: "technitium/dns-server:latest",
+		CurrentDigest: runList, CurrentImageID: runImageID, State: "running",
+		ImageVersion: "24.04", // the bogus OCI label captured at discovery
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := store.NewServices(db).Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r := fakeResolver{
+		// Resolving :latest returns the new served digest + the bogus label +
+		// latest's config digest (== 15.4.0's config digest).
+		img: registry.RemoteImage{
+			Digest: newList, PlatformDigest: newList, ConfigDigest: cfg1540,
+			Labels: map[string]string{"org.opencontainers.image.version": "24.04"},
+		},
+		tags: []string{"latest", "15.4.0", "15.3.0", "15.2.0"},
+		// Per-tag config digests for the reverse scan.
+		configByRef: map[string]string{
+			"technitium/dns-server:15.4.0": cfg1540,      // matches target -> "to" = 15.4.0
+			"technitium/dns-server:15.3.0": "sha256:cfg-1530",
+			"technitium/dns-server:15.2.0": runImageID, // matches running -> "from" = 15.2.0
+		},
+	}
+
+	upd, err := newDetector(db, r).Detect(context.Background(), svc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upd == nil {
+		t.Fatal("expected an available update (list digest drifted), got nil")
+	}
+	if upd.ToVersion != "15.4.0" {
+		t.Fatalf("ToVersion = %q, want 15.4.0 (config-digest match must beat the bogus 24.04 label)", upd.ToVersion)
+	}
+	if upd.FromVersion != "15.2.0" {
+		t.Fatalf("FromVersion = %q, want 15.2.0", upd.FromVersion)
+	}
+	if upd.Severity != "minor" {
+		t.Fatalf("Severity = %q, want minor (15.2.0 -> 15.4.0)", upd.Severity)
 	}
 }
 
@@ -855,5 +941,148 @@ func TestDetectSplitRef(t *testing.T) {
 		if repo != c.repo || tag != c.tag {
 			t.Errorf("SplitRef(%q) = (%q, %q), want (%q, %q)", c.ref, repo, tag, c.repo, c.tag)
 		}
+	}
+}
+
+// tagListCountingResolver counts ListTags calls to assert the negative cache
+// prevents a re-scan on a later detect for the same digest. Named distinctly
+// from the existing countingResolver (which counts Resolve calls for the cache
+// TTL test) to avoid a duplicate type declaration in this package.
+type tagListCountingResolver struct {
+	fakeResolver
+	listCalls *int
+}
+
+func (c tagListCountingResolver) ListTags(ctx context.Context, repo string) ([]string, error) {
+	*c.listCalls++
+	return c.fakeResolver.ListTags(ctx, repo)
+}
+
+// An up-to-date floating service whose digest matches no repo tag and has no
+// usable label is marked version_resolved so the next cycle does not re-scan.
+func TestResolveCurrentVersionNegativeCache(t *testing.T) {
+	db := newDB(t)
+	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
+	id, err := store.NewServices(db).Upsert(store.Service{
+		ProjectID: pid, Name: "app", ImageRef: "acme/app:latest",
+		CurrentDigest: "sha256:list", CurrentImageID: "sha256:cfg-head", State: "running",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, _ := store.NewServices(db).Get(id)
+
+	listCalls := 0
+	r := tagListCountingResolver{
+		fakeResolver: fakeResolver{
+			img:  registry.RemoteImage{Digest: "sha256:list", PlatformDigest: "sha256:list", ConfigDigest: "sha256:cfg-head"},
+			tags: []string{"latest", "1.0.0"},
+			configByRef: map[string]string{
+				"acme/app:1.0.0": "sha256:cfg-other", // no match for the running config
+			},
+		},
+		listCalls: &listCalls,
+	}
+
+	if _, err := newDetector(db, r).Detect(context.Background(), svc); err != nil {
+		t.Fatal(err)
+	}
+	img, err := store.NewImages(db).GetByDigest("acme/app", "sha256:list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !img.VersionResolved {
+		t.Fatal("VersionResolved = false after a conclusive no-match, want true")
+	}
+
+	// Force the remote-state cache row stale so the second Detect takes the
+	// full resolve path (through resolveCurrentVersion) rather than a cheap
+	// digest-only cache hit; the cache-hit path (step 1) returns before
+	// resolveCurrentVersion ever runs, which would make the assertion below
+	// pass without actually exercising the version_resolved negative cache.
+	stale := time.Now().UTC().Add(-2 * time.Minute)
+	if err := store.NewRemoteStates(db).Upsert(store.RemoteState{
+		Repo: "acme/app", Tag: "latest", RemoteDigest: "sha256:list",
+		Status: "ok", ResolvedAt: &stale,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second detect (same digest) must not re-run the tag list.
+	first := listCalls
+	if _, err := newDetector(db, r).Detect(context.Background(), svc); err != nil {
+		t.Fatal(err)
+	}
+	if listCalls != first {
+		t.Fatalf("ListTags called again (%d -> %d); negative cache did not short-circuit", first, listCalls)
+	}
+}
+
+// TestResolveCurrentVersionInconclusiveScanNotPersisted is the mirror image of
+// TestResolveCurrentVersionNegativeCache: it drives matchVersionByDigest to
+// conclusive=false (via a rate-limited per-tag ConfigDigest lookup, distinct
+// from TestDetectFloatingReverseLookupNonFatal's ListTags-failure trigger) and
+// proves resolveCurrentVersion's `if tagName == "" && !conclusive { return }`
+// guard holds: a transient abort must NOT set version_resolved, or a
+// rate-limit would permanently poison the negative cache and the image would
+// never get a real version name once the registry recovers.
+func TestResolveCurrentVersionInconclusiveScanNotPersisted(t *testing.T) {
+	db := newDB(t)
+	svc := seedSvc(t, db, "acme/floaty:latest", "sha256:list3", false)
+	svc.CurrentImageID = "sha256:cfg-head3" // non-empty: skip the configDigest=="" early-return
+
+	seen := map[string]int{}
+	r := fakeResolver{
+		// latest resolves to the SAME digest the container runs (up to date),
+		// so Detect takes the resolveCurrentVersion path (step 4), not the
+		// drift/record path.
+		img:  registry.RemoteImage{Digest: "sha256:list3", PlatformDigest: "sha256:list3"},
+		tags: []string{"1.0.0"},
+		// Every per-tag ConfigDigest call is rate-limited, aborting the loop on
+		// the first candidate (matchVersionByDigest's IsRateLimited branch).
+		headErr:    &transport.Error{StatusCode: 429},
+		configSeen: seen,
+	}
+	det := newDetector(db, r)
+
+	if _, err := det.Detect(context.Background(), svc); err != nil {
+		t.Fatalf("rate-limited reverse scan must be non-fatal, got %v", err)
+	}
+	img, err := store.NewImages(db).GetByDigest("acme/floaty", "sha256:list3")
+	if err != nil {
+		t.Fatalf("image row: %v", err)
+	}
+	if img.VersionResolved {
+		t.Fatal("VersionResolved = true after an inconclusive (rate-limited) scan, want false (must not poison the negative cache)")
+	}
+	if n := seen["acme/floaty:1.0.0"]; n != 1 {
+		t.Fatalf("ConfigDigest calls = %d, want 1 (loop aborts on first rate-limited candidate)", n)
+	}
+
+	// Force the remote-state cache row stale so a second Detect takes the full
+	// resolve path again rather than a cheap digest-only cache hit (which
+	// never calls resolveCurrentVersion at all).
+	stale := time.Now().UTC().Add(-2 * time.Minute)
+	if err := store.NewRemoteStates(db).Upsert(store.RemoteState{
+		Repo: "acme/floaty", Tag: "latest", RemoteDigest: "sha256:list3",
+		Status: "ok", ResolvedAt: &stale,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second detect: since VersionResolved is still false, the scan must
+	// retry (not be short-circuited by the "already attempted" guard).
+	if _, err := det.Detect(context.Background(), svc); err != nil {
+		t.Fatalf("second detect: rate-limited reverse scan must be non-fatal, got %v", err)
+	}
+	if n := seen["acme/floaty:1.0.0"]; n != 2 {
+		t.Fatalf("ConfigDigest calls after 2nd detect = %d, want 2 (inconclusive scan must retry, not be skipped)", n)
+	}
+	img, err = store.NewImages(db).GetByDigest("acme/floaty", "sha256:list3")
+	if err != nil {
+		t.Fatalf("image row after 2nd detect: %v", err)
+	}
+	if img.VersionResolved {
+		t.Fatal("VersionResolved = true after a second inconclusive scan, want false (still not poisoned)")
 	}
 }

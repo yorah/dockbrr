@@ -172,3 +172,38 @@ func TestRemoteStatesAll(t *testing.T) {
 		t.Errorf("missing nginx state: %+v", all)
 	}
 }
+
+func TestSetResolvedVersionMarksVersionResolved(t *testing.T) {
+	db := openImagesStore(t)
+	images := store.NewImages(db)
+
+	if _, err := images.Upsert(store.Image{
+		Repo: "technitium/dns-server", Digest: "sha256:list", Tag: "latest",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Before resolution: not marked.
+	img, err := images.GetByDigest("technitium/dns-server", "sha256:list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if img.VersionResolved {
+		t.Fatal("VersionResolved = true before SetResolvedVersion, want false")
+	}
+
+	// Negative cache: resolve to empty still marks it resolved.
+	if err := images.SetResolvedVersion("technitium/dns-server", "sha256:list", ""); err != nil {
+		t.Fatal(err)
+	}
+	img, err = images.GetByDigest("technitium/dns-server", "sha256:list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !img.VersionResolved {
+		t.Fatal("VersionResolved = false after SetResolvedVersion, want true")
+	}
+	if img.ResolvedVersion != "" {
+		t.Fatalf("ResolvedVersion = %q, want empty", img.ResolvedVersion)
+	}
+}

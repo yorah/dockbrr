@@ -30,6 +30,10 @@ type Image struct {
 	// digest for a floating tag (latest) that carries no semver. Empty until
 	// detection resolves it; owned by SetResolvedVersion, never by Upsert.
 	ResolvedVersion string
+	// VersionResolved is true once detection has attempted to name this image's
+	// floating-tag version (a match, a label fallback, or a conclusive no-match).
+	// It gates re-scanning so an unnameable digest is not re-HEADed every cycle.
+	VersionResolved bool
 }
 
 // Images is the repository for the images table.
@@ -75,13 +79,13 @@ func (i *Images) GetByDigest(repo, digest string) (Image, error) {
 	)
 	err := i.db.QueryRow(
 		`SELECT id, repo, tag, digest, media_type, os, arch, size, built_at,
-		        labels, source_url, revision, resolved_version
+		        labels, source_url, revision, resolved_version, version_resolved
 		   FROM images WHERE repo=? AND digest=?`,
 		repo, digest,
 	).Scan(
 		&img.ID, &img.Repo, &img.Tag, &img.Digest, &img.MediaType, &img.OS,
 		&img.Arch, &img.Size, &builtAt, &img.Labels, &img.SourceURL, &img.Revision,
-		&img.ResolvedVersion,
+		&img.ResolvedVersion, &img.VersionResolved,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Image{}, ErrImageNotFound
@@ -97,12 +101,15 @@ func (i *Images) GetByDigest(repo, digest string) (Image, error) {
 }
 
 // SetResolvedVersion records the reverse-looked release version for (repo,
-// digest). A no-op when no image row matches (best effort; the row is written
-// by Upsert first). Owns the resolved_version column so Upsert can leave it
-// untouched and never clobber a resolved value on a metadata refresh.
+// digest) and marks the image as version-resolved (preventing re-scan next
+// cycle). An empty version is a valid cache entry (negative cache = conclusive
+// no-match). A no-op when no image row matches (best effort; the row is written
+// by Upsert first). Owns the resolved_version and version_resolved columns so
+// Upsert can leave them untouched and never clobber a resolved value on a
+// metadata refresh.
 func (i *Images) SetResolvedVersion(repo, digest, version string) error {
 	_, err := i.db.Exec(
-		`UPDATE images SET resolved_version=? WHERE repo=? AND digest=?`,
+		`UPDATE images SET resolved_version=?, version_resolved=1 WHERE repo=? AND digest=?`,
 		version, repo, digest,
 	)
 	return err

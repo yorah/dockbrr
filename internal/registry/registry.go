@@ -38,6 +38,7 @@ type RemoteImage struct {
 	Ref            string
 	Digest         string
 	PlatformDigest string
+	ConfigDigest   string
 	MediaType      string
 	Labels         map[string]string
 	BuiltAt        time.Time
@@ -92,6 +93,9 @@ func (r *Resolver) Resolve(ctx context.Context, ref string, plat Platform) (Remo
 	if h, err := img.Digest(); err == nil {
 		out.PlatformDigest = h.String()
 	}
+	if cn, err := img.ConfigName(); err == nil {
+		out.ConfigDigest = cn.String()
+	}
 	// Labels are best-effort by design: a config-fetch failure is diagnosable
 	// but does not hard-fail Resolve (digest compare still works).
 	if cf, err := img.ConfigFile(); err == nil && cf != nil {
@@ -106,6 +110,32 @@ func (r *Resolver) Resolve(ctx context.Context, ref string, plat Platform) (Remo
 		out.PlatformDigest = out.Digest
 	}
 	return out, nil
+}
+
+// ConfigDigest resolves ref to its platform image's config digest (the Docker
+// image ID) — the stable per-platform image identity used by the detector's
+// version reverse-lookup. It reads the platform manifest but not the config
+// blob, so it is cheaper than Resolve. Anonymous-first with the same
+// credential-retry-on-401 behavior.
+func (r *Resolver) ConfigDigest(ctx context.Context, ref string, plat Platform) (string, error) {
+	parsed, err := name.ParseReference(ref)
+	if err != nil {
+		return "", fmt.Errorf("registry: parse ref %q: %w", ref, err)
+	}
+	platform := v1.Platform{OS: plat.OS, Architecture: plat.Arch}
+	desc, err := r.get(ctx, parsed, platform)
+	if err != nil {
+		return "", err
+	}
+	img, err := desc.Image()
+	if err != nil {
+		return "", fmt.Errorf("registry: resolve image %q: %w", ref, err)
+	}
+	cn, err := img.ConfigName()
+	if err != nil {
+		return "", fmt.Errorf("registry: config name %q: %w", ref, err)
+	}
+	return cn.String(), nil
 }
 
 // get fetches the descriptor anonymously, retrying with stored credentials on
