@@ -139,6 +139,58 @@ describe("useEventStream", () => {
     }
   });
 
+  test("self-heals a dropped scan_finished by polling GET /api/scan while running", async () => {
+    __setEventSourceFactory((url) => new FakeES(url) as unknown as EventSource);
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ running: false, done: 0, total: 0 }), {
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const { W } = wrapper();
+      renderHook(() => useEventStream(), { wrapper: W });
+      const scanRun = renderHook(() => useScanRun());
+
+      // A scan_progress arrives (running=true) but the matching scan_finished
+      // is dropped by the best-effort bus, so the store would otherwise stay
+      // stuck running=true forever.
+      act(() => FakeES.last!.emit(JSON.stringify({ type: "scan_progress", done: 1, total: 4 })));
+      expect(scanRun.result.current.running).toBe(true);
+
+      // The periodic resync polls the authoritative snapshot and clears it.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/api/scan"), expect.anything());
+      expect(scanRun.result.current.running).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  test("does not poll GET /api/scan while idle", () => {
+    __setEventSourceFactory((url) => new FakeES(url) as unknown as EventSource);
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ running: false, done: 0, total: 0 }), {
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const { W } = wrapper();
+      renderHook(() => useEventStream(), { wrapper: W });
+      act(() => { vi.advanceTimersByTime(30000); });
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+
   test("ignores malformed frames", () => {
     __setEventSourceFactory((url) => new FakeES(url) as unknown as EventSource);
     const { W, invalidated } = wrapper();

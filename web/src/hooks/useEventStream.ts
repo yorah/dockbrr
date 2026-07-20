@@ -4,7 +4,15 @@ import { apiFetch } from "@/api/client";
 import { keys } from "@/api/keys";
 import type { ScanRun } from "@/api/types";
 import { clearJobBusy } from "@/hooks/useBusyServices";
-import { setScanRun } from "@/hooks/useScanRun";
+import { setScanRun, useScanRun } from "@/hooks/useScanRun";
+
+// Authoritative resync poll interval while a scan-run is in progress. The SSE
+// bus is best-effort (drops frames on buffer overflow), so a dropped
+// scan_finished can otherwise strand every check button disabled until a full
+// page reload. Polling GET /api/scan is server-authoritative, so it can never
+// falsely clear an in-progress scan, only confirm what the server already
+// knows.
+const SCAN_RUN_POLL_MS = 5000;
 
 type Factory = (url: string) => EventSource;
 let factory: Factory | null = null;
@@ -28,6 +36,19 @@ const RECONNECT_MAX_MS = 30000;
  */
 export function useEventStream(enabled = true) {
   const qc = useQueryClient();
+  const { running } = useScanRun();
+
+  // Self-heal: while running, periodically confirm against the authoritative
+  // snapshot in case a scan_finished frame never arrived. Stops as soon as
+  // running flips false, whether from that resync or a real scan_finished.
+  useEffect(() => {
+    if (!enabled || !running) return;
+    const id = setInterval(() => {
+      void apiFetch<ScanRun>("/api/scan").then(setScanRun).catch(() => {});
+    }, SCAN_RUN_POLL_MS);
+    return () => clearInterval(id);
+  }, [enabled, running]);
+
   useEffect(() => {
     if (!enabled) return;
     let es: EventSource | null = null;
