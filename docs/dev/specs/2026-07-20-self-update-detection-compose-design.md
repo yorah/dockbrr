@@ -129,23 +129,26 @@ given update targets dockbrr itself without first calling apply. Add `is_self` (
 update list payload (`handleListUpdates`, `updates.go:29`), computed from `serviceIsSelf`.
 `web/src/api/types.ts` gains `is_self` on the update type.
 
-**Pre-click confirmation dialog.** Two trigger points share one dialog component:
+**Pre-click confirmation.** The repo already confirms applies with `window.confirm`
+(`DashboardTable.tsx`, `BulkActions.tsx`); the self-update case follows the same pattern
+rather than introducing a new modal component. Every apply trigger that can hit dockbrr's
+own update swaps in a self-update-specific confirm message when `update.is_self`:
 
-- The per-project/service **Apply** button (`ApplyPanel.tsx`) when the update's `is_self` is
-  true.
-- The sidebar **Update now** button (`UpdateNotice.tsx`) — always a self-update by nature.
+- `DashboardTable` row Apply — self copy replaces the "recreates the container" copy.
+- `ReviewDrawer` apply — currently unconfirmed; gains the self confirm when `is_self`.
+- `BulkActions` — when the pending set includes a self update, the confirm text additionally
+  warns dockbrr itself will restart.
+- Sidebar `UpdateNotice` **Update now** — always a self-update; gains a confirm (none today).
 
-Dialog copy (plain, states the mechanism and the consequence):
+Confirm copy (plain, states the mechanism and the consequence):
 
-> **Update dockbrr itself?**
-> This updates dockbrr using its built-in self-update: it pulls the new image and hands the
-> container swap to a short-lived helper. dockbrr will restart and this page will briefly
-> disconnect, then reconnect on the new version.
-> [Cancel] [Update dockbrr]
+> Update dockbrr itself? dockbrr will pull the new image and hand the container swap to a
+> short-lived helper, then restart. This page will briefly disconnect and reconnect on the
+> new version. Continue?
 
-Confirm -> the existing self-update call (`POST /api/updates/self/apply`, or the routed
-`handleApply` for the ApplyPanel path). Cancel -> nothing enqueued. Non-self applies are
-unaffected: no dialog, current behavior.
+Confirm -> the existing apply call (`handleApply` routes a self update to `self_update`) or,
+for the sidebar, `POST /api/updates/self/apply`. Cancel -> nothing enqueued. Non-self applies
+keep their current confirm copy and behavior.
 
 **Job-log clarity.** The `self_update` job's first emitted line states plainly it is a
 self-update image swap driven by a detached helper, distinct from a normal compose apply
@@ -222,8 +225,8 @@ Web (vitest):
 
 - `UpdateNotice`: dismiss hides; a `dockbrr:dismiss-changed` clear re-shows without remount.
 - `useCheckForUpdates`: success clears the dismiss key and dispatches the event.
-- Confirmation dialog: shown only when `is_self`; confirm triggers the mutation, cancel does
-  not.
+- Self confirm: `window.confirm` mocked; the self-update message is used only when
+  `is_self`; confirm triggers the mutation, cancel does not.
 
 ## Safety invariants (CLAUDE.md)
 
