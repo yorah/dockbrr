@@ -3,6 +3,7 @@ package job
 import (
 	"context"
 	"os"
+	"regexp"
 	"strings"
 
 	"dockbrr/internal/logger"
@@ -139,8 +140,9 @@ func (d *Dispatcher) targetsSelf(job store.Job) bool {
 	}
 	for _, s := range svcs {
 		for _, cid := range s.ContainerIDs {
-			// Stored ids may be full 64-char or short; selfID is the 12-char
-			// short id. Prefix-match either way round.
+			// Stored ids may be full 64-char or short; selfID may be either
+			// too (64-char from mountinfo/cgroup, 12-char from hostname).
+			// Prefix-match either way round.
 			if strings.HasPrefix(cid, d.selfID) || strings.HasPrefix(d.selfID, cid) {
 				return true
 			}
@@ -149,22 +151,80 @@ func (d *Dispatcher) targetsSelf(job store.Job) bool {
 	return false
 }
 
-// SelfContainerID returns dockbrr's own container id when running inside a
-// container, or "" on a host install (guard disabled). Docker sets a
-// container's hostname to its short id (12 hex chars) unless the user
-// overrides it; a hostname that doesn't look like a short id yields "" rather
-// than risking false matches against container ids.
-func SelfContainerID() string {
-	h, err := os.Hostname()
-	if err != nil || len(h) != 12 {
+// containerIDRe matches a full 64-hex Docker container id.
+var containerIDRe = regexp.MustCompile(`[0-9a-f]{64}`)
+
+// parseContainerIDFromMountinfo extracts dockbrr's container id from
+// /proc/self/mountinfo. Docker bind-mounts /etc/hostname, /etc/hosts and
+// /etc/resolv.conf from /var/lib/docker/containers/<id>/, so the id is the
+// 64-hex segment immediately after "/containers/". Overlay layer hashes also
+// appear in mountinfo, so anchoring on "/containers/" avoids matching those.
+func parseContainerIDFromMountinfo(content string) string {
+	const marker = "/containers/"
+	for _, line := range strings.Split(content, "\n") {
+		i := strings.Index(line, marker)
+		if i < 0 {
+			continue
+		}
+		rest := line[i+len(marker):]
+		if id := containerIDRe.FindString(rest); id != "" && strings.HasPrefix(rest, id) {
+			return id
+		}
+	}
+	return ""
+}
+
+// parseContainerIDFromCgroup extracts the id from a cgroup v1 /proc/self/cgroup,
+// whose lines carry ".../docker/<id>" or ".../docker-<id>.scope". Only
+// container-related 64-hex ids appear here, so the first match wins. Returns ""
+// for a host (cgroup v2 root "0::/") where no container id is present.
+func parseContainerIDFromCgroup(content string) string {
+	for _, line := range strings.Split(content, "\n") {
+		if id := containerIDRe.FindString(line); id != "" {
+			return id
+		}
+	}
+	return ""
+}
+
+// parseContainerIDFromHostname returns the hostname when it is Docker's default
+// short container id (exactly 12 hex chars), else "". Under `docker run` the
+// hostname is the short id; under Compose it is the service name, so this is the
+// last-resort probe.
+func parseContainerIDFromHostname(hostname string) string {
+	if len(hostname) != 12 {
 		return ""
 	}
-	for _, c := range h {
+	for _, c := range hostname {
 		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			return ""
 		}
 	}
-	return h
+	return hostname
+}
+
+// SelfContainerID returns dockbrr's own container id when running inside a
+// container, or "" on a host install (guard + self-updater stay disabled).
+// Probes in order of reliability: the containers bind-mount path in
+// /proc/self/mountinfo, then cgroup v1, then the hostname short-id convention.
+// A file that cannot be read is treated as "no match" and falls through.
+func SelfContainerID() string {
+	if b, err := os.ReadFile("/proc/self/mountinfo"); err == nil {
+		if id := parseContainerIDFromMountinfo(string(b)); id != "" {
+			return id
+		}
+	}
+	if b, err := os.ReadFile("/proc/self/cgroup"); err == nil {
+		if id := parseContainerIDFromCgroup(string(b)); id != "" {
+			return id
+		}
+	}
+	if h, err := os.Hostname(); err == nil {
+		if id := parseContainerIDFromHostname(h); id != "" {
+			return id
+		}
+	}
+	return ""
 }
 
 // isStandalone reports whether a job's project is a standalone container. A load
