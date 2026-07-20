@@ -289,3 +289,70 @@ func TestSelfUpdateApplyRequiresCSRF(t *testing.T) {
 		t.Fatalf("code = %d, want 403", rec.Code)
 	}
 }
+
+// TestHandleApplyRoutesSelfToSelfUpdate asserts that applying an update whose
+// service is dockbrr's own container (SelfID prefix-matches one of the
+// service's ContainerIDs) routes to the self_update job instead of a normal
+// apply, since a normal apply would recreate and kill dockbrr mid-job.
+func TestHandleApplyRoutesSelfToSelfUpdate(t *testing.T) {
+	srv, db, tok, csrf := authedServer(t, Deps{})
+	eng := &fakeEngine{}
+	d := mergeDeps(actionDeps(db, eng, &fakeChecker{}), selfUpdateDeps(t, db, ghLatestServer(t, "v9.0.0"), "0.4.2"))
+	d.SelfID = "3f2a1b9c4d5e"
+	srv.deps = mergeDeps(srv.deps, d)
+
+	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
+	sid, _ := store.NewServices(db).Upsert(store.Service{
+		ProjectID: pid, Name: "dockbrr",
+		ContainerIDs: []string{"3f2a1b9c4d5e6f7089abcdef0123456789abcdef0123456789abcdef012345"},
+	})
+	uid, _ := store.NewUpdates(db).Upsert(store.Update{ServiceID: sid, ToDigest: "sha256:new", Status: "available"})
+
+	req := authReq(httptest.NewRequest(http.MethodPost, pathf("/api/updates/%d/apply", uid), nil), tok, csrf)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("apply on self service = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if len(eng.enqueued) != 1 || eng.enqueued[0].Type != "self_update" {
+		t.Fatalf("enqueued = %+v, want one self_update job", eng.enqueued)
+	}
+	var out struct {
+		JobID      int64 `json:"job_id"`
+		SelfUpdate bool  `json:"self_update"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !out.SelfUpdate {
+		t.Fatalf("expected self_update:true in response, body=%s", rec.Body.String())
+	}
+}
+
+// TestHandleApplyNonSelfEnqueuesApply asserts a service whose container id
+// does not prefix-match SelfID still takes the ordinary apply path (202,
+// enqueues "apply"), i.e. the self-route only diverts dockbrr's own service.
+func TestHandleApplyNonSelfEnqueuesApply(t *testing.T) {
+	srv, db, tok, csrf := authedServer(t, Deps{})
+	eng := &fakeEngine{}
+	d := mergeDeps(actionDeps(db, eng, &fakeChecker{}), selfUpdateDeps(t, db, ghLatestServer(t, "v9.0.0"), "0.4.2"))
+	d.SelfID = "3f2a1b9c4d5e"
+	srv.deps = mergeDeps(srv.deps, d)
+
+	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
+	sid, _ := store.NewServices(db).Upsert(store.Service{
+		ProjectID: pid, Name: "app",
+		ContainerIDs: []string{"ffffffffffff0000000000000000000000000000000000000000000000000"},
+	})
+	uid, _ := store.NewUpdates(db).Upsert(store.Update{ServiceID: sid, ToDigest: "sha256:new", Status: "available"})
+
+	req := authReq(httptest.NewRequest(http.MethodPost, pathf("/api/updates/%d/apply", uid), nil), tok, csrf)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("apply on non-self service = %d, want 202, body=%s", rec.Code, rec.Body.String())
+	}
+	if len(eng.enqueued) != 1 || eng.enqueued[0].Type != "apply" {
+		t.Fatalf("enqueued = %+v, want one apply job", eng.enqueued)
+	}
+}

@@ -102,6 +102,23 @@ func (s *Server) handleApply(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusConflict, errors.New("service is gone: its container no longer exists, so it cannot be applied"))
 		return
 	}
+	// Applying an update to dockbrr's own container would recreate (and kill)
+	// dockbrr mid-job, so route to the self_update helper swap instead of a
+	// normal apply. The dispatcher's targetsSelf guard stays as defense in
+	// depth; this check just avoids enqueuing a doomed job in the first place.
+	if s.serviceIsSelf(svc) {
+		id, status, err := s.enqueueSelfUpdate(r.Context())
+		if err != nil {
+			if status == http.StatusInternalServerError {
+				writeInternalError(w, "enqueue self_update", err)
+			} else {
+				writeJSONError(w, status, err)
+			}
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"job_id": id, "self_update": true})
+		return
+	}
 	scope := scopeFromBody(r)
 	pid := svc.ProjectID
 	jobID, err := s.deps.Engine.Enqueue(store.Job{
