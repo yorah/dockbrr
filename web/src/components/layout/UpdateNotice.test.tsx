@@ -6,6 +6,7 @@ import { server } from "@/test/msw";
 import { renderWithClient } from "@/test/utils";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { UpdateNotice, DISMISS_KEY } from "./UpdateNotice";
+import { clearDismissedUpdate } from "@/hooks/useDismissedUpdate";
 
 const available = {
   current: "0.4.2",
@@ -61,6 +62,19 @@ describe("UpdateNotice", () => {
     localStorage.setItem(DISMISS_KEY, "v0.4.9"); // dismissed an older release
     server.use(http.get("/api/updates/self", () => HttpResponse.json(available)));
     renderWithClient(<UpdateNotice collapsed={false} />);
+    expect(await screen.findByText(/update available/i)).toBeInTheDocument();
+  });
+
+  test("an external dismissal clear re-shows the card without a remount", async () => {
+    server.use(http.get("/api/updates/self", () => HttpResponse.json(available)));
+    renderWithClient(<UpdateNotice collapsed={false} />);
+
+    const dismiss = await screen.findByRole("button", { name: /dismiss/i });
+    await userEvent.click(dismiss);
+    expect(screen.queryByText(/update available/i)).not.toBeInTheDocument();
+
+    clearDismissedUpdate();
+
     expect(await screen.findByText(/update available/i)).toBeInTheDocument();
   });
 

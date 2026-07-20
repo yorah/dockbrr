@@ -3,6 +3,7 @@ import { notify } from "@/lib/notify";
 import { apiFetch, ApiError } from "@/api/client";
 import { keys } from "@/api/keys";
 import type { Scope, SelfUpdate } from "@/api/types";
+import { clearDismissedUpdate } from "@/hooks/useDismissedUpdate";
 
 const invalidate = (qc: QueryClient, ...ks: readonly (readonly unknown[])[]) =>
   Promise.all(ks.map((queryKey) => qc.invalidateQueries({ queryKey })));
@@ -203,7 +204,10 @@ export function useCheckForUpdates() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => apiFetch<SelfUpdate>("/api/updates/self?force=true"),
-    onSuccess: (data) => qc.setQueryData(keys.selfUpdate, data),
+    onSuccess: (data) => {
+      qc.setQueryData(keys.selfUpdate, data);
+      clearDismissedUpdate();
+    },
     onError: toastError,
   });
 }
