@@ -337,6 +337,66 @@ test("Apply all excludes a gone service's pending update, even with Show removed
   }
 });
 
+test("row Apply uses the self-update confirm message when the update targets dockbrr itself", async () => {
+  const applied: Array<{ id: string; scope: string }> = [];
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 1,
+          name: "app",
+          kind: "compose",
+          working_dir: "/srv",
+          auto_update_enabled: false,
+          services: [
+            {
+              id: 10,
+              name: "dockbrr-app",
+              image_ref: "ghcr.io/yorah/dockbrr:0.7.0",
+              current_digest: "sha256:a",
+              state: "running",
+              pinned: false,
+              healthcheck: false,
+              auto_update_enabled: null,
+            },
+          ],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () =>
+      HttpResponse.json([
+        {
+          id: 100,
+          service_id: 10,
+          status: "available",
+          tag: "0.8.0",
+          to_digest: "sha256:a2",
+          from_digest: "sha256:a",
+          severity: "minor",
+          is_self: true,
+        },
+      ]),
+    ),
+    http.post("/api/updates/:id/apply", async ({ request, params }) => {
+      const body = (await request.json()) as { scope: string };
+      applied.push({ id: String(params.id), scope: body.scope });
+      return HttpResponse.json({ job_id: Number(params.id) });
+    }),
+  );
+  const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+  try {
+    renderDashboardWithRouter();
+    await expandProject("app");
+    await waitFor(() => expect(screen.getByText("dockbrr-app")).toBeInTheDocument());
+    await userEvent.click(screen.getByRole("button", { name: /apply update to dockbrr-app/i }));
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining("Update dockbrr itself?"));
+    // confirm returned false: the apply must never fire.
+    expect(applied).toHaveLength(0);
+  } finally {
+    confirmSpy.mockRestore();
+  }
+});
+
 function twoServiceProject() {
   return http.get("/api/projects", () =>
     HttpResponse.json([

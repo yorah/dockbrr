@@ -110,7 +110,12 @@ export function ApplyAllButton({
         e.stopPropagation();
         if (pending.length === 0) return;
         const n = pending.length;
-        if (!window.confirm(`Apply ${n} available update${n > 1 ? "s" : ""} ${scopeNoun}? Each affected service is recreated individually.`)) return;
+        const anySelf = pending.some((u) => u.is_self);
+        const base = `Apply ${n} available update${n > 1 ? "s" : ""} ${scopeNoun}? Each affected service is recreated individually.`;
+        const msg = anySelf
+          ? `${base} This includes dockbrr itself, which will restart and briefly disconnect this page.`
+          : base;
+        if (!window.confirm(msg)) return;
         let opened = false;
         for (const u of pending) {
           apply.mutate(

@@ -5,6 +5,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSelfUpdate } from "@/hooks/queries";
 import { useApplySelfUpdate } from "@/hooks/mutations";
+import { SELF_UPDATE_CONFIRM } from "@/lib/selfUpdate";
 
 export const DISMISS_KEY = "dockbrr_dismissed_update";
 
@@ -76,7 +77,9 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
             variant="default"
             size="sm"
             disabled={apply.isPending}
-            onClick={() => apply.mutate()}
+            onClick={() => {
+              if (window.confirm(SELF_UPDATE_CONFIRM)) apply.mutate();
+            }}
           >
             {apply.isPending ? "Updating..." : "Update now"}
           </Button>

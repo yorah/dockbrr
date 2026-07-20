@@ -14,6 +14,7 @@ import { Changelog } from "@/components/Changelog";
 import { CommandPreview } from "@/components/CommandPreview";
 import { useApply, useDismiss, useRestore } from "@/hooks/mutations";
 import { markServiceBusy, useBusyServices } from "@/hooks/useBusyServices";
+import { SELF_UPDATE_CONFIRM } from "@/lib/selfUpdate";
 import type { Project, Service, Update, Scope } from "@/api/types";
 
 export interface ReviewDrawerProps {
@@ -44,6 +45,7 @@ export function ReviewDrawer({ update, service, project, onClose, onApplied }: R
   const isBusy = busyMap.has(service.id);
 
   function handleApply() {
+    if (update.is_self && !window.confirm(SELF_UPDATE_CONFIRM)) return;
     apply.mutate(
       { id: update.id, scope: SCOPE },
       {
