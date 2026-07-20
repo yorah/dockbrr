@@ -91,17 +91,22 @@ unnameable across tags by the same reasoning.
 All version-naming matches compare **config digests**, never index or platform
 manifest digests. Three sources:
 
-1. **Running side (free).** `docker.Container.ImageID` is already collected in
-   `internal/docker/collect.go` but dropped at the discovery boundary. Thread it
-   through: `discovery.Service.ImageID` → new `service.image_id` column → visible
-   to detect. For the technitium container this is the amd64 config digest
-   (`sha256:2a8e6b85…`).
+1. **Running side (free, already plumbed).** `docker.Container.ImageID` is
+   already collected in `internal/docker/collect.go`, threaded through
+   discovery, and persisted as `service.current_image_id`
+   (`store.Service.CurrentImageID`). No new column is needed — detect reads
+   `svc.CurrentImageID`. For the technitium container this is the amd64 config
+   digest (`sha256:2a8e6b85…`).
 2. **Target side (free).** `registry.Resolve` already calls `img.ConfigFile()`.
    Add `RemoteImage.ConfigDigest`, populated from `img.ConfigName()` (reads the
    already-fetched manifest, no extra blob fetch).
-3. **Candidate side (cached).** To name a tag, resolve it to its config digest.
-   Extend the permanent `tag_digests` cache with a `config_digest` column.
-   Exact-semver tags are immutable, so each is fetched once and cached forever.
+3. **Candidate side (cached).** To name a tag, resolve it to its config digest
+   via a new `Resolver.ConfigDigest(ctx, ref, plat)` (index + platform manifest
+   GET, no config blob). The permanent `tag_digest_cache` table already caches an
+   immutable per-tag digest; its only consumer — the old served-digest reverse
+   scan — is being replaced, so its `digest` column is repurposed to hold the
+   config digest. Exact-semver tags are immutable, so each is fetched once and
+   cached forever.
 
 ### Reverse-lookup algorithm
 
@@ -165,9 +170,11 @@ from `24.04`. The changelog resolver continues to key off the target tag.
 Q1 makes reverse-lookup run on every floating-tag detect, so cost control
 matters.
 
-- **Positive cache (candidates).** `tag_digests.config_digest` per `(repo, tag)`.
-  Immutable exact-semver tags ⇒ fetched once, then pure cache hits. Zero
-  candidate network from the second cycle on.
+- **Positive cache (candidates).** The repurposed `tag_digest_cache.digest`
+  column now holds the config digest per `(repo, tag)`. Immutable exact-semver
+  tags ⇒ fetched once, then pure cache hits. Zero candidate network from the
+  second cycle on. Stale served digests from before the upgrade are wiped by the
+  migration so a served digest is never mis-compared as a config digest.
 - **Negative cache (per image).** `resolveCurrentVersion` today persists a
   version only when non-empty (`SetResolvedVersion` skips `""`), so an image
   whose digest matches no tag rescans all 50 candidates **every cycle forever**.
@@ -190,22 +197,28 @@ Steady-state cost per floating service:
 Highest existing migration is `0011` (three duplicate-`0010` files pre-exist; do
 not touch them). Next is `0012`.
 
-- `service.image_id TEXT` — running config digest.
-- `tag_digests.config_digest TEXT` (nullable) — extend the cache. Keep the
-  existing `digest` column intact; it still serves the exact-semver
-  `NewerSemverTag` path. `Get`/`Put` gain a config-digest variant.
-- `image.version_resolved` (boolean/int, default 0) — negative-cache marker for
-  `resolveCurrentVersion`.
+- `DELETE FROM tag_digest_cache;` — the column now holds config digests, not
+  served digests. Wipe pre-upgrade rows so a stale served digest is never
+  compared as a config digest (which would cache a permanent non-match). The
+  table is a pure rebuildable cache, so clearing it is safe.
+- `ALTER TABLE images ADD COLUMN version_resolved BOOLEAN NOT NULL DEFAULT 0;` —
+  negative-cache marker for `resolveCurrentVersion`.
 
-All columns nullable/defaulted; no data migration. Existing rows keep working.
+No `service.image_id` column is added: the running config digest is already
+persisted as `current_image_id`. No `config_digest` column is added: the
+existing `tag_digest_cache.digest` column is repurposed (its former consumer is
+removed). `version_resolved` defaults to 0, so pre-upgrade image rows re-resolve
+once and pick up the correct version.
 
 ## Back-compat
 
-- New columns default cleanly; existing installs upgrade in place.
-- `service.image_id` is empty for services discovered before the upgrade, so the
-  `from` reverse-lookup degrades to label/blank until the next discovery
+- The new `version_resolved` column defaults cleanly; existing installs upgrade
+  in place.
+- `current_image_id` may be empty for services discovered before it was added, so
+  the `from` reverse-lookup degrades to label/blank until the next discovery
   repopulates it. Strictly better than current behavior, not a regression.
-- The served-digest `tag_digests` consumer is untouched (separate column).
+- Wiping `tag_digest_cache` costs one round of re-resolution after upgrade, then
+  the cache refills with config digests and steady-state cost returns to ~0.
 
 ## Testing
 
@@ -216,8 +229,9 @@ All columns nullable/defaulted; no data migration. Existing rows keep working.
   - no-match returns `""` and sets the negative-cache marker.
   - rate-limit aborts cleanly, leaves version blank, no hard failure.
 - **`semver` unit:** unchanged (`semverTagsDesc` reused as-is).
-- **`store`:** `tag_digests` config-digest round-trip; `version_resolved`
-  negative-cache round-trip; migration `0012` applies clean.
+- **`store`:** `version_resolved` set-and-read round-trip via
+  `SetResolvedVersion` + `GetByDigest`; migration `0012` applies clean and clears
+  `tag_digest_cache`.
 - **`registry`:** existing multi-arch resolver tests extended to assert
   `RemoteImage.ConfigDigest` is populated from `ConfigName()`.
 - **Regression fixture (the bug):** mislabeled `image.version = 24.04`, repo tags
