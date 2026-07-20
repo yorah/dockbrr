@@ -405,8 +405,10 @@ func run(args []string, getenv func(string) string) error {
 		}
 	}()
 
-	// Warm the self-update cache off the request path (best-effort).
-	go func() { _, _ = selfUpdateChecker.Check(ctx) }()
+	// Force a fresh self-update check at startup (parallels scan_on_start),
+	// not a TTL-gated maybe-check, so a restart within the TTL still learns of a
+	// new release. Best-effort, off the request path.
+	go func() { _, _ = selfUpdateChecker.CheckFresh(ctx) }()
 
 	// closeDocker runs only after wg.Wait: the supervisor owns dc until then.
 	closeDocker := func() {
