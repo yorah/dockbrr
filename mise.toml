@@ -24,8 +24,22 @@ run = "npm run build"
 [tasks.build]
 description = "Build static dockbrr binary (embeds SPA)"
 depends = ["build-web"]
+# Stamp commit/dirty/date via ldflags instead of Go's auto vcs.* build info:
+# build-web just clobbered the tracked dist/index.html placeholder, so vcs.modified
+# would always read "true". The porcelain check excludes that placeholder, so the
+# dirty flag reflects real uncommitted work. -buildvcs=false drops the now-misleading
+# auto stamp. See internal/version/version.go and internal/httpapi/system.go.
 run = [
-  "CGO_ENABLED=0 go build -o dockbrr ./cmd/dockbrr",
+  """
+  COMMIT=$(git rev-parse HEAD)
+  DIRTY=false
+  if [ -n "$(git status --porcelain --untracked-files=no -- . ':!internal/httpapi/dist/index.html')" ]; then DIRTY=true; fi
+  DATE=$(git show -s --format=%cI HEAD)
+  V=dockbrr/internal/version
+  CGO_ENABLED=0 go build -buildvcs=false \
+    -ldflags "-X $V.Commit=$COMMIT -X $V.CommitDirty=$DIRTY -X $V.BuildDate=$DATE" \
+    -o dockbrr ./cmd/dockbrr
+  """,
   # Restore tracked placeholder clobbered by the vite build.
   "git checkout -- internal/httpapi/dist/index.html",
 ]

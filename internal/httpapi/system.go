@@ -37,10 +37,18 @@ type systemInfoDTO struct {
 	Auth        authInfoDTO   `json:"auth"`
 }
 
-// buildStamps reads the VCS metadata Go embeds automatically when building from
-// a git checkout (no ldflags needed). Absent under `go run` or -buildvcs=false,
-// in which case the zero values travel to the UI, which renders a placeholder dash.
+// buildStamps returns the build metadata shown in Settings → Application.
+//
+// It prefers the link-time -ldflags values (version.Commit/CommitDirty/BuildDate),
+// which both real build paths stamp BEFORE the SPA build clobbers the tracked
+// dist/index.html placeholder, keeping the dirty flag honest. When those are
+// empty (plain `go build` / `go run`), it falls back to the VCS metadata Go
+// embeds automatically from the git checkout. Absent even that (-buildvcs=false),
+// the zero values travel to the UI, which renders a placeholder dash.
 func buildStamps() (commit string, dirty bool, buildDate string) {
+	if version.Commit != "" {
+		return version.Commit, version.CommitDirty == "true", version.BuildDate
+	}
 	bi, ok := debug.ReadBuildInfo()
 	if !ok {
 		return "", false, ""
