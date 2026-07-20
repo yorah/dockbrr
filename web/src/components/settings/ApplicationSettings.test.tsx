@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeQueryClient } from "@/api/queryClient";
 import { keys } from "@/api/keys";
 import { ApplicationSettings } from "@/components/settings/ApplicationSettings";
-import type { SystemInfo } from "@/api/types";
+import type { SystemInfo, SelfUpdate } from "@/api/types";
 
 const FULL: SystemInfo = {
   version: "0.1.0-dev",
@@ -21,10 +21,16 @@ const FULL: SystemInfo = {
   auth: { username: "admin", method: "password" },
 };
 
-function renderPage(info: SystemInfo) {
+const NO_UPDATE: SelfUpdate = { current: "0.1.0-dev", update_available: false, checked_at: "2026-07-13T14:30:00Z" };
+
+function renderPage(info: SystemInfo, self: SelfUpdate = NO_UPDATE) {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => new Response(JSON.stringify(info), { status: 200, headers: { "content-type": "application/json" } })),
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+      const body = url.includes("/api/updates/self") ? self : info;
+      return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    }),
   );
   const client = makeQueryClient();
   return render(
@@ -72,6 +78,28 @@ describe("ApplicationSettings", () => {
     renderPage({ ...FULL, commit: "", build_date: "", started_at: undefined });
     // COMMIT, BUILD DATE and UPTIME all degrade to "-".
     expect(await screen.findAllByText("-")).toHaveLength(3);
+  });
+
+  it("shows 'up to date' status under the version", async () => {
+    renderPage(FULL, { current: "0.1.0-dev", update_available: false, checked_at: "2026-07-13T14:30:00Z" });
+    expect(await screen.findByText(/Up to date/i)).toBeInTheDocument();
+  });
+
+  it("shows an available version when an update exists", async () => {
+    renderPage(FULL, { current: "0.1.0-dev", latest: "0.2.0", update_available: true, checked_at: "2026-07-13T14:30:00Z" });
+    expect(await screen.findByText(/0\.2\.0 available/i)).toBeInTheDocument();
+  });
+
+  it("checks for updates with force=true on click", async () => {
+    renderPage(FULL);
+    const btn = await screen.findByRole("button", { name: /check for updates/i });
+    fireEvent.click(btn);
+    await waitFor(() =>
+      expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+        expect.stringContaining("/api/updates/self?force=true"),
+        expect.anything(),
+      ),
+    );
   });
 
   it("reports an unreachable daemon without a version row", async () => {

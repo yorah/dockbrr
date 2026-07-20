@@ -53,6 +53,39 @@ func TestSelfUpdateEndpoint(t *testing.T) {
 	}
 }
 
+func TestSelfUpdateEndpointForceBypassesCache(t *testing.T) {
+	var hits int
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"tag_name":"v9.0.0","html_url":"https://x/y"}`))
+	}))
+	t.Cleanup(gh.Close)
+
+	srv, db, tok, csrf := authedServer(t, Deps{})
+	srv.deps = mergeDeps(srv.deps, selfUpdateDeps(t, db, gh.URL, "0.4.2"))
+
+	// First cached call warms the cache (1 hit).
+	if rec := authedGet(t, srv, "/api/updates/self", tok, csrf); rec.Code != http.StatusOK {
+		t.Fatalf("warm: want 200, got %d", rec.Code)
+	}
+	// Forced call must refetch despite the fresh cache (2nd hit).
+	rec := authedGet(t, srv, "/api/updates/self?force=true", tok, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("force: want 200, got %d", rec.Code)
+	}
+	if hits != 2 {
+		t.Errorf("force=true must bypass cache; GitHub hits=%d, want 2", hits)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out["latest"] != "v9.0.0" || out["update_available"] != true {
+		t.Errorf("forced verdict: %v", out)
+	}
+}
+
 func TestSelfUpdateEndpointNilDep(t *testing.T) {
 	// Deps without a SelfUpdate checker must degrade to update_available:false,
 	// never panic (mirrors the nil-dep tolerance of other handlers).

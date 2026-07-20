@@ -71,7 +71,22 @@ func (c *Checker) Check(ctx context.Context) (Result, error) {
 	if haveCache && time.Since(checkedAt) < c.ttl {
 		return c.result(tag, url, checkedAt), nil
 	}
+	return c.refresh(ctx, haveCache, tag, url, checkedAt)
+}
 
+// CheckFresh always refetches from GitHub, ignoring the cache TTL. It shares
+// Check's best-effort contract: on a GitHub error it serves a stale cache when
+// one exists (nil error), and only errors when there is nothing to fall back on.
+// Used by the manual "Check for updates" action, which must reflect a
+// brand-new release rather than a verdict cached minutes ago.
+func (c *Checker) CheckFresh(ctx context.Context) (Result, error) {
+	tag, url, checkedAt, haveCache := c.readCache()
+	return c.refresh(ctx, haveCache, tag, url, checkedAt)
+}
+
+// refresh performs the GitHub fetch, cache-write on success, and stale-cache
+// fallback on failure shared by Check and CheckFresh.
+func (c *Checker) refresh(ctx context.Context, haveCache bool, tag, url string, checkedAt time.Time) (Result, error) {
 	fTag, fURL, err := c.fetchLatest(ctx)
 	if err != nil {
 		if haveCache {

@@ -2,7 +2,7 @@ import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-q
 import { notify } from "@/lib/notify";
 import { apiFetch } from "@/api/client";
 import { keys } from "@/api/keys";
-import type { Scope } from "@/api/types";
+import type { Scope, SelfUpdate } from "@/api/types";
 
 const invalidate = (qc: QueryClient, ...ks: readonly (readonly unknown[])[]) =>
   Promise.all(ks.map((queryKey) => qc.invalidateQueries({ queryKey })));
@@ -200,6 +200,18 @@ export function useCreateProject() {
 // the running dockbrr binary/container. The job list (keys.jobs) is
 // invalidated so ApplyPanel/the jobs screen pick up the new job; the browser
 // connection is expected to drop mid-job when the process restarts.
+// useCheckForUpdates forces a fresh GitHub check (bypassing the 6h cache TTL)
+// and writes the verdict into the shared keys.selfUpdate cache, so the sidebar
+// UpdateNotice and the Settings build card both reflect it immediately.
+export function useCheckForUpdates() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch<SelfUpdate>("/api/updates/self?force=true"),
+    onSuccess: (data) => qc.setQueryData(keys.selfUpdate, data),
+    onError: toastError,
+  });
+}
+
 export function useApplySelfUpdate() {
   const qc = useQueryClient();
   return useMutation({
