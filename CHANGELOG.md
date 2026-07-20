@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.7.0](https://github.com/yorah/dockbrr/compare/v0.6.1...v0.7.0) (2026-07-20)
+
+
+### Features
+
+* manual check-for-updates in Application settings ([#49](https://github.com/yorah/dockbrr/issues/49)) ([f0d18ad](https://github.com/yorah/dockbrr/commit/f0d18ad7e66de9cadfd74749c20b74697834ccc2))
+
+
+### Bug Fixes
+
+* **build:** stamp commit/dirty via ldflags, not Go vcs info ([#51](https://github.com/yorah/dockbrr/issues/51)) ([d188b25](https://github.com/yorah/dockbrr/commit/d188b251eead92aa9da60332dbab3e5efc4f6a5c))
+* **changelog:** reach raw CHANGELOG.md fallback when releases API errors ([#48](https://github.com/yorah/dockbrr/issues/48)) ([253c726](https://github.com/yorah/dockbrr/commit/253c72612d8c2c5d4cfdaae6a8e21fff4c0467e9))
+
 ## [0.6.1](https://github.com/yorah/dockbrr/compare/v0.6.0...v0.6.1) (2026-07-20)
 
 
