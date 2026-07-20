@@ -1,7 +1,10 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { apiFetch } from "@/api/client";
 import { keys } from "@/api/keys";
+import type { ScanRun } from "@/api/types";
 import { clearJobBusy } from "@/hooks/useBusyServices";
+import { setScanRun } from "@/hooks/useScanRun";
 
 type Factory = (url: string) => EventSource;
 let factory: Factory | null = null;
@@ -34,7 +37,13 @@ export function useEventStream(enabled = true) {
 
     const handleMessage = (e: MessageEvent) => {
       try {
-        const ev = JSON.parse(e.data as string) as { type: string; service_id?: number; job_id?: number };
+        const ev = JSON.parse(e.data as string) as {
+          type: string;
+          service_id?: number;
+          job_id?: number;
+          done?: number;
+          total?: number;
+        };
         switch (ev.type) {
           case "detected":
             void qc.invalidateQueries({ queryKey: keys.updates });
@@ -70,6 +79,15 @@ export function useEventStream(enabled = true) {
             void qc.invalidateQueries({ queryKey: keys.updates });
             void qc.invalidateQueries({ queryKey: keys.projects });
             break;
+          case "scan_progress":
+            setScanRun({ running: true, done: ev.done ?? 0, total: ev.total ?? 0 });
+            break;
+          case "scan_finished":
+            setScanRun({ running: false, done: 0, total: 0 });
+            void qc.invalidateQueries({ queryKey: keys.updates });
+            void qc.invalidateQueries({ queryKey: keys.projects });
+            void qc.invalidateQueries({ queryKey: keys.status });
+            break;
         }
       } catch { /* ignore malformed frames */ }
     };
@@ -77,7 +95,13 @@ export function useEventStream(enabled = true) {
     const connect = () => {
       if (stopped) return;
       es = makeES("/api/events/stream");
-      es.onopen = () => { attempts = 0; }; // healthy connection → reset backoff
+      es.onopen = () => {
+        attempts = 0; // healthy connection → reset backoff
+        // Authoritative resync: a page mounted mid-scan, or one whose stream
+        // blipped, learns the true running state (dropped progress events
+        // self-heal here).
+        void apiFetch<ScanRun>("/api/scan").then(setScanRun).catch(() => {});
+      };
       es.onmessage = handleMessage;
       es.onerror = () => {
         es?.close();

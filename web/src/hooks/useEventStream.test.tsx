@@ -5,9 +5,12 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { makeQueryClient } from "@/api/queryClient";
 import { keys } from "@/api/keys";
 import { __resetBusyServices, markServiceBusy, useBusyServices } from "@/hooks/useBusyServices";
+import { __resetScanRun, useScanRun } from "@/hooks/useScanRun";
 import { useEventStream, __setEventSourceFactory } from "./useEventStream";
 
 beforeEach(() => __resetBusyServices());
+beforeEach(() => __resetScanRun());
+afterEach(() => __resetScanRun());
 
 class FakeES {
   onmessage: ((e: MessageEvent) => void) | null = null;
@@ -91,6 +94,49 @@ describe("useEventStream", () => {
     expect(invalidated).toContainEqual(keys.status);
     expect(invalidated).toContainEqual(keys.updates);
     expect(invalidated).toContainEqual(keys.projects);
+  });
+
+  test("scan_progress updates the scan-run store, scan_finished clears it and invalidates", () => {
+    __setEventSourceFactory((url) => new FakeES(url) as unknown as EventSource);
+    const { W, invalidated } = wrapper();
+    renderHook(() => useEventStream(), { wrapper: W });
+    const scanRun = renderHook(() => useScanRun());
+
+    act(() => FakeES.last!.emit(JSON.stringify({ type: "scan_progress", done: 3, total: 10 })));
+    expect(scanRun.result.current.running).toBe(true);
+    expect(scanRun.result.current.done).toBe(3);
+    expect(scanRun.result.current.total).toBe(10);
+
+    act(() => FakeES.last!.emit(JSON.stringify({ type: "scan_finished" })));
+    expect(scanRun.result.current.running).toBe(false);
+    expect(scanRun.result.current.done).toBe(0);
+    expect(scanRun.result.current.total).toBe(0);
+    expect(invalidated).toContainEqual(keys.updates);
+    expect(invalidated).toContainEqual(keys.projects);
+    expect(invalidated).toContainEqual(keys.status);
+  });
+
+  test("resyncs the scan-run store from GET /api/scan on connect", async () => {
+    __setEventSourceFactory((url) => new FakeES(url) as unknown as EventSource);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ running: true, done: 1, total: 4 }), {
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    try {
+      const { W } = wrapper();
+      renderHook(() => useEventStream(), { wrapper: W });
+      const scanRun = renderHook(() => useScanRun());
+      act(() => FakeES.last!.onopen?.(new Event("open")));
+      await waitFor(() => expect(scanRun.result.current.running).toBe(true));
+      expect(scanRun.result.current.done).toBe(1);
+      expect(scanRun.result.current.total).toBe(4);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   test("ignores malformed frames", () => {

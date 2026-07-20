@@ -18,6 +18,7 @@ export const handlers = [
       update_available: false,
     })),
   http.get("/api/jobs", () => HttpResponse.json([])),
+  http.get("/api/scan", () => HttpResponse.json({ running: false, done: 0, total: 0 })),
   http.get("/api/status", () =>
     HttpResponse.json({
       last_check_all: "",
