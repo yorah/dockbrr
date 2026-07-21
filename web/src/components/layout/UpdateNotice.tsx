@@ -31,6 +31,10 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
   const [jobId, setJobId] = useState<number | null>(null);
   const job = useJob(jobId ?? 0, jobId !== null);
   const status = job.data?.status;
+  // A terminal status (success/failed/canceled) re-arms the button on its own,
+  // no state reset needed: useJob stops polling once terminal, and a retry
+  // replaces jobId via the mutation's onSuccess below. (Clearing jobId in the
+  // failure effect would be a setState-in-effect the render rules disallow.)
   const applying =
     apply.isPending ||
     (jobId !== null && status !== "success" && status !== "failed" && status !== "canceled");
@@ -42,7 +46,6 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
         ? `Update failed: ${job.data.error}`
         : "Update failed. The new image may not be published yet, try again in a few minutes.",
     );
-    setJobId(null); // clear so the button re-enables for a retry
   }, [status, job.data?.error]);
 
   if (!data?.update_available) return null;
