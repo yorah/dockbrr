@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/yorah/dockbrr/compare/v0.9.0...v0.9.1) (2026-07-21)
+
+
+### Bug Fixes
+
+* **compose:** collapse per-layer pull terminal states in job log ([#57](https://github.com/yorah/dockbrr/issues/57)) ([e503c96](https://github.com/yorah/dockbrr/commit/e503c96a599e418bf6543d81db9f5b629a5a10c6))
+
 ## [0.9.0](https://github.com/yorah/dockbrr/compare/v0.8.0...v0.9.0) (2026-07-21)
 
 
