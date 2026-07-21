@@ -37,9 +37,11 @@ type fakeChangelog struct {
 	text, url string
 	err       error
 	gotLabels map[string]string
+	calls     int
 }
 
 func (f *fakeChangelog) Resolve(_ context.Context, _ store.Update, img registry.RemoteImage) (string, string, error) {
+	f.calls++
 	f.gotLabels = img.Labels
 	return f.text, f.url, f.err
 }
@@ -381,6 +383,84 @@ func TestCheckServiceCurrentRowRateLimited(t *testing.T) {
 	rows, _ := updates.ListLastAppliedByService()
 	if len(rows) != 1 || rows[0].ChangelogStatus != "rate_limited" {
 		t.Fatalf("want single current row marked rate_limited, got %+v", rows)
+	}
+}
+
+// A service that reached a NEW digest out of band (e.g. dockbrr self-updated
+// its own container) must have its stale 'current' baseline replaced, not kept.
+// Regression: HasAnyByService blocked any rewrite, pinning the baseline (and its
+// changelog) to the superseded version forever.
+func TestCheckServiceRefreshesStaleCurrentRowOnNewDigest(t *testing.T) {
+	db := openScanStore(t)
+	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
+	updates := store.NewUpdates(db)
+	// Service now runs sha256:new (v0.10.0); a stale baseline still points at the
+	// old sha256:old (v0.6.0) it was created for before the self-update.
+	sid, _ := store.NewServices(db).Upsert(store.Service{
+		ProjectID: pid, Name: "dockbrr", ImageRef: "ghcr.io/yorah/dockbrr:latest",
+		CurrentDigest: "sha256:new", ImageVersion: "0.10.0",
+	})
+	if _, err := updates.Upsert(store.Update{
+		ServiceID: sid, FromDigest: "sha256:old", ToDigest: "sha256:old",
+		FromVersion: "0.6.0", ToVersion: "0.6.0", Tag: "latest",
+		Severity: "current", Status: "current", ChangelogText: "# 0.6.0 notes",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	det := fakeDetector{upd: nil} // up to date at sha256:new
+	cl := &fakeChangelog{text: "# 0.10.0 notes", url: "https://github.com/yorah/dockbrr/releases/tag/0.10.0"}
+	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil, nil)
+
+	if err := s.CheckService(context.Background(), sid); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := updates.ListLastAppliedByService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("len(rows) = %d, want exactly 1 (stale baseline replaced), got %+v", len(rows), rows)
+	}
+	r := rows[0]
+	if r.Status != "current" || r.ToDigest != "sha256:new" || r.ToVersion != "0.10.0" {
+		t.Fatalf("row = {status:%q to:%q ver:%q}, want current/sha256:new/0.10.0", r.Status, r.ToDigest, r.ToVersion)
+	}
+	if r.ChangelogText != "# 0.10.0 notes" {
+		t.Fatalf("changelog = %q, want the 0.10.0 notes (baseline re-resolved)", r.ChangelogText)
+	}
+	// The old digest's baseline must be gone, not merely shadowed.
+	var stale int
+	_ = db.QueryRow(`SELECT COUNT(*) FROM updates WHERE service_id=? AND to_digest='sha256:old'`, sid).Scan(&stale)
+	if stale != 0 {
+		t.Fatalf("stale current rows = %d, want 0", stale)
+	}
+}
+
+// A baseline already at the running digest is NOT re-resolved on the next
+// up-to-date scan: its changelog is cached, so the changelog source (an API) is
+// not hit again.
+func TestCheckServiceDoesNotReresolveFreshCurrentRow(t *testing.T) {
+	db := openScanStore(t)
+	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
+	sid, _ := store.NewServices(db).Upsert(store.Service{
+		ProjectID: pid, Name: "app", ImageRef: "ghcr.io/acme/web:latest",
+		CurrentDigest: "sha256:cur", ImageVersion: "1.2.3",
+	})
+	updates := store.NewUpdates(db)
+	det := fakeDetector{upd: nil}
+	cl := &fakeChangelog{text: "# notes", url: "https://x"}
+	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil, nil)
+
+	if err := s.CheckService(context.Background(), sid); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CheckService(context.Background(), sid); err != nil {
+		t.Fatal(err)
+	}
+	if cl.calls != 1 {
+		t.Fatalf("changelog resolved %d times, want 1 (fresh baseline must not re-resolve)", cl.calls)
 	}
 }
 
