@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.2](https://github.com/yorah/dockbrr/compare/v0.10.1...v0.10.2) (2026-07-21)
+
+
+### Bug Fixes
+
+* **changelog:** do not let superseded history block the current-version baseline ([#64](https://github.com/yorah/dockbrr/issues/64)) ([1b7949d](https://github.com/yorah/dockbrr/commit/1b7949d1e5704afd9be5cb0a51d019f0eae489a5))
+* **changelog:** show latest release notes for rolling-tag images ([#66](https://github.com/yorah/dockbrr/issues/66)) ([25cfc24](https://github.com/yorah/dockbrr/commit/25cfc247cf047bf17f08818dc87edcbc16058cf5))
+
 ## [0.10.1](https://github.com/yorah/dockbrr/compare/v0.10.0...v0.10.1) (2026-07-21)
 
 
