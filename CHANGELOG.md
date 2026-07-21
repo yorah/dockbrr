@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/yorah/dockbrr/compare/v0.9.1...v0.10.0) (2026-07-21)
+
+
+### Features
+
+* **ui:** explain the project health dot with a tooltip ([#59](https://github.com/yorah/dockbrr/issues/59)) ([5b75cfa](https://github.com/yorah/dockbrr/commit/5b75cfa93ca7336b9bd487cf4e74d9351cfde41d))
+
 ## [0.9.1](https://github.com/yorah/dockbrr/compare/v0.9.0...v0.9.1) (2026-07-21)
 
 
