@@ -209,10 +209,10 @@ func (d *Detector) Detect(ctx context.Context, svc store.Service) (*store.Update
 	// apply still floats the SAME tag; targetTag/ToDigest are untouched.
 	if semverOrEmpty(tag) == "" && ClassifyTag(repo+":"+tag) == TagFloating {
 		toLabel := targetRemote.Labels["org.opencontainers.image.version"]
-		if v, _ := d.matchVersionByDigest(ctx, repo, svc.CurrentImageID, semverTagPref(svc.ImageVersion)); v != "" {
+		if v, _ := d.matchVersionByDigest(ctx, repo, svc.CurrentImageID, semverTagPref(svc.ImageVersion)); v != "" && preferDigestTag(v, fromVer) {
 			fromVer = v
 		}
-		if v, _ := d.matchVersionByDigest(ctx, repo, targetRemote.ConfigDigest, semverTagPref(toLabel)); v != "" {
+		if v, _ := d.matchVersionByDigest(ctx, repo, targetRemote.ConfigDigest, semverTagPref(toLabel)); v != "" && preferDigestTag(v, toVer) {
 			toVer = v
 		}
 	}
@@ -360,6 +360,22 @@ func semverTagPref(label string) string {
 	return ""
 }
 
+// preferDigestTag reports whether a bare, digest-reverse-matched tag should
+// replace the current OCI-label-derived version string. It replaces the label
+// only when the label does not already name the same version: an unparseable
+// label (a base-OS value, a rolling word, or empty) yields the tag; a label whose
+// lenient core differs from the tag's is wrong for this image and yields the tag;
+// a label whose core matches the tag is the same version but potentially more
+// precise (carries "-lsNNN"), so it is kept.
+func preferDigestTag(digestTag, label string) bool {
+	lc, lok := parseCore(StripNamePrefix(label))
+	if !lok {
+		return true // label not a version: use the digest-matched tag
+	}
+	dc, _ := parseCore(digestTag) // digestTag is always bare semver
+	return lc != dc               // differ: correct the label; equal: keep it
+}
+
 // closeStaleUpdates supersedes any still-available update for an up-to-date
 // service. The running image already matches the tracked tag's remote, so no
 // prior drift is actionable; a lingering row would keep the dashboard showing
@@ -425,8 +441,8 @@ func (d *Detector) resolveCurrentVersion(ctx context.Context, repo, tag, digest,
 		return // transient failure; retry next cycle, do not cache a fallback
 	}
 	ver := tagName
-	if ver == "" {
-		ver = label // conclusive no-match: fall back to the label (may be "")
+	if ver == "" || !preferDigestTag(tagName, label) {
+		ver = label // no match, or the label already names this version (keep it)
 	}
 	if err := d.images.SetResolvedVersion(repo, digest, ver); err != nil {
 		logger.Warnf("detect: set resolved version %s@%s: %v", repo, shortDigest(digest), err)

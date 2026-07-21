@@ -9,6 +9,16 @@ Format: `- [ ] [source-tag] short description, why deferred / what it needs`
 
 ## Open
 
+### LSIO tag changelog + version display (branch `feat/changelog-rolling-tag-latest-release`, 2026-07-21, whole-branch review READY TO MERGE)
+
+Changelog now matches LinuxServer.io `<name>-<semver>-lsNNN` release tags (name-prefix strip + core-equality
+fallback), and the version-display reverse-match keeps a suffix-bearing OCI label over a bare digest tag when
+they name the same version. Final review clean; two Minors fixed in-branch (`ParseCore(normVer)` coherence hole;
+name-prefixed `findRelease` test). One genuine defer:
+
+- [ ] [T3-M1] 4+-component versions are excluded from `findRelease`'s core-equality fallback: the `coreComponents(...) <= 3` guard (protecting against `ParseCore` truncating `8.8.0.1`→`[8,8,0]` and false-matching `8.8.0`) also drops the *arr suite's 4-part CalVer (`radarr` `6.3.0.10514-ls311`). NOT a regression (the prior `Count(".") >= 2 → false` rejected them identically), and in practice these images keep their suffixed label and match at the exact tier. Fix needs a component-count-aware core compare (compare full components, not the truncated `[3]int`) so 4-part builds can match by core when only a bare version is available. *arr apps are a marquee LSIO case, so worth doing; not gating.
+- [ ] [T4-cov] The `preferDigestTag` *keep-label* direction (LSIO same-core label retained over bare digest tag) is unit-tested only (`TestPreferDigestTag`); the *override* direction has a `Detect()`-level test (`TestDetectFloatingTagNamesVersionByConfigDigestOverBogusLabel`). Add an integration test for the keep direction if the floating-tag harness makes it cheap.
+
 ### Self-update detection under compose (branch `fix/self-update-detection-compose`, 2026-07-21, whole-branch review READY TO MERGE)
 
 Compose-hostname detection fix + route-apply-on-self-to-self_update + reactive dismissal. All 7

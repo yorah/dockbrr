@@ -111,6 +111,24 @@ func semverTagsDesc(tags []string) []string {
 	return res
 }
 
+// namePrefixRe matches a leading alphanumeric package-name segment followed by
+// "-" and a version core (optionally v-prefixed), e.g. "znc-1.10.2-ls183" ->
+// "1.10.2-ls183". The remainder must begin with an optional "v" then a digit, so
+// it never eats a bare or v-prefixed version or a non-versioned word.
+var namePrefixRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]*-(v?\d.*)$`)
+
+// StripNamePrefix removes a leading "<name>-" package prefix from a tag/version
+// string when one precedes the version core, else returns s unchanged. It is
+// deliberately narrow: only an alphanumeric word directly followed by "-" and a
+// version digit is stripped, so "release-1.2.3" / "znc-1.10.2-ls183" are stripped
+// while "1.2.3", "v1.2.3", "master-omnibus" (no digit) stay as-is.
+func StripNamePrefix(s string) string {
+	if m := namePrefixRe.FindStringSubmatch(strings.TrimSpace(s)); m != nil {
+		return m[1]
+	}
+	return s
+}
+
 // ParseCore extracts the lenient [major, minor, patch] core of a version string
 // (leading "v" dropped, missing components 0, pre-release/build suffix ignored).
 // ok=false when the version is not numeric semver. It is the single source of

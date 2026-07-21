@@ -58,3 +58,21 @@ func TestNewerSemverTag(t *testing.T) {
 		}
 	}
 }
+
+func TestStripNamePrefix(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"znc-1.10.2-ls183", "1.10.2-ls183"},
+		{"release-1.2.3", "1.2.3"},
+		{"radarr-v6.3.0.10514-ls311", "v6.3.0.10514-ls311"},
+		{"1.2.3", "1.2.3"},
+		{"v1.2.3", "v1.2.3"},
+		{"6.3.0.10514-ls311", "6.3.0.10514-ls311"},
+		{"master-omnibus", "master-omnibus"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := detect.StripNamePrefix(c.in); got != c.want {
+			t.Errorf("StripNamePrefix(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

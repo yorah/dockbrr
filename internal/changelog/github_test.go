@@ -197,6 +197,27 @@ func TestGitHubFullVersionDoesNotPrefixMatch(t *testing.T) {
 	}
 }
 
+func TestGitHubLinuxServerNamePrefixedTag(t *testing.T) {
+	// znc releases are tagged "znc-<semver>-lsNNN"; the repo is docker-znc.
+	srv := ghServer(t, map[string][]ghRel{
+		"linuxserver/docker-znc": {
+			{TagName: "znc-1.10.2-ls183", HTMLURL: "https://github.com/linuxserver/docker-znc/releases/tag/znc-1.10.2-ls183", Body: "ls183 notes"},
+			{TagName: "znc-1.10.2-ls182", HTMLURL: "u182", Body: "ls182 notes"},
+		},
+	}, nil, "")
+	s := changelog.NewGitHubSource(srv.Client(), srv.URL, srv.URL, func() string { return "" }, nil, time.Hour)
+	res, err := s.Resolve(context.Background(), ghRangeInput("linuxserver/docker-znc:1.10.2-ls183", "1.10.2-ls181", "1.10.2-ls183"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "ls183 notes") {
+		t.Errorf("Text = %q, want it to contain the ls183 body", res.Text)
+	}
+	if res.URL != "https://github.com/linuxserver/docker-znc/releases/tag/znc-1.10.2-ls183" {
+		t.Errorf("URL = %q, want the ls183 release url", res.URL)
+	}
+}
+
 func TestGitHubTokenSent(t *testing.T) {
 	srv := ghServer(t, map[string][]ghRel{
 		"redis/redis": {{TagName: "7.4.0", HTMLURL: "u", Body: "notes"}},
