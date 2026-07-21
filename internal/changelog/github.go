@@ -225,6 +225,31 @@ func findRelease(rels []ghRelease, want []string, version string) (ghRelease, bo
 	return best, found
 }
 
+// latestStableRelease returns the highest-semver stable release in rels
+// (pre-releases skipped), for rolling-tag images whose version matches no release
+// tag. Mirrors findRelease's prefix-scan / CoreLess ranking: highest version wins,
+// not first-listed, since GitHub orders releases by publish date and a backport can
+// precede the newest release.
+func latestStableRelease(rels []ghRelease) (ghRelease, bool) {
+	var best ghRelease
+	var bestCore [3]int
+	found := false
+	for _, rel := range rels {
+		norm := normalizeTag(rel.TagName)
+		if isPrerelease(norm) {
+			continue
+		}
+		c, ok := detect.ParseCore(norm)
+		if !ok {
+			continue
+		}
+		if !found || detect.CoreLess(bestCore, c) {
+			best, bestCore, found = rel, c, true
+		}
+	}
+	return best, found
+}
+
 // releasesInSpan keeps the stable releases in (fromCore, toCore], ordered by
 // version, highest first. GitHub lists releases by publish date, which is NOT
 // version order: a project maintaining several lines at once (redis backporting
