@@ -351,8 +351,10 @@ func spanLink(owner, name, fromTag, toTag string, reachedFrom bool) string {
 }
 
 // normalizeTag strips the release-tag decorations dockbrr treats as noise
-// ("release-1.31.2", "v1.31.2" -> "1.31.2") so a tag can be parsed as semver.
+// (a leading "<name>-" package prefix, "release-", "v") so a tag can be parsed as
+// semver: "znc-1.10.2-ls183" -> "1.10.2-ls183", "release-1.31.2" -> "1.31.2".
 func normalizeTag(tag string) string {
+	tag = detect.StripNamePrefix(tag)
 	return strings.TrimPrefix(strings.TrimPrefix(tag, "release-"), "v")
 }
 

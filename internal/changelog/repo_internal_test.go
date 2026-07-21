@@ -19,6 +19,21 @@ func TestRepoFromRef(t *testing.T) {
 	}
 }
 
+func TestNormalizeTag(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"znc-1.10.2-ls183", "1.10.2-ls183"},
+		{"release-1.31.2", "1.31.2"},
+		{"v1.31.2", "1.31.2"},
+		{"1.31.2", "1.31.2"},
+		{"6.3.0.10514-ls311", "6.3.0.10514-ls311"},
+	}
+	for _, c := range cases {
+		if got := normalizeTag(c.in); got != c.want {
+			t.Errorf("normalizeTag(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 func TestLatestStableRelease(t *testing.T) {
 	t.Run("picks highest stable, skips prerelease", func(t *testing.T) {
 		rels := []ghRelease{
