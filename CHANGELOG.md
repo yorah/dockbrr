@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.1](https://github.com/yorah/dockbrr/compare/v0.10.0...v0.10.1) (2026-07-21)
+
+
+### Bug Fixes
+
+* **changelog:** refresh the current-version baseline when the image moves ([#62](https://github.com/yorah/dockbrr/issues/62)) ([4549058](https://github.com/yorah/dockbrr/commit/4549058b628bad71e23ee1f2f123887b43458e41))
+* **self-update:** surface job outcome and reload after apply ([#61](https://github.com/yorah/dockbrr/issues/61)) ([8df304e](https://github.com/yorah/dockbrr/commit/8df304eb880dec736e8ef2537cd51ab96095a0f4))
+
 ## [0.10.0](https://github.com/yorah/dockbrr/compare/v0.9.1...v0.10.0) (2026-07-21)
 
 
