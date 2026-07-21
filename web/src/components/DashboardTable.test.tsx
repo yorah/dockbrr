@@ -6,6 +6,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { delay, http, HttpResponse } from "msw";
 import { server } from "@/test/msw";
 import { makeQueryClient } from "@/api/queryClient";
+import { keys } from "@/api/keys";
 import { router } from "@/router";
 import { __resetBusyServices } from "@/hooks/useBusyServices";
 
@@ -13,13 +14,20 @@ import { __resetBusyServices } from "@/hooks/useBusyServices";
 // test leaks into the next and spuriously disables its buttons.
 beforeEach(() => __resetBusyServices());
 
+// Returns the QueryClient alongside the render result: a scan no longer
+// invalidates `projects` itself (SSE's scan_finished does, once the scan-run
+// completes server-side), so tests that need a projects refetch after a scan
+// trigger it explicitly via this client, standing in for that SSE event.
 function renderDashboardWithRouter() {
   const client = makeQueryClient();
-  return render(
-    <QueryClientProvider client={client}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>,
-  );
+  return {
+    client,
+    ...render(
+      <QueryClientProvider client={client}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    ),
+  };
 }
 
 // Top-level projects load collapsed on the dashboard now. Waits for the project
@@ -347,21 +355,21 @@ function twoServiceProject() {
   );
 }
 
-test("project Check all fans out a check for every service in the project", async () => {
-  const checked: string[] = [];
+test("project Check all runs a single scoped scan (POST /api/scan with project_id), not a per-service fan-out", async () => {
+  const scans: unknown[] = [];
   server.use(
     twoServiceProject(),
     http.get("/api/updates", () => HttpResponse.json([])),
-    http.post("/api/services/:id/check", ({ params }) => {
-      checked.push(String(params.id));
-      return HttpResponse.json({ ok: true });
+    http.post("/api/scan", async ({ request }) => {
+      scans.push(await request.json());
+      return HttpResponse.json({ running: true, total: 2 });
     }),
   );
   renderDashboardWithRouter();
   await expandProject("app");
   await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
   await userEvent.click(screen.getByRole("button", { name: /check all services in app/i }));
-  await waitFor(() => expect(new Set(checked)).toEqual(new Set(["10", "11"])));
+  await waitFor(() => expect(scans).toEqual([{ project_id: 1 }]));
 });
 
 test("global Check all runs a full scan; global Apply all applies each available update at service scope", async () => {
@@ -1330,18 +1338,19 @@ test("a manually-expanded project stays expanded across a refetch", async () => 
       return HttpResponse.json([app, db]);
     }),
     http.get("/api/updates", () => HttpResponse.json([])),
-    // Backs the global "Check all services" button: its mutation invalidates
-    // the projects query on success (see useScanAll), the same mechanism the
-    // "global Check all" test above uses to prove a scan ran.
+    // Backs the global "Check all services" button (POST /api/scan). The
+    // projects refetch itself is forced explicitly below (see client.invalidateQueries).
     http.post("/api/scan", () => HttpResponse.json({ status: "checked" })),
   );
-  renderDashboardWithRouter();
+  const { client } = renderDashboardWithRouter();
   await expandProject("app");
   await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
-  // Force a projects refetch (mirror the mechanism used by the "Check all"
-  // tests): the global button is named exactly "Check all services", distinct
-  // from the per-project "Check all services in app" button.
+  // Force a projects refetch: click the global "Check all services" button to
+  // kick off a scan (as a user would), then invalidate `projects` directly to
+  // stand in for the "scan_finished" SSE event that would drive this refetch
+  // in the real app (the test env's EventSource never actually opens).
   await userEvent.click(screen.getByRole("button", { name: /^check all services$/i }));
+  await client.invalidateQueries({ queryKey: keys.projects });
   // The new project's header must appear before asserting on its collapsed
   // state, otherwise a false negative could just mean the refetch hasn't
   // landed yet.
@@ -1421,15 +1430,19 @@ test("a project that disappears and reappears re-collapses at the default", asyn
     http.get("/api/updates", () => HttpResponse.json([])),
     http.post("/api/scan", () => HttpResponse.json({ status: "checked" })),
   );
-  renderDashboardWithRouter();
+  const { client } = renderDashboardWithRouter();
   await expandProject("app");
   await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
   // Refetch #2: "app" disappears from the payload (no filter active, so the
-  // seed effect prunes its id from `seenProjects`).
+  // seed effect prunes its id from `seenProjects`). The click kicks off a scan
+  // as a user would; the invalidation stands in for the "scan_finished" SSE
+  // event that drives the refetch in the real app.
   await userEvent.click(screen.getByRole("button", { name: /^check all services$/i }));
+  await client.invalidateQueries({ queryKey: keys.projects });
   await waitFor(() => expect(screen.queryByRole("button", { name: "app" })).not.toBeInTheDocument());
   // Refetch #3: "app" comes back. It must return COLLAPSED, not expanded.
   await userEvent.click(screen.getByRole("button", { name: /^check all services$/i }));
+  await client.invalidateQueries({ queryKey: keys.projects });
   await waitFor(() => expect(screen.getByRole("button", { name: "app" })).toBeInTheDocument());
   expect(screen.queryByText("web")).not.toBeInTheDocument();
 });

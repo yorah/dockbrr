@@ -17,9 +17,14 @@ var heartbeatInterval = 25 * time.Second
 // payload beyond identifiers: the client refetches the authoritative queries on
 // receipt (events are hints, queries are the source of truth).
 type Event struct {
-	Type      string `json:"type"` // detected|job_finished|reconciled|scanned
+	Type      string `json:"type"` // detected|job_finished|reconciled|scanned|scan_progress|scan_finished
 	ServiceID int64  `json:"service_id,omitempty"`
 	JobID     int64  `json:"job_id,omitempty"`
+	// Done/Total carry scan-run progress. Exception to the payload-free hint
+	// rule: progress is ephemeral with no query to refetch. The authoritative
+	// GET /api/scan snapshot self-heals dropped events on mount/reconnect.
+	Done  int `json:"done,omitempty"`
+	Total int `json:"total,omitempty"`
 }
 
 // Bus fans events out to SSE subscribers. Publish is non-blocking: a slow

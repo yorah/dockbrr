@@ -150,3 +150,8 @@ export interface SystemInfo {
   data_dir: string;
   auth: AuthInfo;
 }
+export interface ScanRun {
+  running: boolean;
+  done: number;
+  total: number;
+}

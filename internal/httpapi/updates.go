@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"time"
@@ -167,24 +166,26 @@ func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "available"})
 }
 
-// handleCheck triggers read-only detection for one service and waits for it.
-// The response means "detection ran", so the client's cache invalidation
-// observes the result. Bounded by a server-side timeout so a hung registry
-// cannot pin the request forever.
+// handleCheck starts a scan-run scoped to a single service. It returns 202
+// immediately (progress + completion arrive over SSE); a scan already in
+// flight returns 409.
 func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 	id, err := pathInt64(r, "id")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, err)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
 	logger.Infof("check: manual check requested (service %d (%s))", id, s.serviceName(id))
-	if err := s.deps.Checker.CheckServiceFresh(ctx, id); err != nil {
+	st, err := s.scan.Start("service", 0, id)
+	if errors.Is(err, ErrScanBusy) {
+		writeJSONError(w, http.StatusConflict, err)
+		return
+	}
+	if err != nil {
 		writeJSONError(w, http.StatusBadGateway, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "checked"})
+	writeJSON(w, http.StatusAccepted, st)
 }
 
 // scopeFromBody reads an optional {"scope":...}; defaults to "service".

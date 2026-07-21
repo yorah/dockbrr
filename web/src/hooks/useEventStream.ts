@@ -1,7 +1,18 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { apiFetch } from "@/api/client";
 import { keys } from "@/api/keys";
+import type { ScanRun } from "@/api/types";
 import { clearJobBusy } from "@/hooks/useBusyServices";
+import { setScanRun, useScanRun } from "@/hooks/useScanRun";
+
+// Authoritative resync poll interval while a scan-run is in progress. The SSE
+// bus is best-effort (drops frames on buffer overflow), so a dropped
+// scan_finished can otherwise strand every check button disabled until a full
+// page reload. Polling GET /api/scan is server-authoritative, so it can never
+// falsely clear an in-progress scan, only confirm what the server already
+// knows.
+const SCAN_RUN_POLL_MS = 5000;
 
 type Factory = (url: string) => EventSource;
 let factory: Factory | null = null;
@@ -25,6 +36,19 @@ const RECONNECT_MAX_MS = 30000;
  */
 export function useEventStream(enabled = true) {
   const qc = useQueryClient();
+  const { running } = useScanRun();
+
+  // Self-heal: while running, periodically confirm against the authoritative
+  // snapshot in case a scan_finished frame never arrived. Stops as soon as
+  // running flips false, whether from that resync or a real scan_finished.
+  useEffect(() => {
+    if (!enabled || !running) return;
+    const id = setInterval(() => {
+      void apiFetch<ScanRun>("/api/scan").then(setScanRun).catch(() => {});
+    }, SCAN_RUN_POLL_MS);
+    return () => clearInterval(id);
+  }, [enabled, running]);
+
   useEffect(() => {
     if (!enabled) return;
     let es: EventSource | null = null;
@@ -34,7 +58,13 @@ export function useEventStream(enabled = true) {
 
     const handleMessage = (e: MessageEvent) => {
       try {
-        const ev = JSON.parse(e.data as string) as { type: string; service_id?: number; job_id?: number };
+        const ev = JSON.parse(e.data as string) as {
+          type: string;
+          service_id?: number;
+          job_id?: number;
+          done?: number;
+          total?: number;
+        };
         switch (ev.type) {
           case "detected":
             void qc.invalidateQueries({ queryKey: keys.updates });
@@ -70,6 +100,15 @@ export function useEventStream(enabled = true) {
             void qc.invalidateQueries({ queryKey: keys.updates });
             void qc.invalidateQueries({ queryKey: keys.projects });
             break;
+          case "scan_progress":
+            setScanRun({ running: true, done: ev.done ?? 0, total: ev.total ?? 0 });
+            break;
+          case "scan_finished":
+            setScanRun({ running: false, done: 0, total: 0 });
+            void qc.invalidateQueries({ queryKey: keys.updates });
+            void qc.invalidateQueries({ queryKey: keys.projects });
+            void qc.invalidateQueries({ queryKey: keys.status });
+            break;
         }
       } catch { /* ignore malformed frames */ }
     };
@@ -77,7 +116,13 @@ export function useEventStream(enabled = true) {
     const connect = () => {
       if (stopped) return;
       es = makeES("/api/events/stream");
-      es.onopen = () => { attempts = 0; }; // healthy connection → reset backoff
+      es.onopen = () => {
+        attempts = 0; // healthy connection → reset backoff
+        // Authoritative resync: a page mounted mid-scan, or one whose stream
+        // blipped, learns the true running state (dropped progress events
+        // self-heal here).
+        void apiFetch<ScanRun>("/api/scan").then(setScanRun).catch(() => {});
+      };
       es.onmessage = handleMessage;
       es.onerror = () => {
         es?.close();

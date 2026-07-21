@@ -27,13 +27,18 @@ type JobService interface {
 
 // Checker triggers read-only detection, either a fresh check of one service
 // (invalidating its detect cache first, so a manual check always does a full
-// re-scan) or a fresh sweep of every service (same cache invalidation,
+// re-scan) or a fresh sweep of a set of services (same cache invalidation,
 // per service). Both endpoints are manual/user-initiated, hence fresh; the
 // scheduler's cache-keeping sweep never comes through the API. *scan.Scanner
 // satisfies it. Detection does not go through the Job Engine (read-only).
 type Checker interface {
 	CheckServiceFresh(ctx context.Context, serviceID int64) error
 	CheckAllFresh(ctx context.Context) error
+	// CheckServicesFresh checks each id fresh, reporting progress via onDone.
+	// reopen lifts the rolled_back auto-apply suppression per service (the
+	// manual "look again" gesture) and must only be true for scoped
+	// (service/project) runs, never for an all-services sweep.
+	CheckServicesFresh(ctx context.Context, ids []int64, reopen bool, onDone func(done, total int)) error
 }
 
 // DockerPinger re-probes daemon liveness on each /api/status request so the
@@ -106,12 +111,14 @@ type Server struct {
 	deps    Deps
 	mux     *chi.Mux
 	limiter *loginLimiter
+	scan    *ScanRunner
 }
 
 // New builds the API server. deps carries the wired repos + engine/checker;
 // pass Deps{} in tests that exercise only /healthz or /api/projects.
 func New(cfg config.Config, db *store.DB, deps Deps) *Server {
 	s := &Server{cfg: cfg, db: db, deps: deps, mux: chi.NewRouter(), limiter: newLoginLimiter(time.Now)}
+	s.scan = NewScanRunner(deps.Checker, deps.Services, deps.Settings, deps.Bus)
 	s.routes()
 	return s
 }
@@ -175,6 +182,7 @@ func (s *Server) routes() {
 		r.Post("/api/services/{id}/remove", s.handleRemove)
 		r.Get("/api/services/{id}/logs", s.handleLogs)
 		r.Post("/api/scan", s.handleScanAll)
+		r.Get("/api/scan", s.handleScanStatus)
 		r.Get("/api/services/{id}/events", s.handleServiceEvents)
 		r.Get("/api/jobs", s.handleListJobs)
 		r.Delete("/api/jobs", s.handleClearJobs)
