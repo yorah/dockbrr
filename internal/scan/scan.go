@@ -123,10 +123,11 @@ func (s *Scanner) CheckService(ctx context.Context, serviceID int64) error {
 		s.mu.Lock()
 		delete(s.notifiedTo, serviceID)
 		s.mu.Unlock()
-		// A historyless, up-to-date service still deserves a changelog: write a
-		// synthetic current-version row (from == to) so the dashboard can show
-		// what the running version shipped. Only when the service has no update
-		// row at all, so we never shadow real (open/applied/dismissed) history.
+		// An up-to-date service with no surfaced history still deserves a
+		// changelog: write a synthetic current-version row (from == to) so the
+		// dashboard can show what the running version shipped. Skipped when a
+		// surfaced row (open/applied/dismissed) already provides one; superseded
+		// rows do not count, so a self-updated service still gets a baseline.
 		if err := s.ensureCurrentChangelog(ctx, svc); err != nil {
 			logger.Errorf("scan: ensure current changelog (service %d (%s)): %v", svc.ID, svc.Name, err)
 		}
@@ -164,11 +165,15 @@ func (s *Scanner) CheckService(ctx context.Context, serviceID int64) error {
 }
 
 // ensureCurrentChangelog writes a synthetic status='current' update row for an
-// up-to-date, historyless service and resolves its changelog. The row is
-// from == to == the current running version, so the resolver returns that
-// version's own release notes. It is inert everywhere pending/applied logic
-// lives (those key on 'available'/'applied'); only the dashboard's last-applied
-// fallback surfaces it. A missing/failed changelog is non-fatal.
+// up-to-date service with no surfaced history, and resolves its changelog. The
+// row is from == to == the current running version, so the resolver returns
+// that version's own release notes. It is inert everywhere pending/applied
+// logic lives (those key on 'available'/'applied'); only the dashboard's
+// last-applied fallback surfaces it. A missing/failed changelog is non-fatal.
+//
+// Stale baselines at other digests are dropped first (the image can move out of
+// band, e.g. dockbrr self-updating its own container), and a baseline is
+// (re)resolved unless one is already cached for the running digest.
 func (s *Scanner) ensureCurrentChangelog(ctx context.Context, svc store.Service) error {
 	if svc.CurrentDigest == "" {
 		return nil // nothing to key the row on
@@ -180,21 +185,24 @@ func (s *Scanner) ensureCurrentChangelog(ctx context.Context, svc store.Service)
 	if _, derr := s.updates.DeleteStaleCurrent(svc.ID, svc.CurrentDigest); derr != nil {
 		return derr
 	}
-	// Real history (a pending/applied/dismissed row) already carries a changelog;
-	// only the synthetic 'current' baseline is ours to (re)write.
-	hasReal, err := s.updates.HasNonCurrentByService(svc.ID)
-	if err != nil {
-		return err
-	}
-	if hasReal {
+	// A surfaced row (an open available/dismissed/rolled_back update, or an
+	// applied one) already gives the dashboard a changelog; the synthetic
+	// baseline is only for services with none. Superseded rows are deliberately
+	// NOT surfaced, so a service whose only history is superseded, e.g. every
+	// dockbrr self-update leaves one, still gets a baseline (the greyed-changelog
+	// fix: gating on "any non-current row" wrongly blocked that).
+	if surfaced, serr := s.updates.HasSurfacedByService(svc.ID); serr != nil {
+		return serr
+	} else if surfaced {
 		return nil
 	}
-	// A baseline already exists at the running digest: its changelog is cached,
-	// so don't re-resolve it (keeps this off the changelog source's API on every
-	// up-to-date scan). Only a first sight of this digest falls through to write.
-	if fresh, herr := s.updates.HasCurrentAtDigest(svc.ID, svc.CurrentDigest); herr != nil {
+	// A baseline already RESOLVED for this digest: its changelog is cached, so
+	// don't re-hit the changelog source's API. A baseline whose resolve came back
+	// empty is not resolved, so it falls through and retries here (self-heals an
+	// instance left with an empty baseline by an earlier miss).
+	if resolved, herr := s.updates.HasResolvedCurrentAtDigest(svc.ID, svc.CurrentDigest); herr != nil {
 		return herr
-	} else if fresh {
+	} else if resolved {
 		return nil
 	}
 

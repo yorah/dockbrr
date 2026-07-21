@@ -394,15 +394,23 @@ func (u *Updates) HasAnyByService(serviceID int64) (bool, error) {
 	return true, nil
 }
 
-// HasNonCurrentByService reports whether the service has any update row whose
-// status is NOT the synthetic 'current' baseline. scan uses it to decide
-// whether real history (a pending/applied/dismissed row) already provides a
-// changelog, distinct from HasAnyByService which also counts prior 'current'
-// rows and so would wrongly block refreshing a stale baseline.
-func (u *Updates) HasNonCurrentByService(serviceID int64) (bool, error) {
+// HasSurfacedByService reports whether the service has an update row the
+// dashboard actually surfaces as a changelog source: an OPEN row
+// (available/dismissed/rolled_back, per ListVisible) or an APPLIED row (per
+// ListLastAppliedByService). scan uses it to decide whether real history
+// already provides a changelog, so it should NOT write a synthetic baseline.
+//
+// It deliberately EXCLUDES 'superseded' (which nothing surfaces) and 'current'
+// (the baseline itself). This is the crux of the greyed-changelog fix: a
+// service whose only history is superseded rows, e.g. every dockbrr self-update
+// or out-of-band pull leaves one, has no visible changelog, so it must still
+// get a baseline. Gating on "any non-'current' row" wrongly blocked that.
+func (u *Updates) HasSurfacedByService(serviceID int64) (bool, error) {
 	var one int
 	err := u.db.QueryRow(
-		`SELECT 1 FROM updates WHERE service_id=? AND status<>'current' LIMIT 1`, serviceID,
+		`SELECT 1 FROM updates
+		   WHERE service_id=? AND status IN ('available','dismissed','rolled_back','applied') LIMIT 1`,
+		serviceID,
 	).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
@@ -413,13 +421,19 @@ func (u *Updates) HasNonCurrentByService(serviceID int64) (bool, error) {
 	return true, nil
 }
 
-// HasCurrentAtDigest reports whether a synthetic 'current' baseline row already
-// exists for the service at digest (its changelog is therefore already cached,
-// so scan can skip re-resolving it and keep off the changelog source's API).
-func (u *Updates) HasCurrentAtDigest(serviceID int64, digest string) (bool, error) {
+// HasResolvedCurrentAtDigest reports whether a synthetic 'current' baseline row
+// already exists for the service at digest AND has a changelog resolved onto it
+// (text/url present, or a rate_limited marker the dashboard still opens on).
+// scan uses it to skip re-resolving a cached baseline, so it stays off the
+// changelog source's API. A baseline whose resolve came back empty is NOT
+// "resolved", so it falls through and retries on the next scan (self-healing an
+// instance left with an empty baseline by an earlier transient miss).
+func (u *Updates) HasResolvedCurrentAtDigest(serviceID int64, digest string) (bool, error) {
 	var one int
 	err := u.db.QueryRow(
-		`SELECT 1 FROM updates WHERE service_id=? AND status='current' AND to_digest=? LIMIT 1`,
+		`SELECT 1 FROM updates
+		   WHERE service_id=? AND status='current' AND to_digest=?
+		     AND (changelog_text<>'' OR changelog_url<>'' OR changelog_status<>'') LIMIT 1`,
 		serviceID, digest,
 	).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {

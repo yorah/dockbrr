@@ -438,6 +438,46 @@ func TestCheckServiceRefreshesStaleCurrentRowOnNewDigest(t *testing.T) {
 	}
 }
 
+// A service whose only history is SUPERSEDED rows (every dockbrr self-update /
+// out-of-band pull leaves one) has no surfaced changelog, so it must still get a
+// current-version baseline. Regression: gating on "any non-current row" left
+// these services with a greyed, changelog-less button.
+func TestCheckServiceWritesBaselineWhenOnlySupersededHistory(t *testing.T) {
+	db := openScanStore(t)
+	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
+	updates := store.NewUpdates(db)
+	sid, _ := store.NewServices(db).Upsert(store.Service{
+		ProjectID: pid, Name: "scrutiny", ImageRef: "ghcr.io/analogj/scrutiny:latest",
+		CurrentDigest: "sha256:cur", ImageVersion: "0.9.2",
+	})
+	// Only superseded history (no available/applied/dismissed): not surfaced.
+	if _, err := updates.Upsert(store.Update{
+		ServiceID: sid, FromDigest: "sha256:a", ToDigest: "sha256:b",
+		Tag: "latest", Status: "superseded",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	det := fakeDetector{upd: nil} // up to date
+	cl := &fakeChangelog{text: "# 0.9.2 notes", url: "https://github.com/AnalogJ/scrutiny/releases/tag/v0.9.2"}
+	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil, nil)
+
+	if err := s.CheckService(context.Background(), sid); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := updates.ListLastAppliedByService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Status != "current" {
+		t.Fatalf("rows = %+v, want a single 'current' baseline", rows)
+	}
+	if rows[0].ChangelogText != "# 0.9.2 notes" {
+		t.Fatalf("changelog = %q, want the 0.9.2 notes (baseline resolved despite superseded history)", rows[0].ChangelogText)
+	}
+}
+
 // A baseline already at the running digest is NOT re-resolved on the next
 // up-to-date scan: its changelog is cached, so the changelog source (an API) is
 // not hit again.
@@ -461,6 +501,41 @@ func TestCheckServiceDoesNotReresolveFreshCurrentRow(t *testing.T) {
 	}
 	if cl.calls != 1 {
 		t.Fatalf("changelog resolved %d times, want 1 (fresh baseline must not re-resolve)", cl.calls)
+	}
+}
+
+// A baseline whose first resolve came back empty (a transient miss) is retried
+// on the next scan, so an instance left changelog-less self-heals.
+func TestCheckServiceRetriesEmptyCurrentRow(t *testing.T) {
+	db := openScanStore(t)
+	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
+	sid, _ := store.NewServices(db).Upsert(store.Service{
+		ProjectID: pid, Name: "app", ImageRef: "ghcr.io/acme/web:latest",
+		CurrentDigest: "sha256:cur", ImageVersion: "1.2.3",
+	})
+	updates := store.NewUpdates(db)
+	det := fakeDetector{upd: nil}
+	cl := &fakeChangelog{text: "", url: ""} // first resolve: empty miss
+	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil, nil)
+
+	if err := s.CheckService(context.Background(), sid); err != nil {
+		t.Fatal(err)
+	}
+	if rows, _ := updates.ListLastAppliedByService(); len(rows) != 1 || rows[0].ChangelogText != "" {
+		t.Fatalf("after empty resolve want a single blank baseline, got %+v", rows)
+	}
+
+	// Next scan: the changelog is now available; the empty baseline must retry.
+	cl.text, cl.url = "# 1.2.3 notes", "https://x"
+	if err := s.CheckService(context.Background(), sid); err != nil {
+		t.Fatal(err)
+	}
+	if cl.calls != 2 {
+		t.Fatalf("changelog resolved %d times, want 2 (empty baseline must retry)", cl.calls)
+	}
+	rows, _ := updates.ListLastAppliedByService()
+	if len(rows) != 1 || rows[0].ChangelogText != "# 1.2.3 notes" {
+		t.Fatalf("baseline not healed: %+v", rows)
 	}
 }
 
