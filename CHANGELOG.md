@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.3](https://github.com/yorah/dockbrr/compare/v0.10.2...v0.10.3) (2026-07-21)
+
+
+### Bug Fixes
+
+* **changelog:** match LinuxServer.io tags + keep build suffix in version display ([#70](https://github.com/yorah/dockbrr/issues/70)) ([8412064](https://github.com/yorah/dockbrr/commit/8412064f9d281032363e5cfcef1e71a848a05785))
+
 ## [0.10.2](https://github.com/yorah/dockbrr/compare/v0.10.1...v0.10.2) (2026-07-21)
 
 
