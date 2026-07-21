@@ -778,7 +778,11 @@ func TestResolveRollingTagLatestRelease(t *testing.T) {
 			Ref:    "ghcr.io/analogj/scrutiny:master-omnibus",
 			Labels: map[string]string{"org.opencontainers.image.source": "https://github.com/AnalogJ/scrutiny"},
 		},
-		Version: "master-omnibus",
+		// Mirror the current-row caller (scan.ensureCurrentChangelog), which sets
+		// FromVersion == Version == the rolling tag. Both are non-parseable, so the
+		// span walk stays disabled and the latest-release fallback still fires.
+		FromVersion: "master-omnibus",
+		Version:     "master-omnibus",
 	}
 	res, err := s.Resolve(context.Background(), in)
 	if err != nil {
