@@ -169,16 +169,21 @@ func (r *ExecRunner) Run(ctx context.Context, spec RunSpec, sink LogSink) (int, 
 	return 0, nil
 }
 
-// transientProgressRe matches docker's per-layer, per-tick pull progress:
-// "<layerid> Downloading 5.243MB", "<layerid> Extracting 1B", etc. docker
-// rewrites these in place in a TTY; captured as a stream, each tick becomes a
-// separate line, so one apply persists dozens of near-duplicate job_log rows.
-// docker compose indents each of these with leading whitespace (" 575d46df
-// Downloading 1.049MB"), hence the `\s*` anchor: without it nothing matched
-// and a single pull persisted hundreds of ticks. Terminal states ("Download
-// complete", "Pull complete", "Already exists"), image/container lifecycle,
-// and all non-pull output do not match and are kept.
-var transientProgressRe = regexp.MustCompile(`^\s*\S+\s+(?:Downloading|Extracting|Waiting|Verifying Checksum|Pending|Pulling fs layer)\b`)
+// transientProgressRe matches docker's per-layer pull output: both the
+// per-tick interim states ("<layerid> Downloading 5.243MB", "<layerid>
+// Extracting 1B") and the per-layer terminal states ("<layerid> Download
+// complete", "<layerid> Pull complete", "<layerid> Already exists"). docker
+// rewrites the interim states in place in a TTY; captured as a stream, each
+// tick becomes a separate line, so one apply persists dozens of near-duplicate
+// job_log rows. The terminal states are one-per-layer, so a many-layer image
+// still persists dozens of "Download complete"/"Pull complete" rows even after
+// the ticks are dropped; they are filtered too so the log collapses to the
+// image-level "Image X Pulling" -> "Image X Pulled" pair plus container
+// lifecycle. docker compose indents each of these with leading whitespace
+// (" 575d46df Downloading 1.049MB"), hence the `\s*` anchor: without it nothing
+// matched and a single pull persisted hundreds of ticks. Image/container
+// lifecycle and all non-pull output do not match and are kept.
+var transientProgressRe = regexp.MustCompile(`^\s*\S+\s+(?:Downloading|Extracting|Waiting|Verifying Checksum|Pending|Pulling fs layer|Download complete|Pull complete|Already exists)\b`)
 
 // isTransientProgress reports whether a line is interim docker pull progress
 // that should be dropped from the job log to keep it readable.

@@ -12,8 +12,10 @@ import (
 
 func TestIsTransientProgress(t *testing.T) {
 	t.Parallel()
-	// Drop the per-layer per-tick progress that docker rewrites in place in a
-	// TTY; keep every lifecycle terminal + non-pull output.
+	// Drop all per-layer pull output: both the per-tick interim states docker
+	// rewrites in place in a TTY, and the per-layer terminal states (one per
+	// layer, still dozens of rows on a many-layer image). Keep image-level
+	// pull lifecycle + container lifecycle + non-pull output.
 	drop := []string{
 		"12cf9316ae87 Downloading 5.243MB",
 		"f6e607ad0f52 Downloading 1.103kB",
@@ -22,24 +24,26 @@ func TestIsTransientProgress(t *testing.T) {
 		"5457d5da3ec8 Verifying Checksum 0B",
 		"45983244b0aa Pending 0B",
 		"3b3d036990fd Pulling fs layer 0B",
+		// Per-layer terminal states: one line per layer, dropped so the log
+		// collapses to the image-level Pulling -> Pulled pair.
+		"4f4fb700ef54 Already exists 0B",
+		"f6e607ad0f52 Download complete 0B",
+		"4f4fb700ef54 Pull complete 0B",
 		// docker compose indents progress lines with leading whitespace; these
 		// are verbatim captures from a real compose pull.
 		" 07683a18a1c6 Pulling fs layer 0B",
 		" 575d46df4705 Downloading 1.049MB",
 		"  f6e607ad0f52 Extracting 1B",
+		" 7e0b8e884178 Download complete 0B",
 	}
 	keep := []string{
-		"4f4fb700ef54 Already exists 0B",
-		"f6e607ad0f52 Download complete 0B",
-		"4f4fb700ef54 Pull complete 0B",
 		"Image redis:8.8@sha256:2838 Pulling",
 		"Image redis:8.8@sha256:2838 Pulled",
 		"Container smoke-cache Recreate",
 		"Container smoke-cache Started",
 		"apply succeeded",
 		"",
-		// Indented terminal states must survive too.
-		" 7e0b8e884178 Download complete 0B",
+		// Indented image-level lifecycle must survive.
 		" Image louislam/uptime-kuma:2.4.0 Pulling ",
 	}
 	for _, l := range drop {
