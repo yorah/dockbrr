@@ -239,6 +239,67 @@ func TestHasAnyByService(t *testing.T) {
 	}
 }
 
+func TestCurrentBaselineHelpers(t *testing.T) {
+	db := openImagesStore(t)
+	sid := seedService(t, db)
+	u := store.NewUpdates(db)
+
+	// Only a 'current' baseline exists: no real history, but a baseline at :old.
+	if _, err := u.Upsert(store.Update{
+		ServiceID: sid, FromDigest: "sha256:old", ToDigest: "sha256:old",
+		Tag: "latest", Status: "current",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if has, err := u.HasNonCurrentByService(sid); err != nil {
+		t.Fatal(err)
+	} else if has {
+		t.Fatal("HasNonCurrentByService = true with only a 'current' row, want false")
+	}
+	if has, err := u.HasCurrentAtDigest(sid, "sha256:old"); err != nil {
+		t.Fatal(err)
+	} else if !has {
+		t.Fatal("HasCurrentAtDigest(:old) = false, want true")
+	}
+	if has, err := u.HasCurrentAtDigest(sid, "sha256:new"); err != nil {
+		t.Fatal(err)
+	} else if has {
+		t.Fatal("HasCurrentAtDigest(:new) = true, want false")
+	}
+
+	// DeleteStaleCurrent keeping :new drops the :old baseline.
+	n, err := u.DeleteStaleCurrent(sid, "sha256:new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("DeleteStaleCurrent removed %d rows, want 1", n)
+	}
+	if has, _ := u.HasCurrentAtDigest(sid, "sha256:old"); has {
+		t.Fatal("stale :old baseline still present after DeleteStaleCurrent")
+	}
+
+	// A real (non-current) row makes HasNonCurrentByService true and is NOT
+	// touched by DeleteStaleCurrent.
+	if _, err := u.Upsert(store.Update{
+		ServiceID: sid, FromDigest: "sha256:a", ToDigest: "sha256:b",
+		Tag: "1.0", Status: "available",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if has, err := u.HasNonCurrentByService(sid); err != nil {
+		t.Fatal(err)
+	} else if !has {
+		t.Fatal("HasNonCurrentByService = false with an 'available' row, want true")
+	}
+	if n, err := u.DeleteStaleCurrent(sid, "sha256:zzz"); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatalf("DeleteStaleCurrent removed %d non-current rows, want 0", n)
+	}
+}
+
 func TestUpdatesRecordDriftNewThenIdempotent(t *testing.T) {
 	db := openImagesStore(t)
 	sid := seedService(t, db)

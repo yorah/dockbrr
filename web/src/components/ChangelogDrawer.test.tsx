@@ -65,6 +65,12 @@ test("labels an available update as Pending update", () => {
   expect(screen.getByText(/^Pending update/)).toBeInTheDocument();
 });
 
+test("labels a current-version baseline as Current version, not Pending", () => {
+  render(<ChangelogDrawer update={{ ...update, status: "current" }} service={service} onClose={() => {}} />);
+  expect(screen.getByText(/^Current version/)).toBeInTheDocument();
+  expect(screen.queryByText(/^Pending update/)).not.toBeInTheDocument();
+});
+
 test("shows the rate-limit hint for a rate_limited update with no changelog", () => {
   render(
     <ChangelogDrawer

@@ -25,6 +25,8 @@ function statusLabel(status: Update["status"]): string {
       return "Last applied update";
     case "dismissed":
       return "Dismissed update";
+    case "current":
+      return "Current version";
     default:
       return "Pending update";
   }

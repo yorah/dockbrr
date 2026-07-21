@@ -394,6 +394,62 @@ func (u *Updates) HasAnyByService(serviceID int64) (bool, error) {
 	return true, nil
 }
 
+// HasNonCurrentByService reports whether the service has any update row whose
+// status is NOT the synthetic 'current' baseline. scan uses it to decide
+// whether real history (a pending/applied/dismissed row) already provides a
+// changelog, distinct from HasAnyByService which also counts prior 'current'
+// rows and so would wrongly block refreshing a stale baseline.
+func (u *Updates) HasNonCurrentByService(serviceID int64) (bool, error) {
+	var one int
+	err := u.db.QueryRow(
+		`SELECT 1 FROM updates WHERE service_id=? AND status<>'current' LIMIT 1`, serviceID,
+	).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// HasCurrentAtDigest reports whether a synthetic 'current' baseline row already
+// exists for the service at digest (its changelog is therefore already cached,
+// so scan can skip re-resolving it and keep off the changelog source's API).
+func (u *Updates) HasCurrentAtDigest(serviceID int64, digest string) (bool, error) {
+	var one int
+	err := u.db.QueryRow(
+		`SELECT 1 FROM updates WHERE service_id=? AND status='current' AND to_digest=? LIMIT 1`,
+		serviceID, digest,
+	).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// DeleteStaleCurrent removes synthetic 'current' baseline rows for the service
+// whose to_digest differs from keepDigest. The running image can move out of
+// band (dockbrr self-updating its OWN container, or an external `docker pull`),
+// which leaves the baseline pinned to the old digest/version/changelog forever:
+// 'current' rows are immune to every supersede path (those key on 'available'),
+// and HasAnyByService would block ever rewriting them. Dropping the stale row
+// lets scan re-resolve the baseline for what is actually running now. Returns
+// rows affected.
+func (u *Updates) DeleteStaleCurrent(serviceID int64, keepDigest string) (int64, error) {
+	res, err := u.db.Exec(
+		`DELETE FROM updates WHERE service_id=? AND status='current' AND to_digest<>?`,
+		serviceID, keepDigest,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // ListLastAppliedByService returns, for each service, the newest
 // changelog-bearing non-open row among status IN ('applied', 'current'),
 // changelog columns included, with 'applied' outranking 'current' for the

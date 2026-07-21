@@ -173,12 +173,29 @@ func (s *Scanner) ensureCurrentChangelog(ctx context.Context, svc store.Service)
 	if svc.CurrentDigest == "" {
 		return nil // nothing to key the row on
 	}
-	has, err := s.updates.HasAnyByService(svc.ID)
+	// A prior baseline pinned to a now-superseded digest is stale: the running
+	// image moved out of band (e.g. dockbrr self-updated its own container), so
+	// drop it before deciding whether to write a fresh one. 'current' rows are
+	// immune to supersede, so nothing else ever clears them.
+	if _, derr := s.updates.DeleteStaleCurrent(svc.ID, svc.CurrentDigest); derr != nil {
+		return derr
+	}
+	// Real history (a pending/applied/dismissed row) already carries a changelog;
+	// only the synthetic 'current' baseline is ours to (re)write.
+	hasReal, err := s.updates.HasNonCurrentByService(svc.ID)
 	if err != nil {
 		return err
 	}
-	if has {
-		return nil // real (or prior current) history already provides a changelog
+	if hasReal {
+		return nil
+	}
+	// A baseline already exists at the running digest: its changelog is cached,
+	// so don't re-resolve it (keeps this off the changelog source's API on every
+	// up-to-date scan). Only a first sight of this digest falls through to write.
+	if fresh, herr := s.updates.HasCurrentAtDigest(svc.ID, svc.CurrentDigest); herr != nil {
+		return herr
+	} else if fresh {
+		return nil
 	}
 
 	repo, tag := detect.SplitRef(svc.ImageRef)
