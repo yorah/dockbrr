@@ -1,4 +1,5 @@
 import { cn } from "@/lib/cn";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Dot } from "@/hooks/useProjectHealth";
 
 const DOT_CLASS: Record<Dot, string> = {
@@ -10,6 +11,11 @@ const DOT_LABEL: Record<Dot, string> = {
   red: "last job failed",
   amber: "updates available",
   green: "healthy",
+};
+const DOT_TOOLTIP: Record<Dot, string> = {
+  red: "This project's most recent job failed. The dot clears when the next job succeeds; open the project to see the failed job.",
+  amber: "This project has updates available.",
+  green: "All services are up to date and the last job succeeded.",
 };
 
 /**
@@ -35,7 +41,19 @@ export function ProjectHealthIndicator({
           {updates}
         </span>
       )}
-      <span role="img" aria-label={label} className={cn("h-2 w-2 shrink-0 rounded-full", DOT_CLASS[dot])} />
+      <TooltipProvider delayDuration={300}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              role="img"
+              aria-label={label}
+              tabIndex={0}
+              className={cn("h-2 w-2 shrink-0 cursor-help rounded-full", DOT_CLASS[dot])}
+            />
+          </TooltipTrigger>
+          <TooltipContent className="max-w-xs">{DOT_TOOLTIP[dot]}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
     </span>
   );
 }
