@@ -6,7 +6,8 @@ import { makeQueryClient } from "@/api/queryClient";
 import { keys } from "@/api/keys";
 import { __resetBusyServices, markServiceBusy, useBusyServices } from "@/hooks/useBusyServices";
 import { __resetScanRun, useScanRun } from "@/hooks/useScanRun";
-import { useEventStream, __setEventSourceFactory } from "./useEventStream";
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() }, Toaster: () => null }));
+import { useEventStream, __setEventSourceFactory, __setReloadForTest } from "./useEventStream";
 
 beforeEach(() => __resetBusyServices());
 beforeEach(() => __resetScanRun());
@@ -26,6 +27,25 @@ class FakeES {
 }
 
 afterEach(() => __setEventSourceFactory(null));
+afterEach(() => __setReloadForTest(null));
+
+// system/info responder keyed by version, used by the self-update reload tests.
+function stubSystemInfoVersions(...versions: string[]) {
+  let i = 0;
+  return vi.fn().mockImplementation((url: string) => {
+    if (typeof url === "string" && url.includes("/api/system/info")) {
+      const v = versions[Math.min(i, versions.length - 1)];
+      i += 1;
+      return Promise.resolve(new Response(JSON.stringify({ version: v }), {
+        headers: { "Content-Type": "application/json" },
+      }));
+    }
+    // Everything else (e.g. GET /api/scan on open) gets a benign default.
+    return Promise.resolve(new Response(JSON.stringify({ running: false, done: 0, total: 0 }), {
+      headers: { "Content-Type": "application/json" },
+    }));
+  });
+}
 
 function wrapper(client = makeQueryClient()) {
   const invalidated: unknown[][] = [];
@@ -257,6 +277,45 @@ describe("useEventStream", () => {
       expect(FakeES.created).toBe(1); // no reconnect after teardown
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  test("reloads the page when a reconnect reports a new version (self-update landed)", async () => {
+    __setEventSourceFactory((url) => new FakeES(url) as unknown as EventSource);
+    vi.stubGlobal("fetch", stubSystemInfoVersions("0.9.1", "0.9.2"));
+    const reload = vi.fn();
+    __setReloadForTest(reload);
+    try {
+      const { W } = wrapper();
+      renderHook(() => useEventStream(), { wrapper: W });
+
+      // First open records the baseline version, no reload.
+      await act(async () => { FakeES.last!.onopen?.(new Event("open")); });
+      expect(reload).not.toHaveBeenCalled();
+
+      // Stream drops and reconnects on the swapped binary → new version → reload.
+      await act(async () => { FakeES.last!.onopen?.(new Event("open")); });
+      await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  test("does not reload when the version is unchanged across reconnects", async () => {
+    __setEventSourceFactory((url) => new FakeES(url) as unknown as EventSource);
+    vi.stubGlobal("fetch", stubSystemInfoVersions("0.9.1"));
+    const reload = vi.fn();
+    __setReloadForTest(reload);
+    try {
+      const { W } = wrapper();
+      renderHook(() => useEventStream(), { wrapper: W });
+      await act(async () => { FakeES.last!.onopen?.(new Event("open")); });
+      await act(async () => { FakeES.last!.onopen?.(new Event("open")); });
+      // Give any pending microtasks a beat, then assert no reload happened.
+      await act(async () => { await Promise.resolve(); });
+      expect(reload).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
     }
   });
 
