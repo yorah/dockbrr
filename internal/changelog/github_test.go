@@ -761,6 +761,72 @@ func TestGitHubReleasesErrorFallsBackToRawChangelog(t *testing.T) {
 	}
 }
 
+func TestResolveRollingTagLatestRelease(t *testing.T) {
+	// scrutiny's ghcr image floats on the non-semver "master-omnibus" tag, which
+	// never matches a release. The running digest is built from repo tip, so the
+	// latest stable release is the right proxy for "what changed".
+	srv := ghServer(t, map[string][]ghRel{
+		"AnalogJ/scrutiny": {
+			{TagName: "v0.9.2", HTMLURL: "https://github.com/AnalogJ/scrutiny/releases/tag/v0.9.2", Body: "scrutiny 0.9.2 notes"},
+			{TagName: "v0.9.1", HTMLURL: "https://github.com/AnalogJ/scrutiny/releases/tag/v0.9.1", Body: "0.9.1 notes"},
+			{TagName: "v0.9.0-rc1", HTMLURL: "x", Body: "rc"},
+		},
+	}, nil, "")
+	s := changelog.NewGitHubSource(srv.Client(), srv.URL, srv.URL, func() string { return "" }, nil, time.Hour)
+	in := changelog.Input{
+		Image: registry.RemoteImage{
+			Ref:    "ghcr.io/analogj/scrutiny:master-omnibus",
+			Labels: map[string]string{"org.opencontainers.image.source": "https://github.com/AnalogJ/scrutiny"},
+		},
+		Version: "master-omnibus",
+	}
+	res, err := s.Resolve(context.Background(), in)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if !strings.Contains(res.Text, "Latest release for rolling tag `master-omnibus`") {
+		t.Fatalf("missing rolling-tag note, got: %q", res.Text)
+	}
+	if !strings.Contains(res.Text, "scrutiny 0.9.2 notes") {
+		t.Fatalf("want v0.9.2 body, got: %q", res.Text)
+	}
+	if res.URL != "https://github.com/AnalogJ/scrutiny/releases/tag/v0.9.2" {
+		t.Fatalf("want v0.9.2 html_url, got: %q", res.URL)
+	}
+}
+
+func TestResolveRollingTagPrereleaseOnlyFallsThrough(t *testing.T) {
+	// Only a pre-release exists (no stable release to fall back to) and no raw
+	// CHANGELOG.md either: the rolling-tag fallback must not fabricate a result.
+	srv := ghServer(t, map[string][]ghRel{
+		"o/r": {{TagName: "v1.0.0-rc1", HTMLURL: "x", Body: "rc"}},
+	}, nil, "")
+	s := changelog.NewGitHubSource(srv.Client(), srv.URL, srv.URL, func() string { return "" }, nil, time.Hour)
+	res, err := s.Resolve(context.Background(), ghInput("ghcr.io/o/r:latest", "latest"))
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if res.Text != "" {
+		t.Fatalf("want no text (fall through), got: %q", res.Text)
+	}
+}
+
+func TestResolveSemverMissNoLatestFallback(t *testing.T) {
+	// A parseable semver version that matches no release must NOT fall back to
+	// the latest release: that fallback is reserved for non-semver rolling tags.
+	srv := ghServer(t, map[string][]ghRel{
+		"o/r": {{TagName: "v3.0.0", HTMLURL: "x", Body: "v3 notes"}},
+	}, nil, "")
+	s := changelog.NewGitHubSource(srv.Client(), srv.URL, srv.URL, func() string { return "" }, nil, time.Hour)
+	res, err := s.Resolve(context.Background(), ghInput("ghcr.io/o/r:1.2.3", "1.2.3"))
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if strings.Contains(res.Text, "v3 notes") {
+		t.Fatalf("semver miss must NOT fall back to latest release, got: %q", res.Text)
+	}
+}
+
 func TestGitHubReleasesErrorNoRawChangelogPreservesError(t *testing.T) {
 	// Releases API rate-limited AND no raw CHANGELOG.md anywhere: the original
 	// ErrRateLimited must still surface (not be swallowed by the fallback).

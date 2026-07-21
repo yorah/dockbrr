@@ -153,6 +153,16 @@ func (s *GitHubSource) Resolve(ctx context.Context, in Input) (Result, error) {
 	want := tgt.tags(in.Version)
 	target, ok := findRelease(rels, want, in.Version)
 	if !ok {
+		// Rolling tag (non-semver version, e.g. "master-omnibus"): no release is
+		// tagged with it, but the running digest is built from the repo tip, so the
+		// latest stable release is the right proxy. Only for non-semver versions: a
+		// semver miss must not resolve to an unrelated latest release.
+		if _, parseable := detect.ParseCore(in.Version); !parseable {
+			if latest, ok := latestStableRelease(rels); ok {
+				note := fmt.Sprintf("_Latest release for rolling tag `%s`._\n\n", in.Version)
+				return Result{Text: note + latest.Body, URL: latest.HTMLURL}, nil
+			}
+		}
 		link, ok, err := s.changelogLink(ctx, owner, name, want)
 		if err != nil {
 			return Result{}, err
