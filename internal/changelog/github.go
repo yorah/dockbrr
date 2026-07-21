@@ -203,7 +203,11 @@ func (s *GitHubSource) Resolve(ctx context.Context, in Input) (Result, error) {
 // version's dotted prefix (8.8 -> the newest 8.8.x patch). Highest-numbered, not
 // first-listed: GitHub orders releases by publish date, so a later backport can
 // precede the newest patch. The "."-suffix guard makes "8.8" match "8.8.0" but
-// not the "8.8-rc1" pre-release nor an unrelated "8.80.0".
+// not the "8.8-rc1" pre-release nor an unrelated "8.80.0". For a full (>=2-dot)
+// or empty version, a third tier falls back to full-semver core-equality,
+// matching name-prefixed / build-suffixed tags (LSIO-style "znc-1.10.2-ls183")
+// by parsed core, where an exact normalized-tag match wins over the newest
+// same-core build.
 func findRelease(rels []ghRelease, want []string, version string) (ghRelease, bool) {
 	for _, rel := range rels {
 		for _, w := range want {
@@ -230,9 +234,7 @@ func findRelease(rels []ghRelease, want []string, version string) (ghRelease, bo
 				best, bestCore, found = rel, c, true
 			}
 		}
-		if found {
-			return best, true
-		}
+		return best, found
 	}
 	// Full-semver core-equality fallback: LSIO-style tags ("znc-1.10.2-ls183")
 	// carry a name prefix and/or build suffix, so neither the raw exact match nor
