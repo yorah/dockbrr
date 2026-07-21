@@ -213,26 +213,60 @@ func findRelease(rels []ghRelease, want []string, version string) (ghRelease, bo
 		}
 	}
 	v := strings.TrimPrefix(version, "v")
-	if v == "" || strings.Count(v, ".") >= 2 {
-		return ghRelease{}, false
+	if v != "" && strings.Count(v, ".") < 2 {
+		var best ghRelease
+		var bestCore [3]int
+		found := false
+		for _, rel := range rels {
+			norm := normalizeTag(rel.TagName)
+			if !strings.HasPrefix(norm, v+".") {
+				continue
+			}
+			c, ok := detect.ParseCore(norm)
+			if !ok {
+				continue
+			}
+			if !found || detect.CoreLess(bestCore, c) {
+				best, bestCore, found = rel, c, true
+			}
+		}
+		if found {
+			return best, true
+		}
 	}
-	var best ghRelease
-	var bestCore [3]int
-	found := false
-	for _, rel := range rels {
-		norm := normalizeTag(rel.TagName)
-		if !strings.HasPrefix(norm, v+".") {
-			continue
+	// Full-semver core-equality fallback: LSIO-style tags ("znc-1.10.2-ls183")
+	// carry a name prefix and/or build suffix, so neither the raw exact match nor
+	// the partial (<2-dot) scan above finds them. Match by parsed core instead. An
+	// exact normalized-tag match (a suffix-bearing version like "1.10.2-ls183") wins
+	// outright; otherwise the first-listed same-core release wins, which is the
+	// newest-published and thus the highest build for a given core (LSIO publishes
+	// ascending lsNNN over time). detect.ParseCore silently truncates a 4th+
+	// numeric component ("8.8.0.1" -> core [8,8,0]), so both sides are also
+	// required to have at most 3 leading numeric components: without that guard
+	// an unrelated 4-part tag ("8.8.0.1") would falsely core-match a full 3-part
+	// version ("8.8.0").
+	normVer := normalizeTag(version)
+	if vCore, cok := detect.ParseCore(version); cok && coreComponents(normVer) <= 3 {
+		var best ghRelease
+		coreFound := false
+		for _, rel := range rels {
+			norm := normalizeTag(rel.TagName)
+			c, ok := detect.ParseCore(norm)
+			if !ok || c != vCore || isPrerelease(norm) || coreComponents(norm) > 3 {
+				continue
+			}
+			if norm == normVer {
+				return rel, true
+			}
+			if !coreFound {
+				best, coreFound = rel, true
+			}
 		}
-		c, ok := detect.ParseCore(norm)
-		if !ok {
-			continue
-		}
-		if !found || detect.CoreLess(bestCore, c) {
-			best, bestCore, found = rel, c, true
+		if coreFound {
+			return best, true
 		}
 	}
-	return best, found
+	return ghRelease{}, false
 }
 
 // latestStableRelease returns the highest-semver stable release in rels
@@ -356,6 +390,19 @@ func spanLink(owner, name, fromTag, toTag string, reachedFrom bool) string {
 func normalizeTag(tag string) string {
 	tag = detect.StripNamePrefix(tag)
 	return strings.TrimPrefix(strings.TrimPrefix(tag, "release-"), "v")
+}
+
+// coreComponents counts the leading dot-separated numeric components of a
+// normalized tag, ignoring any "-"/"+" suffix: "1.10.2-ls183" -> 3,
+// "8.8.0.1" -> 4. detect.ParseCore silently truncates to the first 3
+// components, so callers doing core-equality comparisons must reject operands
+// with more than 3 to avoid a false match between an unrelated 4-part tag
+// (e.g. an OS-patch-style "8.8.0.1") and a real 3-part version ("8.8.0").
+func coreComponents(norm string) int {
+	if i := strings.IndexAny(norm, "-+"); i >= 0 {
+		norm = norm[:i]
+	}
+	return strings.Count(norm, ".") + 1
 }
 
 // prereleaseRe matches the common pre-release identifiers that follow a "-" right

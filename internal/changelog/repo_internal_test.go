@@ -76,3 +76,23 @@ func TestLatestStableRelease(t *testing.T) {
 		}
 	})
 }
+
+func TestFindReleaseCoreEquality(t *testing.T) {
+	rels := []ghRelease{
+		{TagName: "znc-1.10.2-ls183"},
+		{TagName: "znc-1.10.2-ls182"},
+		{TagName: "znc-1.10.1-ls179"},
+	}
+	// Suffixed version: exact normalized match wins.
+	if got, ok := findRelease(rels, defaultTags("1.10.2-ls182"), "1.10.2-ls182"); !ok || got.TagName != "znc-1.10.2-ls182" {
+		t.Errorf("suffixed: got %q ok=%v, want znc-1.10.2-ls182", got.TagName, ok)
+	}
+	// Bare full-semver version: newest same-core build (first-listed) wins.
+	if got, ok := findRelease(rels, defaultTags("1.10.2"), "1.10.2"); !ok || got.TagName != "znc-1.10.2-ls183" {
+		t.Errorf("bare: got %q ok=%v, want znc-1.10.2-ls183", got.TagName, ok)
+	}
+	// No core match: miss.
+	if _, ok := findRelease(rels, defaultTags("2.0.0"), "2.0.0"); ok {
+		t.Error("2.0.0: want miss")
+	}
+}
