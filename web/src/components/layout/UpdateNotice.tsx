@@ -1,8 +1,10 @@
+import { useEffect, useState } from "react";
 import { Download, X } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { notify } from "@/lib/notify";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useSelfUpdate } from "@/hooks/queries";
+import { useSelfUpdate, useJob } from "@/hooks/queries";
 import { useApplySelfUpdate } from "@/hooks/mutations";
 import { useDismissedUpdate } from "@/hooks/useDismissedUpdate";
 import { SELF_UPDATE_CONFIRM } from "@/lib/selfUpdate";
@@ -19,6 +21,29 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
   const { data } = useSelfUpdate();
   const apply = useApplySelfUpdate();
   const { dismissed, dismiss: setDismissed } = useDismissedUpdate();
+
+  // The self_update job is enqueue-then-restart: POST returns an id instantly,
+  // but the image pull + container swap run async and can outlive the request.
+  // Track the job so the button stays disabled until the job itself terminates
+  // (not just until POST returns, which let a second click re-fire it), and so a
+  // pull failure (e.g. the image for the new tag is not published yet) surfaces
+  // instead of vanishing silently.
+  const [jobId, setJobId] = useState<number | null>(null);
+  const job = useJob(jobId ?? 0, jobId !== null);
+  const status = job.data?.status;
+  const applying =
+    apply.isPending ||
+    (jobId !== null && status !== "success" && status !== "failed" && status !== "canceled");
+
+  useEffect(() => {
+    if (status !== "failed" && status !== "canceled") return;
+    notify.error(
+      job.data?.error
+        ? `Update failed: ${job.data.error}`
+        : "Update failed. The new image may not be published yet, try again in a few minutes.",
+    );
+    setJobId(null); // clear so the button re-enables for a retry
+  }, [status, job.data?.error]);
 
   if (!data?.update_available) return null;
   if (dismissed === data.latest) return null;
@@ -75,12 +100,14 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
             type="button"
             variant="default"
             size="sm"
-            disabled={apply.isPending}
+            disabled={applying}
             onClick={() => {
-              if (window.confirm(SELF_UPDATE_CONFIRM)) apply.mutate();
+              if (window.confirm(SELF_UPDATE_CONFIRM)) {
+                apply.mutate(undefined, { onSuccess: (res) => setJobId(res.job_id) });
+              }
             }}
           >
-            {apply.isPending ? "Updating..." : "Update now"}
+            {applying ? "Updating..." : "Update now"}
           </Button>
           <a
             href={data.html_url}

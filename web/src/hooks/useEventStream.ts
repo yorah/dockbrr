@@ -1,10 +1,18 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
 import { keys } from "@/api/keys";
-import type { ScanRun } from "@/api/types";
+import { notify } from "@/lib/notify";
+import type { ScanRun, SystemInfo } from "@/api/types";
 import { clearJobBusy } from "@/hooks/useBusyServices";
 import { setScanRun, useScanRun } from "@/hooks/useScanRun";
+
+// Page reload triggered after a self-update swap lands. Behind a seam so tests
+// can assert it without navigating jsdom.
+let reloadPage: () => void = () => window.location.reload();
+export function __setReloadForTest(f: (() => void) | null) {
+  reloadPage = f ?? (() => window.location.reload());
+}
 
 // Authoritative resync poll interval while a scan-run is in progress. The SSE
 // bus is best-effort (drops frames on buffer overflow), so a dropped
@@ -37,6 +45,10 @@ const RECONNECT_MAX_MS = 30000;
 export function useEventStream(enabled = true) {
   const qc = useQueryClient();
   const { running } = useScanRun();
+  // Running version captured on the first stream open. A later open reporting a
+  // different version means the backend binary was replaced under us (a
+  // self-update landed): see the reload logic in es.onopen below.
+  const baselineVersion = useRef<string | null>(null);
 
   // Self-heal: while running, periodically confirm against the authoritative
   // snapshot in case a scan_finished frame never arrived. Stops as soon as
@@ -122,6 +134,24 @@ export function useEventStream(enabled = true) {
         // blipped, learns the true running state (dropped progress events
         // self-heal here).
         void apiFetch<ScanRun>("/api/scan").then(setScanRun).catch(() => {});
+        // Self-update landing check: a self_update swaps dockbrr's own
+        // container, so the stream drops and reconnects on the NEW binary. The
+        // first open records the running version; any later open on a different
+        // version means the backend was replaced, so hard-reload to load the
+        // new SPA bundle + version instead of running stale assets against it.
+        void apiFetch<SystemInfo>("/api/system/info")
+          .then((info) => {
+            if (baselineVersion.current === null) {
+              baselineVersion.current = info.version;
+              return;
+            }
+            if (info.version !== baselineVersion.current) {
+              baselineVersion.current = info.version;
+              notify.success(`dockbrr updated to ${info.version}. Reloading…`);
+              reloadPage();
+            }
+          })
+          .catch(() => {});
       };
       es.onmessage = handleMessage;
       es.onerror = () => {
