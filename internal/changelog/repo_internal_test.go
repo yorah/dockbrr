@@ -95,4 +95,8 @@ func TestFindReleaseCoreEquality(t *testing.T) {
 	if _, ok := findRelease(rels, defaultTags("2.0.0"), "2.0.0"); ok {
 		t.Error("2.0.0: want miss")
 	}
+	// Name-prefixed version resolves via prefix-stripped core match.
+	if got, ok := findRelease(rels, defaultTags("znc-1.10.2-ls182"), "znc-1.10.2-ls182"); !ok || got.TagName != "znc-1.10.2-ls182" {
+		t.Errorf("name-prefixed: got %q ok=%v, want znc-1.10.2-ls182", got.TagName, ok)
+	}
 }

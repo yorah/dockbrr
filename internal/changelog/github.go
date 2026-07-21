@@ -248,7 +248,7 @@ func findRelease(rels []ghRelease, want []string, version string) (ghRelease, bo
 	// an unrelated 4-part tag ("8.8.0.1") would falsely core-match a full 3-part
 	// version ("8.8.0").
 	normVer := normalizeTag(version)
-	if vCore, cok := detect.ParseCore(version); cok && coreComponents(normVer) <= 3 {
+	if vCore, cok := detect.ParseCore(normVer); cok && coreComponents(normVer) <= 3 {
 		var best ghRelease
 		coreFound := false
 		for _, rel := range rels {
