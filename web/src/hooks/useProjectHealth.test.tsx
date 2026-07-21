@@ -14,7 +14,7 @@ const proj = (id: number, name: string, services: Service[]): Project => ({
 const upd = (id: number, service_id: number, status: string): Update => ({
   id, service_id, from_digest: "sha256:a", to_digest: "sha256:b",
   from_version: "1.0.0", to_version: "1.1.0", tag: "1.1.0", severity: "minor",
-  changelog_url: "", changelog_text: "", status, detected_at: "2026-07-12T10:00:00Z",
+  changelog_url: "", changelog_text: "", status, detected_at: "2026-07-12T10:00:00Z", is_self: false,
 });
 const job = (id: number, project_id: number | null, status: string, created_at: string): JobRow => ({
   id, type: "apply", status, scope: "project", exit_code: null, error: "",

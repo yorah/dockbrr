@@ -23,6 +23,7 @@ const update: Update = {
   changelog_text: "",
   status: "available",
   detected_at: "2026-07-04T00:00:00Z",
+  is_self: false,
 };
 const service: Service = {
   id: 10,
@@ -199,6 +200,42 @@ test("a dismissed update shows Restore and calls the restore endpoint", async ()
 
   await waitFor(() => expect(restored).toBe(true));
   await waitFor(() => expect(onClose).toHaveBeenCalled());
+});
+
+test("Apply on a self update shows the self-update confirm and skips the mutation when cancelled", async () => {
+  let applied = false;
+  server.use(
+    http.get("/api/updates/7/preview", () => HttpResponse.json({ pull: "p", up: "u" })),
+    http.post("/api/updates/7/apply", () => {
+      applied = true;
+      return HttpResponse.json({ job_id: 99 });
+    }),
+  );
+  const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+  try {
+    renderDrawer({ update: makeUpdate({ is_self: true }) });
+    await userEvent.click(screen.getByRole("button", { name: /^apply$/i }));
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining("Update dockbrr itself?"));
+    expect(applied).toBe(false);
+  } finally {
+    confirmSpy.mockRestore();
+  }
+});
+
+test("Apply on a non-self update never calls window.confirm", async () => {
+  server.use(
+    http.get("/api/updates/7/preview", () => HttpResponse.json({ pull: "p", up: "u" })),
+    http.post("/api/updates/7/apply", () => HttpResponse.json({ job_id: 99 })),
+  );
+  const confirmSpy = vi.spyOn(window, "confirm");
+  try {
+    const { onApplied } = setup();
+    await userEvent.click(screen.getByRole("button", { name: /^apply$/i }));
+    await waitFor(() => expect(onApplied).toHaveBeenCalledWith(99));
+    expect(confirmSpy).not.toHaveBeenCalled();
+  } finally {
+    confirmSpy.mockRestore();
+  }
 });
 
 test("a rolled-back update shows Restore and calls the restore endpoint", async () => {

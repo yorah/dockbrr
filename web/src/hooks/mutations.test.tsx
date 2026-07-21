@@ -1,18 +1,23 @@
 import type { ReactNode } from "react";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
 import { server } from "@/test/msw";
 import { makeQueryClient } from "@/api/queryClient";
 import { keys } from "@/api/keys";
-import { useApply, useLifecycle, useProjectScan, useRemoveContainer, useScanAll, useServiceCheck } from "./mutations";
+import { useApply, useCheckForUpdates, useLifecycle, useProjectScan, useRemoveContainer, useScanAll, useServiceCheck } from "./mutations";
+import { DISMISS_KEY } from "@/hooks/useDismissedUpdate";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() }, Toaster: () => null }));
 import { toast } from "sonner";
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+afterEach(() => {
+  localStorage.clear();
 });
 
 function wrapper(client = makeQueryClient()) {
@@ -159,5 +164,21 @@ describe("useRemoveContainer", () => {
     const { result } = renderHook(() => useRemoveContainer(), { wrapper: W });
     result.current.mutate(3);
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
+  });
+});
+
+describe("useCheckForUpdates", () => {
+  test("on success, clears a previously dismissed update so the notice can reappear", async () => {
+    localStorage.setItem(DISMISS_KEY, "v0.5.0");
+    server.use(
+      http.get("/api/updates/self", () =>
+        HttpResponse.json({ current: "0.4.2", latest: "v0.5.0", html_url: "", update_available: true }),
+      ),
+    );
+    const { W } = wrapper();
+    const { result } = renderHook(() => useCheckForUpdates(), { wrapper: W });
+    result.current.mutate();
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(localStorage.getItem(DISMISS_KEY)).toBeNull();
   });
 });

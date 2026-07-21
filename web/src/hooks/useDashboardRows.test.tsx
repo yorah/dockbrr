@@ -10,7 +10,7 @@ const projects: Project[] = [{
   ],
 }];
 const updates: Update[] = [
-  { id: 99, service_id: 10, from_digest: "sha256:a", to_digest: "sha256:c", from_version: "", to_version: "", tag: "1.28", severity: "minor", changelog_url: "https://x/rel", changelog_text: "", status: "available", detected_at: "2026-07-04T00:00:00Z" },
+  { id: 99, service_id: 10, from_digest: "sha256:a", to_digest: "sha256:c", from_version: "", to_version: "", tag: "1.28", severity: "minor", changelog_url: "https://x/rel", changelog_text: "", status: "available", detected_at: "2026-07-04T00:00:00Z", is_self: false },
 ];
 
 describe("joinRows", () => {
@@ -125,7 +125,7 @@ describe("joinRows", () => {
 
   test("attaches the last applied update to the service row, without affecting filters", () => {
     const lastApplied: Update[] = [
-      { id: 42, service_id: 11, from_digest: "sha256:x", to_digest: "sha256:b", from_version: "", to_version: "", tag: "16.1", severity: "minor", changelog_url: "https://x/16.1", changelog_text: "# 16.1", status: "applied", detected_at: "2026-07-01T00:00:00Z" },
+      { id: 42, service_id: 11, from_digest: "sha256:x", to_digest: "sha256:b", from_version: "", to_version: "", tag: "16.1", severity: "minor", changelog_url: "https://x/16.1", changelog_text: "# 16.1", status: "applied", detected_at: "2026-07-01T00:00:00Z", is_self: false },
     ];
     const rows = joinRows(projects, updates, { onlyUpdates: false, project: "", status: "", search: "", showRemoved: false }, lastApplied);
     const db = rows.find((r) => r.kind === "service" && r.service.id === 11);

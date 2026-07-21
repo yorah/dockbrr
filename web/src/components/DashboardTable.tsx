@@ -50,6 +50,7 @@ import {
 import { markServiceBusy, useBusyServices } from "@/hooks/useBusyServices";
 import { useScanRun } from "@/hooks/useScanRun";
 import { ApplyAllButton, CheckAllButton } from "@/components/BulkActions";
+import { SELF_UPDATE_CONFIRM } from "@/lib/selfUpdate";
 import type { Row } from "@/hooks/useDashboardRows";
 import type { Project, Service, Update } from "@/api/types";
 
@@ -198,9 +199,11 @@ function ActionsCell({
               onClick={(e) => {
                 e.stopPropagation();
                 if (!update) return;
-                const msg = service.pinned
-                  ? `Apply update to "${service.name}"? It is pinned, and applying overrides the pin and recreates the container.`
-                  : `Apply update to "${service.name}"? This recreates the container.`;
+                const msg = update.is_self
+                  ? SELF_UPDATE_CONFIRM
+                  : service.pinned
+                    ? `Apply update to "${service.name}"? It is pinned, and applying overrides the pin and recreates the container.`
+                    : `Apply update to "${service.name}"? This recreates the container.`;
                 if (!window.confirm(msg)) return;
                 apply.mutate(
                   { id: update.id, scope: "service" },

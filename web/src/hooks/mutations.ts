@@ -3,6 +3,7 @@ import { notify } from "@/lib/notify";
 import { apiFetch, ApiError } from "@/api/client";
 import { keys } from "@/api/keys";
 import type { Scope, SelfUpdate } from "@/api/types";
+import { clearDismissedUpdate } from "@/hooks/useDismissedUpdate";
 
 const invalidate = (qc: QueryClient, ...ks: readonly (readonly unknown[])[]) =>
   Promise.all(ks.map((queryKey) => qc.invalidateQueries({ queryKey })));
@@ -24,7 +25,10 @@ export function useApply() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (v: { id: number; scope: Scope }) =>
-      apiFetch<{ job_id: number }>(`/api/updates/${v.id}/apply`, { method: "POST", body: { scope: v.scope } }),
+      apiFetch<{ job_id: number; self_update?: boolean }>(`/api/updates/${v.id}/apply`, {
+        method: "POST",
+        body: { scope: v.scope },
+      }),
     onSuccess: () => invalidate(qc, keys.updates, keys.projects),
     onError: toastError,
   });
@@ -200,7 +204,10 @@ export function useCheckForUpdates() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => apiFetch<SelfUpdate>("/api/updates/self?force=true"),
-    onSuccess: (data) => qc.setQueryData(keys.selfUpdate, data),
+    onSuccess: (data) => {
+      qc.setQueryData(keys.selfUpdate, data);
+      clearDismissedUpdate();
+    },
     onError: toastError,
   });
 }

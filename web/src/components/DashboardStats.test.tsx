@@ -16,7 +16,7 @@ const projects: Project[] = [
 const updates = [
   { id: 9, service_id: 1, from_digest: "a", to_digest: "b", from_version: "", to_version: "",
     tag: "1", severity: "minor", changelog_url: "", changelog_text: "", status: "available",
-    detected_at: "2026-07-04T00:00:00Z" },
+    detected_at: "2026-07-04T00:00:00Z", is_self: false },
 ] as Update[];
 
 test("renders counts and forwards tile clicks as filters", () => {
@@ -120,7 +120,7 @@ test("updates-available tile counts only currently-visible services, not service
   const goneUpdates: Update[] = [
     { id: 9, service_id: 1, from_digest: "a", to_digest: "b", from_version: "", to_version: "",
       tag: "1", severity: "minor", changelog_url: "", changelog_text: "", status: "available",
-      detected_at: "2026-07-04T00:00:00Z" },
+      detected_at: "2026-07-04T00:00:00Z", is_self: false },
   ];
   // showRemoved: false hides the gone service (and its update) from the table;
   // the tile must reflect that, not the raw updates list (which has 1 open update).

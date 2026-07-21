@@ -1,12 +1,13 @@
-import { useState } from "react";
 import { Download, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSelfUpdate } from "@/hooks/queries";
 import { useApplySelfUpdate } from "@/hooks/mutations";
+import { useDismissedUpdate } from "@/hooks/useDismissedUpdate";
+import { SELF_UPDATE_CONFIRM } from "@/lib/selfUpdate";
 
-export const DISMISS_KEY = "dockbrr_dismissed_update";
+export { DISMISS_KEY } from "@/hooks/useDismissedUpdate";
 
 /**
  * UpdateNotice shows a dismissable "Update Available" card in the sidebar when a
@@ -17,7 +18,7 @@ export const DISMISS_KEY = "dockbrr_dismissed_update";
 export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
   const { data } = useSelfUpdate();
   const apply = useApplySelfUpdate();
-  const [dismissed, setDismissed] = useState<string | null>(() => localStorage.getItem(DISMISS_KEY));
+  const { dismissed, dismiss: setDismissed } = useDismissedUpdate();
 
   if (!data?.update_available) return null;
   if (dismissed === data.latest) return null;
@@ -25,7 +26,6 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
   const dismiss = () => {
     // Guarded by the update_available check above: the backend always sends
     // latest/html_url together with update_available:true.
-    localStorage.setItem(DISMISS_KEY, data.latest!);
     setDismissed(data.latest!);
   };
 
@@ -76,7 +76,9 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
             variant="default"
             size="sm"
             disabled={apply.isPending}
-            onClick={() => apply.mutate()}
+            onClick={() => {
+              if (window.confirm(SELF_UPDATE_CONFIRM)) apply.mutate();
+            }}
           >
             {apply.isPending ? "Updating..." : "Update now"}
           </Button>

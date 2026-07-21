@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { delay, http, HttpResponse } from "msw";
@@ -6,6 +6,7 @@ import { server } from "@/test/msw";
 import { renderWithClient } from "@/test/utils";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { UpdateNotice, DISMISS_KEY } from "./UpdateNotice";
+import { clearDismissedUpdate } from "@/hooks/useDismissedUpdate";
 
 const available = {
   current: "0.4.2",
@@ -64,7 +65,20 @@ describe("UpdateNotice", () => {
     expect(await screen.findByText(/update available/i)).toBeInTheDocument();
   });
 
-  test("Update now posts to the apply endpoint and shows Updating while pending", async () => {
+  test("an external dismissal clear re-shows the card without a remount", async () => {
+    server.use(http.get("/api/updates/self", () => HttpResponse.json(available)));
+    renderWithClient(<UpdateNotice collapsed={false} />);
+
+    const dismiss = await screen.findByRole("button", { name: /dismiss/i });
+    await userEvent.click(dismiss);
+    expect(screen.queryByText(/update available/i)).not.toBeInTheDocument();
+
+    clearDismissedUpdate();
+
+    expect(await screen.findByText(/update available/i)).toBeInTheDocument();
+  });
+
+  test("Update now shows the self-update confirm, and posts to the apply endpoint only when confirmed", async () => {
     let posted = false;
     server.use(
       http.get("/api/updates/self", () => HttpResponse.json(available)),
@@ -74,13 +88,42 @@ describe("UpdateNotice", () => {
         return HttpResponse.json({ job_id: 5 });
       }),
     );
-    renderWithClient(<UpdateNotice collapsed={false} />);
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    try {
+      renderWithClient(<UpdateNotice collapsed={false} />);
 
-    const btn = await screen.findByRole("button", { name: /update now/i });
-    await userEvent.click(btn);
+      const btn = await screen.findByRole("button", { name: /update now/i });
+      await userEvent.click(btn);
 
-    expect(await screen.findByRole("button", { name: /updating/i })).toBeDisabled();
-    await waitFor(() => expect(posted).toBe(true));
+      expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining("Update dockbrr itself?"));
+      expect(await screen.findByRole("button", { name: /updating/i })).toBeDisabled();
+      await waitFor(() => expect(posted).toBe(true));
+    } finally {
+      confirmSpy.mockRestore();
+    }
+  });
+
+  test("Update now does not apply when the self-update confirm is cancelled", async () => {
+    let posted = false;
+    server.use(
+      http.get("/api/updates/self", () => HttpResponse.json(available)),
+      http.post("/api/updates/self/apply", () => {
+        posted = true;
+        return HttpResponse.json({ job_id: 5 });
+      }),
+    );
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    try {
+      renderWithClient(<UpdateNotice collapsed={false} />);
+
+      const btn = await screen.findByRole("button", { name: /update now/i });
+      await userEvent.click(btn);
+
+      expect(confirmSpy).toHaveBeenCalled();
+      expect(posted).toBe(false);
+    } finally {
+      confirmSpy.mockRestore();
+    }
   });
 
   test("collapsed variant renders an icon-only link, no card text", async () => {

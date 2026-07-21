@@ -13,7 +13,7 @@ const update: Update = {
   id: 42, service_id: 10, from_digest: "sha256:b", to_digest: "sha256:c",
   from_version: "1.27", to_version: "1.28", tag: "1.28", severity: "minor",
   changelog_url: "https://example.test/rel/1.28", changelog_text: "## What's new\n\n- faster",
-  status: "applied", detected_at: "2026-07-01T00:00:00Z",
+  status: "applied", detected_at: "2026-07-01T00:00:00Z", is_self: false,
 };
 
 test("renders the cached changelog markdown and the external link", () => {

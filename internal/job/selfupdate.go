@@ -71,6 +71,7 @@ func (u *SelfUpdater) Handle(ctx context.Context, job store.Job) {
 		_ = u.jobs.Finish(job.ID, "success", nil, "")
 		return
 	}
+	emit("this is dockbrr updating itself: the new image is pulled, then a short-lived helper swaps the container. A normal compose apply is not used here, and dockbrr will restart.")
 	currentRef, err := u.docker.ContainerImageRef(ctx, u.selfID)
 	if err != nil {
 		fail("could not resolve dockbrr's own image: " + err.Error())

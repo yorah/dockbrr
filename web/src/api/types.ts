@@ -39,6 +39,7 @@ export interface Update {
   changelog_status?: string;
   status: string;
   detected_at: string;
+  is_self: boolean;
 }
 export interface Settings {
   poll_interval_seconds: string;

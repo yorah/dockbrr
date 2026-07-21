@@ -23,6 +23,7 @@ type updateDTO struct {
 	ChangelogStatus string `json:"changelog_status"`
 	Status          string `json:"status"`
 	DetectedAt      string `json:"detected_at"`
+	IsSelf          bool   `json:"is_self"`
 }
 
 func (s *Server) handleListUpdates(w http.ResponseWriter, r *http.Request) {
@@ -33,12 +34,17 @@ func (s *Server) handleListUpdates(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]updateDTO, 0, len(ups))
 	for _, u := range ups {
+		isSelf := false
+		if svc, err := s.deps.Services.Get(u.ServiceID); err == nil {
+			isSelf = s.serviceIsSelf(svc)
+		}
 		out = append(out, updateDTO{
 			ID: u.ID, ServiceID: u.ServiceID, FromDigest: u.FromDigest, ToDigest: u.ToDigest,
 			FromVersion: u.FromVersion, ToVersion: u.ToVersion,
 			Tag: u.Tag, Severity: u.Severity,
 			ChangelogURL: u.ChangelogURL, ChangelogText: u.ChangelogText, ChangelogStatus: u.ChangelogStatus,
 			Status: u.Status, DetectedAt: u.DetectedAt.UTC().Format(time.RFC3339),
+			IsSelf: isSelf,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -56,12 +62,17 @@ func (s *Server) handleListLastApplied(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]updateDTO, 0, len(ups))
 	for _, u := range ups {
+		isSelf := false
+		if svc, err := s.deps.Services.Get(u.ServiceID); err == nil {
+			isSelf = s.serviceIsSelf(svc)
+		}
 		out = append(out, updateDTO{
 			ID: u.ID, ServiceID: u.ServiceID, FromDigest: u.FromDigest, ToDigest: u.ToDigest,
 			FromVersion: u.FromVersion, ToVersion: u.ToVersion,
 			Tag: u.Tag, Severity: u.Severity,
 			ChangelogURL: u.ChangelogURL, ChangelogText: u.ChangelogText, ChangelogStatus: u.ChangelogStatus,
 			Status: u.Status, DetectedAt: u.DetectedAt.UTC().Format(time.RFC3339),
+			IsSelf: isSelf,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -100,6 +111,23 @@ func (s *Server) handleApply(w http.ResponseWriter, r *http.Request) {
 	}
 	if svc.State == "gone" {
 		writeJSONError(w, http.StatusConflict, errors.New("service is gone: its container no longer exists, so it cannot be applied"))
+		return
+	}
+	// Applying an update to dockbrr's own container would recreate (and kill)
+	// dockbrr mid-job, so route to the self_update helper swap instead of a
+	// normal apply. The dispatcher's targetsSelf guard stays as defense in
+	// depth; this check just avoids enqueuing a doomed job in the first place.
+	if s.serviceIsSelf(svc) {
+		id, status, err := s.enqueueSelfUpdate(r.Context())
+		if err != nil {
+			if status == http.StatusInternalServerError {
+				writeInternalError(w, "enqueue self_update", err)
+			} else {
+				writeJSONError(w, status, err)
+			}
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"job_id": id, "self_update": true})
 		return
 	}
 	scope := scopeFromBody(r)

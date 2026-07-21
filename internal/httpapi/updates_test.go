@@ -112,6 +112,61 @@ func TestListUpdatesCarriesChangelogStatus(t *testing.T) {
 	}
 }
 
+// seedServiceWithContainer creates a project and a service with the given
+// container id, returning the service ID.
+func seedServiceWithContainer(t *testing.T, s *Server, containerID string) int64 {
+	t.Helper()
+	pid, err := s.deps.Projects.Upsert(store.Project{
+		HostID: 1, Kind: "compose", Name: "p" + containerID, Source: "discovered",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid, err := s.deps.Services.Upsert(store.Service{
+		ProjectID: pid, Name: "svc-" + containerID, ContainerIDs: []string{containerID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sid
+}
+
+// TestListUpdatesMarksSelf asserts that /api/updates marks the update for
+// dockbrr's own service with is_self:true, and leaves it false for every
+// other service, so the frontend can show a self-update-specific confirmation.
+func TestListUpdatesMarksSelf(t *testing.T) {
+	srv, db, tok, csrf := authedServer(t, Deps{})
+	d := updatesDeps(db)
+	d.SelfID = "3f2a1b9c4d5e"
+	srv.deps = mergeDeps(srv.deps, d)
+
+	selfSvc := seedServiceWithContainer(t, srv, "3f2a1b9c4d5e6f7089abcdef0123456789abcdef0123456789abcdef012345")
+	otherSvc := seedServiceWithContainer(t, srv, "ffffffffffff0000000000000000000000000000000000000000000000000")
+	if _, err := srv.deps.Updates.Upsert(store.Update{ServiceID: selfSvc, ToDigest: "sha256:new1", Status: "available"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.deps.Updates.Upsert(store.Update{ServiceID: otherSvc, ToDigest: "sha256:new2", Status: "available"}); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := authedGet(t, srv, "/api/updates", tok, csrf)
+	var out []updateDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+
+	byID := map[int64]bool{}
+	for _, u := range out {
+		byID[u.ServiceID] = u.IsSelf
+	}
+	if !byID[selfSvc] {
+		t.Errorf("self service update is_self = false, want true")
+	}
+	if byID[otherSvc] {
+		t.Errorf("non-self service update is_self = true, want false")
+	}
+}
+
 func TestListLastAppliedUpdates(t *testing.T) {
 	srv, db, tok, csrf := authedServer(t, Deps{})
 	srv.deps = mergeDeps(srv.deps, updatesDeps(db))

@@ -9,6 +9,15 @@ Format: `- [ ] [source-tag] short description, why deferred / what it needs`
 
 ## Open
 
+### Self-update detection under compose (branch `fix/self-update-detection-compose`, 2026-07-21, whole-branch review READY TO MERGE)
+
+Compose-hostname detection fix + route-apply-on-self-to-self_update + reactive dismissal. All 7
+safety invariants hold. One Minor fixed in-branch (triple `SelfContainerID()` call in main.go
+hoisted to one local). One genuine defer:
+
+- [ ] [sud-M1] `enqueueSelfUpdate` single-flight is check-then-enqueue, not atomic: `Jobs.ActiveByType("self_update")` (SELECT) then a separate `Enqueue`. This branch adds a SECOND caller (the apply-on-self route) alongside the manual `/api/updates/self/apply`, so two concurrent POSTs could in principle both pass the check and stack two `self_update` jobs, each spawning a detached swap helper. Pre-existing primitive (manual endpoint already had the race); not worsened, only a second caller added. Mitigated by single-user usage + `isPending`-disabled buttons. Needs a unique partial index on active `self_update` jobs, or a keyed lock, to make atomic. Revisit if multi-user or automation-triggered self-update lands.
+- Note: this branch's reactive dismissal (Task 7) RETIRES the earlier `[su-A1]` known-accepted item (dismissal not re-syncing across tabs): the `storage`-event subscription now cross-syncs tabs.
+
 ### v1 readiness P0+P1 (branch `worktree-v1-readiness`, 2026-07-18, whole-branch review READY TO MERGE)
 
 Deferred Minors from per-task reviews, triaged backlog-grade by the final review. Plus two

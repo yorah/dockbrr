@@ -1,8 +1,10 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"dockbrr/internal/selfupdate"
@@ -46,38 +48,66 @@ func (s *Server) handleSelfUpdate(w http.ResponseWriter, r *http.Request) {
 // Single-flight: if a self_update is already queued or running, the existing
 // job's id is returned (200) instead of enqueuing a second one.
 func (s *Server) handleSelfUpdateApply(w http.ResponseWriter, r *http.Request) {
-	if s.deps.SelfID == "" {
-		writeJSONError(w, http.StatusConflict, errors.New("self-update is only available when dockbrr runs in a container"))
+	id, status, err := s.enqueueSelfUpdate(r.Context())
+	if err != nil {
+		if status == http.StatusInternalServerError {
+			writeInternalError(w, "enqueue self_update", err)
+		} else {
+			writeJSONError(w, status, err)
+		}
 		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"job_id": id})
+}
+
+// serviceIsSelf reports whether svc is dockbrr's own container. False on a
+// host install (SelfID == ""). Ids may be stored 12- or 64-hex while SelfID
+// may be 64-hex, so prefix-match both directions (same rule as
+// job.Dispatcher.targetsSelf).
+func (s *Server) serviceIsSelf(svc store.Service) bool {
+	self := s.deps.SelfID
+	if self == "" {
+		return false
+	}
+	for _, cid := range svc.ContainerIDs {
+		if strings.HasPrefix(cid, self) || strings.HasPrefix(self, cid) {
+			return true
+		}
+	}
+	return false
+}
+
+// enqueueSelfUpdate runs the self_update preconditions and enqueues the job,
+// shared by the manual endpoint and the Apply-on-self route. status == 0 means
+// success (jobID is a new or an already-active single-flight job); a non-zero
+// status is the HTTP code to write alongside err. A StatusInternalServerError
+// status signals the caller to use writeInternalError.
+func (s *Server) enqueueSelfUpdate(ctx context.Context) (int64, int, error) {
+	if s.deps.SelfID == "" {
+		return 0, http.StatusConflict, errors.New("self-update is only available when dockbrr runs in a container")
 	}
 	if s.deps.SelfUpdate == nil {
-		writeJSONError(w, http.StatusConflict, errors.New("self-update is unavailable"))
-		return
+		return 0, http.StatusConflict, errors.New("self-update is unavailable")
 	}
-	res, err := s.deps.SelfUpdate.Check(r.Context())
+	res, err := s.deps.SelfUpdate.Check(ctx)
 	if err != nil {
-		writeJSONError(w, http.StatusConflict, errors.New("could not check for updates, try again later"))
-		return
+		return 0, http.StatusConflict, errors.New("could not check for updates, try again later")
 	}
 	if !res.UpdateAvailable {
-		writeJSONError(w, http.StatusConflict, errors.New("no dockbrr update is available"))
-		return
+		return 0, http.StatusConflict, errors.New("no dockbrr update is available")
 	}
 	if s.deps.Jobs != nil {
 		if active, ok, err := s.deps.Jobs.ActiveByType("self_update"); err != nil {
-			writeInternalError(w, "check active self_update", err)
-			return
+			return 0, http.StatusInternalServerError, err
 		} else if ok {
 			// Single-flight: a self_update is already queued or running. Return its
 			// id idempotently rather than stacking a second job on top of it.
-			writeJSON(w, http.StatusOK, map[string]any{"job_id": active.ID})
-			return
+			return active.ID, 0, nil
 		}
 	}
 	id, err := s.deps.Engine.Enqueue(store.Job{Type: "self_update", RequestedBy: "user"})
 	if err != nil {
-		writeInternalError(w, "enqueue self_update", err)
-		return
+		return 0, http.StatusInternalServerError, err
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"job_id": id})
+	return id, 0, nil
 }
