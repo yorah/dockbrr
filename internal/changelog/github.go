@@ -153,6 +153,16 @@ func (s *GitHubSource) Resolve(ctx context.Context, in Input) (Result, error) {
 	want := tgt.tags(in.Version)
 	target, ok := findRelease(rels, want, in.Version)
 	if !ok {
+		// Rolling tag (non-semver version, e.g. "master-omnibus"): no release is
+		// tagged with it, but the running digest is built from the repo tip, so the
+		// latest stable release is the right proxy. Only for non-semver versions: a
+		// semver miss must not resolve to an unrelated latest release.
+		if _, parseable := detect.ParseCore(in.Version); !parseable {
+			if latest, ok := latestStableRelease(rels); ok {
+				note := fmt.Sprintf("_Latest release for rolling tag `%s`._\n\n", in.Version)
+				return Result{Text: note + latest.Body, URL: latest.HTMLURL}, nil
+			}
+		}
 		link, ok, err := s.changelogLink(ctx, owner, name, want)
 		if err != nil {
 			return Result{}, err
@@ -212,6 +222,31 @@ func findRelease(rels []ghRelease, want []string, version string) (ghRelease, bo
 	for _, rel := range rels {
 		norm := normalizeTag(rel.TagName)
 		if !strings.HasPrefix(norm, v+".") {
+			continue
+		}
+		c, ok := detect.ParseCore(norm)
+		if !ok {
+			continue
+		}
+		if !found || detect.CoreLess(bestCore, c) {
+			best, bestCore, found = rel, c, true
+		}
+	}
+	return best, found
+}
+
+// latestStableRelease returns the highest-semver stable release in rels
+// (pre-releases skipped), for rolling-tag images whose version matches no release
+// tag. Mirrors findRelease's prefix-scan / CoreLess ranking: highest version wins,
+// not first-listed, since GitHub orders releases by publish date and a backport can
+// precede the newest release.
+func latestStableRelease(rels []ghRelease) (ghRelease, bool) {
+	var best ghRelease
+	var bestCore [3]int
+	found := false
+	for _, rel := range rels {
+		norm := normalizeTag(rel.TagName)
+		if isPrerelease(norm) {
 			continue
 		}
 		c, ok := detect.ParseCore(norm)
