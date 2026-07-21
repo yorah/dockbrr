@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.9.0](https://github.com/yorah/dockbrr/compare/v0.8.0...v0.9.0) (2026-07-21)
+
+
+### Features
+
+* scan progress + cross-navigation button disabling ([#54](https://github.com/yorah/dockbrr/issues/54)) ([08925e2](https://github.com/yorah/dockbrr/commit/08925e299479613e97f5b20b939b63488d52601a))
+
+
+### Bug Fixes
+
+* self-update detection under Docker Compose + route apply-on-self to the self-updater ([#55](https://github.com/yorah/dockbrr/issues/55)) ([74f1479](https://github.com/yorah/dockbrr/commit/74f1479379d55e100d0bed768cf22ea149ecb2c4))
+
 ## [0.8.0](https://github.com/yorah/dockbrr/compare/v0.7.0...v0.8.0) (2026-07-20)
 
 
