@@ -33,6 +33,24 @@ func (cl *Client) ContainerImageRef(ctx context.Context, id string) (string, err
 	return ct.Config.Image, nil
 }
 
+// ImageVersion returns a local image's org.opencontainers.image.version label,
+// the value GoReleaser stamps on published dockbrr images (.goreleaser.yaml).
+// Empty string when the image carries no such label. Read-only; the image must
+// already be present locally (the self-updater calls this right after
+// ImagePull to confirm the pulled image is really the release it intends to
+// install, since a floating tag like :latest can still resolve to an older
+// image while a new release's image is mid-publish).
+func (cl *Client) ImageVersion(ctx context.Context, ref string) (string, error) {
+	img, err := cl.c.ImageInspect(ctx, ref)
+	if err != nil {
+		return "", fmt.Errorf("docker: inspect image %s: %w", ref, err)
+	}
+	if img.Config == nil {
+		return "", nil
+	}
+	return img.Config.Labels["org.opencontainers.image.version"], nil
+}
+
 // SpawnUpdater creates and starts a detached helper container that runs `image`
 // with `cmd`, bind-mounting the Docker socket so the helper can drive the daemon
 // after dockbrr itself stops. It is NOT auto-removed: a failed swap leaves the
