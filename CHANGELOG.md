@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.2](https://github.com/yorah/dockbrr/compare/v0.11.1...v0.11.2) (2026-07-22)
+
+
+### Bug Fixes
+
+* **selfupdate:** surface manual check failures instead of masking them ([#78](https://github.com/yorah/dockbrr/issues/78)) ([0a611e0](https://github.com/yorah/dockbrr/commit/0a611e09a869ba3d4630aa8077312a31e871f68b))
+* **web:** keep the self-update button disabled after the job succeeds ([#80](https://github.com/yorah/dockbrr/issues/80)) ([7744b43](https://github.com/yorah/dockbrr/commit/7744b43b7b7e5f6f61448744a0cfa457cc1bf7b7))
+
 ## [0.11.1](https://github.com/yorah/dockbrr/compare/v0.11.0...v0.11.1) (2026-07-22)
 
 
