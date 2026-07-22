@@ -280,7 +280,7 @@ git commit -m "feat(httpapi): surface github error_kind on self-update check"
 **Interfaces:**
 - Consumes: `changelog.ErrRateLimited` (already used in scan.go).
 - Produces:
-  - `Scanner.CheckServicesFresh(ctx, ids, reopen, onDone) (bool, error)` — first return is `true` when any changelog resolve during the sweep hit the GitHub rate limit.
+  - `Scanner.CheckServicesFresh(ctx, ids, reopen, onDone) (bool, error)`: first return is `true` when any changelog resolve during the sweep hit the GitHub rate limit.
   - Exported `Scanner.CheckService(ctx, id) error` and `Scanner.CheckServiceFresh(ctx, id) error` keep their `error`-only signatures (thin wrappers over new internal `(bool, error)` helpers).
   - httpapi `Checker` interface method `CheckServicesFresh` now returns `(bool, error)`.
 
