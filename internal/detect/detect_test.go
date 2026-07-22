@@ -5,7 +5,6 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 
@@ -107,7 +106,7 @@ func newDetector(db *store.DB, r detect.Resolver) *detect.Detector {
 	return detect.NewDetector(
 		r, store.NewUpdates(db), store.NewImages(db),
 		store.NewRemoteStates(db), store.NewEvents(db), store.NewTagDigests(db),
-		registry.HostPlatform(), func() time.Duration { return time.Minute },
+		registry.HostPlatform(),
 	)
 }
 
@@ -203,61 +202,6 @@ func TestDetectUpToDateSupersedesStaleOpenUpdate(t *testing.T) {
 	}
 	if open, _ := store.NewUpdates(db).ListOpen(); len(open) != 0 {
 		t.Fatalf("stale update not superseded: open updates = %d, want 0", len(open))
-	}
-}
-
-// TestDetectCacheHitUpToDateKeepsSemverUpdateOpen pins the digest-only
-// cache-hit path's supersede scope: the tracked tag matching the running
-// digest says NOTHING about a semver update targeting a different tag (the
-// cache-hit path skips the tag scan), so that row must stay open. Before this
-// was narrowed, a scan-all inside the cache TTL right after a manual check
-// flapped the freshly (re)opened semver update back to superseded.
-func TestDetectCacheHitUpToDateKeepsSemverUpdateOpen(t *testing.T) {
-	db := newDB(t)
-	svc := seedSvc(t, db, "ghcr.io/acme/web:1.2.3", "sha256:old", false)
-	updates := store.NewUpdates(db)
-
-	// A semver update to a different tag's digest...
-	semverID, _, err := updates.RecordDrift(store.Update{
-		ServiceID: svc.ID, FromDigest: "sha256:old", ToDigest: "sha256:semver",
-		Tag: "1.3.0", Severity: "minor", Status: "available",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// ...and a same-tag update whose target the service has since reached
-	// (to_digest == running digest). RecordDrift's tail superseded the semver
-	// row (one-available invariant); force both open to observe the scope.
-	reachedID, _, err := updates.RecordDrift(store.Update{
-		ServiceID: svc.ID, FromDigest: "sha256:older", ToDigest: "sha256:old",
-		Tag: "1.2.3", Status: "available",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := updates.SetStatus(semverID, "available"); err != nil {
-		t.Fatal(err)
-	}
-
-	// Fresh cache: tracked tag resolves to the running digest (up to date).
-	now := time.Now().UTC()
-	_ = store.NewRemoteStates(db).Upsert(store.RemoteState{
-		Repo: "ghcr.io/acme/web", Tag: "1.2.3", RemoteDigest: "sha256:old",
-		Status: "ok", ResolvedAt: &now,
-	})
-	r := fakeResolver{err: errors.New("resolver must not be called on a fresh cache hit")}
-	u, err := newDetector(db, r).Detect(context.Background(), svc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if u != nil {
-		t.Fatalf("expected no update on cache-hit up-to-date, got %+v", u)
-	}
-	if got, _ := updates.Get(reachedID); got.Status != "superseded" {
-		t.Fatalf("reached-target row status = %q, want superseded", got.Status)
-	}
-	if got, _ := updates.Get(semverID); got.Status != "available" {
-		t.Fatalf("semver row status = %q, want available (cache-hit path must not close it)", got.Status)
 	}
 }
 
@@ -384,56 +328,6 @@ func TestDetectPinnedStillInforms(t *testing.T) {
 	}
 	if len(open) != 1 {
 		t.Fatalf("open updates = %d, want 1", len(open))
-	}
-}
-
-func TestDetectUsesFreshCache(t *testing.T) {
-	db := newDB(t)
-	svc := seedSvc(t, db, "ghcr.io/acme/web:1.2.3", "sha256:old", false)
-	// Pre-seed a fresh ok cache entry; resolver would error if called.
-	now := time.Now().UTC()
-	_ = store.NewRemoteStates(db).Upsert(store.RemoteState{
-		Repo: "ghcr.io/acme/web", Tag: "1.2.3", RemoteDigest: "sha256:cached",
-		Status: "ok", ResolvedAt: &now,
-	})
-	r := fakeResolver{err: errors.New("resolver must not be called on a fresh cache hit")}
-	u, err := newDetector(db, r).Detect(context.Background(), svc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if u == nil || u.ToDigest != "sha256:cached" {
-		t.Fatalf("expected update from cached digest, got %+v", u)
-	}
-	if u.Severity != "digest-only" {
-		t.Fatalf("cache-path severity = %q, want digest-only", u.Severity)
-	}
-}
-
-func TestDetectIgnoresEmptyCachedDigest(t *testing.T) {
-	db := newDB(t)
-	svc := seedSvc(t, db, "ghcr.io/acme/web:1.2.3", "sha256:old", false)
-
-	// Pre-seed a fresh ok RemoteState with an empty RemoteDigest.
-	now := time.Now().UTC()
-	if err := store.NewRemoteStates(db).Upsert(store.RemoteState{
-		Repo: "ghcr.io/acme/web", Tag: "1.2.3", RemoteDigest: "",
-		Status: "ok", ResolvedAt: &now,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	// Resolver returns a real digest when called; if the empty cache row is
-	// NOT skipped, the resolver would not be called and no update would be
-	// recorded.
-	resolverDigest := "sha256:real"
-	r := fakeResolver{img: registry.RemoteImage{Digest: resolverDigest, PlatformDigest: resolverDigest}}
-	u, err := newDetector(db, r).Detect(context.Background(), svc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The resolver must have been consulted; the result must have the resolver's digest.
-	if u == nil || u.ToDigest != resolverDigest {
-		t.Fatalf("expected update with digest %q from resolver (empty cache should be skipped), got %+v", resolverDigest, u)
 	}
 }
 
@@ -567,82 +461,6 @@ func TestDetectTagListFailureFallsBackToDigestCompare(t *testing.T) {
 	}
 	if u.Severity != "digest-only" {
 		t.Fatalf("severity = %q, want digest-only (no version label, tag unchanged)", u.Severity)
-	}
-}
-
-// countingResolver counts Resolve calls so a test can assert whether the
-// network path was consulted.
-type countingResolver struct {
-	calls  *int
-	digest string
-}
-
-func (c countingResolver) Resolve(_ context.Context, ref string, _ registry.Platform) (registry.RemoteImage, error) {
-	*c.calls++
-	return registry.RemoteImage{Ref: ref, Digest: c.digest, PlatformDigest: c.digest}, nil
-}
-
-func (c countingResolver) ListTags(_ context.Context, _ string) ([]string, error) {
-	return nil, nil
-}
-
-func (c countingResolver) ConfigDigest(_ context.Context, _ string, _ registry.Platform) (string, error) {
-	return c.digest, nil
-}
-
-// TestDetectCacheTTLReadPerCall proves cacheTTL is consulted on every Detect
-// call rather than captured once at NewDetector time: the same detector
-// instance, given the same stale-ish cache row, behaves differently across
-// two calls purely because the closure's returned value changed in between.
-func TestDetectCacheTTLReadPerCall(t *testing.T) {
-	db := newDB(t)
-	svc := seedSvc(t, db, "ghcr.io/acme/web:1.2.3", "sha256:old", false)
-
-	// Seed a cache row that is 90s old.
-	seededAt := time.Now().UTC().Add(-90 * time.Second)
-	if err := store.NewRemoteStates(db).Upsert(store.RemoteState{
-		Repo: "ghcr.io/acme/web", Tag: "1.2.3", RemoteDigest: "sha256:cached",
-		Status: "ok", ResolvedAt: &seededAt,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	calls := 0
-	r := countingResolver{calls: &calls, digest: "sha256:resolved"}
-
-	ttl := 5 * time.Minute // long enough to cover the 90s-old row
-	d := detect.NewDetector(
-		r, store.NewUpdates(db), store.NewImages(db),
-		store.NewRemoteStates(db), store.NewEvents(db), store.NewTagDigests(db),
-		registry.HostPlatform(), func() time.Duration { return ttl },
-	)
-
-	// 1st Detect: ttl is long, so the 90s-old row reads as fresh -> cache hit,
-	// resolver untouched.
-	u1, err := d.Detect(context.Background(), svc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if calls != 0 {
-		t.Fatalf("expected cache hit (no resolver call) on first Detect, got %d calls", calls)
-	}
-	if u1 == nil || u1.ToDigest != "sha256:cached" {
-		t.Fatalf("expected update from cached digest on first Detect, got %+v", u1)
-	}
-
-	// Flip ttl short. The row itself hasn't changed (a cache hit never
-	// upserts) -- only the closure's return value did. If cacheTTL were
-	// captured once at construction, this call would still hit the cache.
-	ttl = 1 * time.Second
-	u2, err := d.Detect(context.Background(), svc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if calls != 1 {
-		t.Fatalf("expected resolver to be called after ttl flip (cache now stale), got %d calls", calls)
-	}
-	if u2 == nil || u2.ToDigest != "sha256:resolved" {
-		t.Fatalf("expected update from resolver after ttl flip, got %+v", u2)
 	}
 }
 
@@ -995,19 +813,6 @@ func TestResolveCurrentVersionNegativeCache(t *testing.T) {
 		t.Fatal("VersionResolved = false after a conclusive no-match, want true")
 	}
 
-	// Force the remote-state cache row stale so the second Detect takes the
-	// full resolve path (through resolveCurrentVersion) rather than a cheap
-	// digest-only cache hit; the cache-hit path (step 1) returns before
-	// resolveCurrentVersion ever runs, which would make the assertion below
-	// pass without actually exercising the version_resolved negative cache.
-	stale := time.Now().UTC().Add(-2 * time.Minute)
-	if err := store.NewRemoteStates(db).Upsert(store.RemoteState{
-		Repo: "acme/app", Tag: "latest", RemoteDigest: "sha256:list",
-		Status: "ok", ResolvedAt: &stale,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
 	// Second detect (same digest) must not re-run the tag list.
 	first := listCalls
 	if _, err := newDetector(db, r).Detect(context.Background(), svc); err != nil {
@@ -1057,17 +862,6 @@ func TestResolveCurrentVersionInconclusiveScanNotPersisted(t *testing.T) {
 	}
 	if n := seen["acme/floaty:1.0.0"]; n != 1 {
 		t.Fatalf("ConfigDigest calls = %d, want 1 (loop aborts on first rate-limited candidate)", n)
-	}
-
-	// Force the remote-state cache row stale so a second Detect takes the full
-	// resolve path again rather than a cheap digest-only cache hit (which
-	// never calls resolveCurrentVersion at all).
-	stale := time.Now().UTC().Add(-2 * time.Minute)
-	if err := store.NewRemoteStates(db).Upsert(store.RemoteState{
-		Repo: "acme/floaty", Tag: "latest", RemoteDigest: "sha256:list3",
-		Status: "ok", ResolvedAt: &stale,
-	}); err != nil {
-		t.Fatal(err)
 	}
 
 	// Second detect: since VersionResolved is still false, the scan must

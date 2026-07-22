@@ -47,7 +47,6 @@ export interface Settings {
   concurrency: string;
   health_timeout_seconds: string;
   health_poll_seconds: string;
-  cache_ttl_seconds: string;
   write_back_compose: string;
   auto_remove_gone: string;
   default_auto_update_enabled: string;

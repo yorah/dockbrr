@@ -30,12 +30,9 @@ type Detector struct {
 	events   *store.Events
 	tagCache *store.TagDigests
 	plat     registry.Platform
-	cacheTTL func() time.Duration
 }
 
-// NewDetector wires the detector. cacheTTL is consulted on every Detect call
-// (not just at construction) so a live settings change bounding reuse of a
-// prior ok remote resolution takes effect without a restart.
+// NewDetector wires the detector.
 func NewDetector(
 	resolver Resolver,
 	updates *store.Updates,
@@ -44,15 +41,11 @@ func NewDetector(
 	events *store.Events,
 	tagCache *store.TagDigests,
 	plat registry.Platform,
-	cacheTTL func() time.Duration,
 ) *Detector {
-	if cacheTTL == nil {
-		cacheTTL = func() time.Duration { return 10 * time.Minute }
-	}
 	return &Detector{
 		resolver: resolver, updates: updates, images: images,
 		states: states, events: events, tagCache: tagCache,
-		plat: plat, cacheTTL: cacheTTL,
+		plat: plat,
 	}
 }
 
@@ -75,25 +68,7 @@ func (d *Detector) Detect(ctx context.Context, svc store.Service) (*store.Update
 		return nil, nil
 	}
 
-	// 1. Try a fresh cache hit (digest only, no labels). A cache hit
-	// intentionally skips the semver tag scan below (digest-only path) until
-	// the cache TTL expires.
-	if remoteDigest, ok := d.freshCachedDigest(repo, tag, now); ok {
-		logger.Tracef("detect: %s cache hit digest %s", svc.ImageRef, shortDigest(remoteDigest))
-		if remoteDigest == svc.CurrentDigest {
-			// Only close updates whose target the service now RUNS. This path
-			// skipped the semver tag scan, so an open update targeting a
-			// different (newer) tag may still be perfectly current; supersede
-			// -all here would flap it closed on every cache-window re-check
-			// (e.g. a scan-all right after a manual per-service check) until
-			// the TTL expires and the full resolve re-opens it.
-			d.closeReachedUpdates(svc.ID, remoteDigest)
-			return nil, nil
-		}
-		return d.record(svc, tag, remoteDigest, "", "", "digest-only")
-	}
-
-	// 2. Resolve from the network.
+	// 1. Resolve from the network.
 	logger.Tracef("detect: %s resolving from registry", svc.ImageRef)
 	remote, err := d.resolver.Resolve(ctx, svc.ImageRef, d.plat)
 	if err != nil {
@@ -120,7 +95,7 @@ func (d *Detector) Detect(ctx context.Context, svc store.Service) (*store.Update
 		return nil, nil // non-fatal
 	}
 
-	// 3. Cache the ok resolution + record the observed image (best effort).
+	// 2. Cache the ok resolution + record the observed image (best effort).
 	// Normalize nil labels to an empty map so json.Marshal emits {} not null.
 	if remote.Labels == nil {
 		remote.Labels = map[string]string{}
@@ -134,7 +109,7 @@ func (d *Detector) Detect(ctx context.Context, svc store.Service) (*store.Update
 	d.recordImage(repo, tag, remote, labelsStr)
 	logger.Debugf("detect: %s resolved digest %s (current %s)", svc.ImageRef, shortDigest(remote.Digest), shortDigest(svc.CurrentDigest))
 
-	// 3b. Semver tag scan (design §5.4): when the tracked tag is an EXACT
+	// 2b. Semver tag scan (design §5.4): when the tracked tag is an EXACT
 	// (full-semver) pin, look for a strictly newer stable tag and, if found,
 	// target THAT tag's digest. This must NOT run for floating tags (latest,
 	// named, or partial semver like "1" / "1.31"), since apply floats a floating
@@ -166,7 +141,7 @@ func (d *Detector) Detect(ctx context.Context, svc store.Service) (*store.Update
 		d.recordImage(repo, targetTag, targetRemote, string(targetLabelsJSON))
 	}
 
-	// 4. Compare (match on either the served or platform digest).
+	// 3. Compare (match on either the served or platform digest).
 	if targetRemote.Digest == svc.CurrentDigest || targetRemote.PlatformDigest == svc.CurrentDigest {
 		// Up to date. A floating tag (latest) with no version label would show
 		// only ":latest" on the dashboard, since version enrichment otherwise
@@ -179,7 +154,7 @@ func (d *Detector) Detect(ctx context.Context, svc store.Service) (*store.Update
 		return nil, nil
 	}
 
-	// 5. Classify severity from versions. When the semver scan actually moved
+	// 4. Classify severity from versions. When the semver scan actually moved
 	// to a different tag, that tag's own version string is authoritative.
 	// Otherwise (same tracked tag), prefer the OCI version label as before:
 	// it can be more precise than the tag itself (e.g. a floating tag whose
@@ -201,7 +176,7 @@ func (d *Detector) Detect(ctx context.Context, svc store.Service) (*store.Update
 	if toVer == "" {
 		toVer = targetRemote.Labels["org.opencontainers.image.version"]
 	}
-	// 5b. Fully-floating tag (latest, stable, named): the tag carries no semver.
+	// 4b. Fully-floating tag (latest, stable, named): the tag carries no semver.
 	// Name both ends by matching the running + target CONFIG digests back to the
 	// repo's stable semver tags. A digest-matched real tag wins over the OCI
 	// image.version label, which some images set to a base-OS version (e.g.
@@ -397,21 +372,6 @@ func (d *Detector) closeStaleUpdates(serviceID int64) {
 	}
 }
 
-// closeReachedUpdates is closeStaleUpdates' narrow sibling for the digest-only
-// cache-hit path: it supersedes only updates whose target digest the service
-// now runs, leaving different-tag (semver) targets open since that path cannot
-// judge them. Best-effort: a failure is logged, never fatal.
-func (d *Detector) closeReachedUpdates(serviceID int64, reachedDigest string) {
-	if d.updates == nil {
-		return
-	}
-	if n, err := d.updates.SupersedeOpenAtDigest(serviceID, reachedDigest); err != nil {
-		logger.Warnf("detect: supersede reached updates for service %d: %v", serviceID, err)
-	} else if n > 0 {
-		logger.Debugf("detect: service %d reached %s, superseded %d update(s)", serviceID, shortDigest(reachedDigest), n)
-	}
-}
-
 // resolveCurrentVersion names the running version of an up-to-date, fully-
 // floating service and caches it on the image row (keyed by the served digest)
 // so the dashboard can show a release for a tag that carries no semver. The name
@@ -447,21 +407,6 @@ func (d *Detector) resolveCurrentVersion(ctx context.Context, repo, tag, digest,
 	if err := d.images.SetResolvedVersion(repo, digest, ver); err != nil {
 		logger.Warnf("detect: set resolved version %s@%s: %v", repo, shortDigest(digest), err)
 	}
-}
-
-// freshCachedDigest returns the cached remote digest for (repo, tag) when the
-// last resolution was ok and within cacheTTL. An empty cached digest is
-// rejected (falls through to the network) to prevent recording an update with
-// an empty to_digest.
-func (d *Detector) freshCachedDigest(repo, tag string, now time.Time) (string, bool) {
-	st, err := d.states.Get(repo, tag)
-	if err != nil || st.Status != "ok" || st.ResolvedAt == nil || st.RemoteDigest == "" {
-		return "", false
-	}
-	if now.Sub(*st.ResolvedAt) > d.cacheTTL() {
-		return "", false
-	}
-	return st.RemoteDigest, true
 }
 
 // SplitRef splits an image reference into its repo and tag. A digest-only or

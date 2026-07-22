@@ -73,7 +73,7 @@ func newScannerWithServices(t *testing.T, n int) (*scan.Scanner, []int64) {
 		}
 		ids[i] = sid
 	}
-	s := scan.New(fakeDetector{}, &fakeChangelog{}, store.NewServices(db), store.NewUpdates(db), store.NewImages(db), &spyInvalidator{}, nil)
+	s := scan.New(fakeDetector{}, &fakeChangelog{}, store.NewServices(db), store.NewUpdates(db), store.NewImages(db), nil)
 	return s, ids
 }
 
@@ -93,7 +93,7 @@ func TestCheckServicePersistsChangelogFromStoredLabels(t *testing.T) {
 
 	det := fakeDetector{upd: &store.Update{ID: uid, ServiceID: sid, ToDigest: "sha256:new", Tag: "1.3.0"}}
 	cl := &fakeChangelog{text: "release notes", url: "https://github.com/acme/web/releases/tag/1.3.0"}
-	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil, nil)
+	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil)
 
 	if err := s.CheckService(context.Background(), sid); err != nil {
 		t.Fatal(err)
@@ -119,7 +119,7 @@ func TestCheckServicePersistsRateLimitedStatus(t *testing.T) {
 
 	det := fakeDetector{upd: &store.Update{ID: uid, ServiceID: sid, ToDigest: "sha256:new", Tag: "1.3.0"}}
 	cl := &fakeChangelog{err: changelog.ErrRateLimited}
-	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil, nil)
+	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil)
 
 	if err := s.CheckService(context.Background(), sid); err != nil {
 		t.Fatal(err)
@@ -155,7 +155,7 @@ func TestCheckServiceClearsRateLimitedStatusOnSuccess(t *testing.T) {
 
 	det := fakeDetector{upd: &store.Update{ID: uid, ServiceID: sid, ToDigest: "sha256:new", Tag: "1.3.0"}}
 	cl := &fakeChangelog{text: "release notes", url: "https://github.com/acme/web/releases/tag/1.3.0"}
-	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil, nil)
+	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil)
 
 	if err := s.CheckService(context.Background(), sid); err != nil {
 		t.Fatal(err)
@@ -184,13 +184,13 @@ func TestCheckServiceEmitsBreadcrumbs(t *testing.T) {
 	sid, _ := store.NewServices(db).Upsert(store.Service{ProjectID: pid, Name: "app", ImageRef: "ghcr.io/acme/web:1.2.0", CurrentDigest: "sha256:old"})
 
 	// up-to-date -> debug "checking" + "up to date", no info update line
-	upToDate := scan.New(fakeDetector{upd: nil}, &fakeChangelog{}, store.NewServices(db), store.NewUpdates(db), store.NewImages(db), nil, nil)
+	upToDate := scan.New(fakeDetector{upd: nil}, &fakeChangelog{}, store.NewServices(db), store.NewUpdates(db), store.NewImages(db), nil)
 	if err := upToDate.CheckService(context.Background(), sid); err != nil {
 		t.Fatal(err)
 	}
 	// update found -> info "update available"
 	det := fakeDetector{upd: &store.Update{ServiceID: sid, ToDigest: "sha256:new", FromVersion: "1.2.0", ToVersion: "1.3.0", Severity: "minor"}}
-	withUpd := scan.New(det, &fakeChangelog{}, store.NewServices(db), store.NewUpdates(db), store.NewImages(db), nil, nil)
+	withUpd := scan.New(det, &fakeChangelog{}, store.NewServices(db), store.NewUpdates(db), store.NewImages(db), nil)
 	if err := withUpd.CheckService(context.Background(), sid); err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestCheckServiceNoUpdateIsNoop(t *testing.T) {
 	det := fakeDetector{upd: nil} // up-to-date
 	cl := &fakeChangelog{}
 	notified := false
-	s := scan.New(det, cl, store.NewServices(db), store.NewUpdates(db), store.NewImages(db), nil, func(int64) { notified = true })
+	s := scan.New(det, cl, store.NewServices(db), store.NewUpdates(db), store.NewImages(db), func(int64) { notified = true })
 	if err := s.CheckService(context.Background(), sid); err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestCheckServiceNotifiesOnFreshUpdate(t *testing.T) {
 	sid, _ := store.NewServices(db).Upsert(store.Service{ProjectID: pid, Name: "app", ImageRef: "ghcr.io/acme/web:1.2.0"})
 	det := fakeDetector{upd: &store.Update{ServiceID: sid, ToDigest: "sha256:new", Tag: "1.3.0"}}
 	var gotID int64
-	s := scan.New(det, &fakeChangelog{}, store.NewServices(db), store.NewUpdates(db), store.NewImages(db), nil, func(id int64) { gotID = id })
+	s := scan.New(det, &fakeChangelog{}, store.NewServices(db), store.NewUpdates(db), store.NewImages(db), func(id int64) { gotID = id })
 	if err := s.CheckService(context.Background(), sid); err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +248,7 @@ func TestCheckServiceNotifyDedupsSameStandingDrift(t *testing.T) {
 	// Detector returns the SAME standing update on every poll (drift persists).
 	det := fakeDetector{upd: &store.Update{ServiceID: sid, ToDigest: "sha256:new", Tag: "1.3.0"}}
 	calls := 0
-	s := scan.New(det, &fakeChangelog{}, store.NewServices(db), store.NewUpdates(db), store.NewImages(db), nil, func(int64) { calls++ })
+	s := scan.New(det, &fakeChangelog{}, store.NewServices(db), store.NewUpdates(db), store.NewImages(db), func(int64) { calls++ })
 	for i := 0; i < 3; i++ {
 		if err := s.CheckService(context.Background(), sid); err != nil {
 			t.Fatal(err)
@@ -265,7 +265,7 @@ func TestCheckServiceNotifyRefiresAfterDriftClearsAndReturns(t *testing.T) {
 	sid, _ := store.NewServices(db).Upsert(store.Service{ProjectID: pid, Name: "app", ImageRef: "ghcr.io/acme/web:1.2.0"})
 	det := &togglingDetector{upd: &store.Update{ServiceID: sid, ToDigest: "sha256:v2", Tag: "2.0.0"}}
 	calls := 0
-	s := scan.New(det, &fakeChangelog{}, store.NewServices(db), store.NewUpdates(db), store.NewImages(db), nil, func(int64) { calls++ })
+	s := scan.New(det, &fakeChangelog{}, store.NewServices(db), store.NewUpdates(db), store.NewImages(db), func(int64) { calls++ })
 	check := func() {
 		if err := s.CheckService(context.Background(), sid); err != nil {
 			t.Fatal(err)
@@ -302,7 +302,7 @@ func TestCheckServiceCreatesCurrentRowWhenUpToDateNoHistory(t *testing.T) {
 	updates := store.NewUpdates(db)
 	det := fakeDetector{upd: nil} // up to date
 	cl := &fakeChangelog{text: "# 1.2.3 notes", url: "https://github.com/acme/web/releases/tag/1.2.3"}
-	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil, nil)
+	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil)
 
 	if err := s.CheckService(context.Background(), sid); err != nil {
 		t.Fatal(err)
@@ -352,7 +352,7 @@ func TestCheckServiceSkipsCurrentRowWhenHistoryExists(t *testing.T) {
 
 	det := fakeDetector{upd: nil}
 	cl := &fakeChangelog{text: "should not be called for current", url: "https://x"}
-	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil, nil)
+	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil)
 
 	if err := s.CheckService(context.Background(), sid); err != nil {
 		t.Fatal(err)
@@ -375,7 +375,7 @@ func TestCheckServiceCurrentRowRateLimited(t *testing.T) {
 	updates := store.NewUpdates(db)
 	det := fakeDetector{upd: nil}
 	cl := &fakeChangelog{err: changelog.ErrRateLimited}
-	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil, nil)
+	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil)
 
 	if err := s.CheckService(context.Background(), sid); err != nil {
 		t.Fatal(err)
@@ -410,7 +410,7 @@ func TestCheckServiceRefreshesStaleCurrentRowOnNewDigest(t *testing.T) {
 
 	det := fakeDetector{upd: nil} // up to date at sha256:new
 	cl := &fakeChangelog{text: "# 0.10.0 notes", url: "https://github.com/yorah/dockbrr/releases/tag/0.10.0"}
-	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil, nil)
+	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil)
 
 	if err := s.CheckService(context.Background(), sid); err != nil {
 		t.Fatal(err)
@@ -460,7 +460,7 @@ func TestCheckServiceWritesBaselineWhenOnlySupersededHistory(t *testing.T) {
 
 	det := fakeDetector{upd: nil} // up to date
 	cl := &fakeChangelog{text: "# 0.9.2 notes", url: "https://github.com/AnalogJ/scrutiny/releases/tag/v0.9.2"}
-	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil, nil)
+	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil)
 
 	if err := s.CheckService(context.Background(), sid); err != nil {
 		t.Fatal(err)
@@ -491,7 +491,7 @@ func TestCheckServiceDoesNotReresolveFreshCurrentRow(t *testing.T) {
 	updates := store.NewUpdates(db)
 	det := fakeDetector{upd: nil}
 	cl := &fakeChangelog{text: "# notes", url: "https://x"}
-	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil, nil)
+	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil)
 
 	if err := s.CheckService(context.Background(), sid); err != nil {
 		t.Fatal(err)
@@ -516,7 +516,7 @@ func TestCheckServiceRetriesEmptyCurrentRow(t *testing.T) {
 	updates := store.NewUpdates(db)
 	det := fakeDetector{upd: nil}
 	cl := &fakeChangelog{text: "", url: ""} // first resolve: empty miss
-	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil, nil)
+	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil)
 
 	if err := s.CheckService(context.Background(), sid); err != nil {
 		t.Fatal(err)
@@ -539,46 +539,19 @@ func TestCheckServiceRetriesEmptyCurrentRow(t *testing.T) {
 	}
 }
 
-func TestCheckAllSweepsAllServices(t *testing.T) {
-	db := openScanStore(t)
-	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
-	_, _ = store.NewServices(db).Upsert(store.Service{ProjectID: pid, Name: "a"})
-	_, _ = store.NewServices(db).Upsert(store.Service{ProjectID: pid, Name: "b"})
-	det := fakeDetector{upd: nil}
-	s := scan.New(det, &fakeChangelog{}, store.NewServices(db), store.NewUpdates(db), store.NewImages(db), nil, nil)
-	if err := s.CheckAll(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-}
+func TestCheckServicesFreshStopsOnCancelledContext(t *testing.T) {
+	sc, svcIDs := newScannerWithServices(t, 3)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled before the sweep starts
 
-func TestCheckAllFreshInvalidatesEveryService(t *testing.T) {
-	db := openScanStore(t)
-	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
-	_, _ = store.NewServices(db).Upsert(store.Service{ProjectID: pid, Name: "a", ImageRef: "nginx:1.25.0"})
-	_, _ = store.NewServices(db).Upsert(store.Service{ProjectID: pid, Name: "b", ImageRef: "redis:7.2.0"})
-	spy := &spyInvalidator{}
-	s := scan.New(fakeDetector{}, &fakeChangelog{}, store.NewServices(db), store.NewUpdates(db), store.NewImages(db), spy, nil)
-	if err := s.CheckAllFresh(context.Background()); err != nil {
-		t.Fatal(err)
+	var calls int
+	if err := sc.CheckServicesFresh(ctx, svcIDs, false, func(done, total int) {
+		calls++
+	}); err != nil {
+		t.Fatalf("CheckServicesFresh: %v", err)
 	}
-	if spy.calls != 2 {
-		t.Fatalf("Invalidate calls = %d, want 2 (one per service)", spy.calls)
-	}
-}
-
-func TestCheckAllKeepsCache(t *testing.T) {
-	// The scheduler path must not invalidate: within the cache TTL it takes the
-	// cheap digest-only route by design.
-	db := openScanStore(t)
-	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
-	_, _ = store.NewServices(db).Upsert(store.Service{ProjectID: pid, Name: "a", ImageRef: "nginx:1.25.0"})
-	spy := &spyInvalidator{}
-	s := scan.New(fakeDetector{}, &fakeChangelog{}, store.NewServices(db), store.NewUpdates(db), store.NewImages(db), spy, nil)
-	if err := s.CheckAll(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if spy.calls != 0 {
-		t.Fatalf("Invalidate calls = %d, want 0 (scheduler sweep keeps the cache)", spy.calls)
+	if calls != 0 {
+		t.Fatalf("onDone called %d time(s), want 0 (cancelled ctx must stop the sweep before any service)", calls)
 	}
 }
 
@@ -610,39 +583,6 @@ func TestCheckServicesFreshContinuesPastMissingService(t *testing.T) {
 	}
 }
 
-// spyInvalidator records the (repo, tag) passed to Invalidate.
-type spyInvalidator struct {
-	repo, tag string
-	calls     int
-}
-
-func (s *spyInvalidator) Invalidate(repo, tag string) error {
-	s.calls++
-	s.repo, s.tag = repo, tag
-	return nil
-}
-
-func TestCheckServiceFreshInvalidatesDetectCache(t *testing.T) {
-	db := openScanStore(t)
-	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
-	sid, _ := store.NewServices(db).Upsert(store.Service{
-		ProjectID: pid, Name: "cache", ImageRef: "redis:7.2.0", CurrentDigest: "sha256:old",
-	})
-	spy := &spyInvalidator{}
-	// Detector returns no drift; we only assert the cache was invalidated first.
-	s := scan.New(fakeDetector{}, &fakeChangelog{}, store.NewServices(db), store.NewUpdates(db), store.NewImages(db), spy, nil)
-
-	if err := s.CheckServiceFresh(context.Background(), sid); err != nil {
-		t.Fatal(err)
-	}
-	if spy.calls != 1 {
-		t.Fatalf("Invalidate calls = %d, want 1", spy.calls)
-	}
-	if spy.repo != "redis" || spy.tag != "7.2.0" {
-		t.Fatalf("Invalidate(%q, %q), want (redis, 7.2.0)", spy.repo, spy.tag)
-	}
-}
-
 func TestCheckServiceFreshReopensRolledBack(t *testing.T) {
 	db := openScanStore(t)
 	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
@@ -658,7 +598,7 @@ func TestCheckServiceFreshReopensRolledBack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s := scan.New(fakeDetector{}, &fakeChangelog{}, store.NewServices(db), updates, store.NewImages(db), &spyInvalidator{}, nil)
+	s := scan.New(fakeDetector{}, &fakeChangelog{}, store.NewServices(db), updates, store.NewImages(db), nil)
 	if err := s.CheckServiceFresh(context.Background(), sid); err != nil {
 		t.Fatal(err)
 	}
@@ -684,7 +624,7 @@ func TestCheckServiceKeepsRolledBackSuppressed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s := scan.New(fakeDetector{}, &fakeChangelog{}, store.NewServices(db), updates, store.NewImages(db), &spyInvalidator{}, nil)
+	s := scan.New(fakeDetector{}, &fakeChangelog{}, store.NewServices(db), updates, store.NewImages(db), nil)
 	if err := s.CheckService(context.Background(), sid); err != nil {
 		t.Fatal(err)
 	}
@@ -710,7 +650,7 @@ func TestCheckServicesFreshReopenTrueLiftsRolledBack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s := scan.New(fakeDetector{}, &fakeChangelog{}, store.NewServices(db), updates, store.NewImages(db), &spyInvalidator{}, nil)
+	s := scan.New(fakeDetector{}, &fakeChangelog{}, store.NewServices(db), updates, store.NewImages(db), nil)
 	if err := s.CheckServicesFresh(context.Background(), []int64{sid}, true, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -736,29 +676,11 @@ func TestCheckServicesFreshReopenFalseKeepsRolledBack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s := scan.New(fakeDetector{}, &fakeChangelog{}, store.NewServices(db), updates, store.NewImages(db), &spyInvalidator{}, nil)
+	s := scan.New(fakeDetector{}, &fakeChangelog{}, store.NewServices(db), updates, store.NewImages(db), nil)
 	if err := s.CheckServicesFresh(context.Background(), []int64{sid}, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := updates.Get(uid); got.Status != "rolled_back" {
 		t.Fatalf("status = %q, want rolled_back (reopen=false keeps the suppression)", got.Status)
-	}
-}
-
-func TestCheckServiceDoesNotInvalidate(t *testing.T) {
-	// The periodic poll path (CheckService) must NOT touch the detect cache.
-	db := openScanStore(t)
-	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
-	sid, _ := store.NewServices(db).Upsert(store.Service{
-		ProjectID: pid, Name: "cache", ImageRef: "redis:7.2.0", CurrentDigest: "sha256:old",
-	})
-	spy := &spyInvalidator{}
-	s := scan.New(fakeDetector{}, &fakeChangelog{}, store.NewServices(db), store.NewUpdates(db), store.NewImages(db), spy, nil)
-
-	if err := s.CheckService(context.Background(), sid); err != nil {
-		t.Fatal(err)
-	}
-	if spy.calls != 0 {
-		t.Fatalf("Invalidate calls = %d, want 0 (poll path must keep the cache)", spy.calls)
 	}
 }

@@ -38,7 +38,7 @@ func TestSettingsGetPutRoundTrip(t *testing.T) {
 	s.deps = mergeDeps(s.deps, settingsDeps(t, db))
 
 	put := authReq(httptest.NewRequest(http.MethodPut, "/api/settings",
-		strings.NewReader(`{"poll_interval_seconds":"300","cache_ttl_seconds":"600","github_token":"ghp_secret"}`)), tok, csrf)
+		strings.NewReader(`{"poll_interval_seconds":"300","github_token":"ghp_secret"}`)), tok, csrf)
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, put)
 	if rec.Code != http.StatusOK {
@@ -51,9 +51,6 @@ func TestSettingsGetPutRoundTrip(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, `"poll_interval_seconds":"300"`) {
 		t.Fatalf("GET settings missing value: %s", body)
-	}
-	if !strings.Contains(body, `"cache_ttl_seconds":"600"`) {
-		t.Fatalf("GET settings missing cache_ttl_seconds round-trip: %s", body)
 	}
 	if !strings.Contains(body, `"github_token_set":true`) {
 		t.Fatalf("github_token_set not true: %s", body)
@@ -488,7 +485,6 @@ func TestGetSettingsReturnsDefaultsWhenUnset(t *testing.T) {
 		"concurrency":            "2",
 		"health_timeout_seconds": "120",
 		"health_poll_seconds":    "2",
-		"cache_ttl_seconds":      "600",
 		"scan_on_start":          "true",
 	}
 	for k, v := range want {
@@ -554,7 +550,6 @@ func TestSettingDefaultsMatchConsumers(t *testing.T) {
 		"concurrency":            "2",
 		"health_timeout_seconds": "120",
 		"health_poll_seconds":    "2",
-		"cache_ttl_seconds":      "600",
 		// Discovery-side consumers (internal/discovery/discovery.go auto-prune
 		// pass). Pinned here too so drift from the discovery.go literals is
 		// caught, not just the main.go-consumed defaults above.

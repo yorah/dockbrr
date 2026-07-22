@@ -2,7 +2,6 @@ package discovery_test
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -251,7 +250,7 @@ func TestReconcilePopulatesStore(t *testing.T) {
 		},
 	}
 
-	r := discovery.NewReconciler(fc, projects, services, 1, nil, nil)
+	r := discovery.NewReconciler(fc, projects, services, 1, nil)
 	if _, err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +322,7 @@ func TestReconcileIgnoresSelfUpdateHelper(t *testing.T) {
 		},
 	}
 
-	r := discovery.NewReconciler(fc, projects, services, 1, nil, nil)
+	r := discovery.NewReconciler(fc, projects, services, 1, nil)
 	if _, err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +373,7 @@ func TestReconcileNewProjectRespectsDefaultAutoUpdateSetting(t *testing.T) {
 		},
 	}
 
-	r := discovery.NewReconciler(fc, projects, services, 1, settings, nil)
+	r := discovery.NewReconciler(fc, projects, services, 1, settings)
 	if _, err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -412,7 +411,7 @@ func TestReconcileNewProjectDefaultsAutoUpdateOffWhenUnset(t *testing.T) {
 		},
 	}
 
-	r := discovery.NewReconciler(fc, projects, services, 1, settings, nil)
+	r := discovery.NewReconciler(fc, projects, services, 1, settings)
 	if _, err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -441,7 +440,7 @@ func TestReconcileMarksGone(t *testing.T) {
 		},
 	}
 
-	r := discovery.NewReconciler(fc, projects, services, 1, nil, nil)
+	r := discovery.NewReconciler(fc, projects, services, 1, nil)
 	if _, err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -508,7 +507,7 @@ func TestReconcileManualProjectUntouched(t *testing.T) {
 
 	// Reconcile with empty discovery.
 	fc := &fakeCollector{containers: nil}
-	r := discovery.NewReconciler(fc, projects, services, 1, nil, nil)
+	r := discovery.NewReconciler(fc, projects, services, 1, nil)
 	if _, err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -563,7 +562,7 @@ func TestReconcileSkipsManualNameCollision(t *testing.T) {
 		},
 	}
 
-	r := discovery.NewReconciler(fc, projects, services, 1, nil, nil)
+	r := discovery.NewReconciler(fc, projects, services, 1, nil)
 	if _, err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -650,7 +649,7 @@ func TestReconcileRefreshesServicesInsideManualProjects(t *testing.T) {
 		},
 	}
 
-	reconciler := discovery.NewReconciler(fc, projects, services, 1, nil, nil)
+	reconciler := discovery.NewReconciler(fc, projects, services, 1, nil)
 	if _, err := reconciler.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -705,7 +704,7 @@ func TestReconcileDriftNotDriftedWhenImageMatchesDeclared(t *testing.T) {
 			},
 		},
 	}
-	r := discovery.NewReconciler(fc, projects, services, 1, nil, nil)
+	r := discovery.NewReconciler(fc, projects, services, 1, nil)
 	if _, err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -743,7 +742,7 @@ func TestReconcileDriftDetectedWhenImageDiffersFromDeclared(t *testing.T) {
 			},
 		},
 	}
-	r := discovery.NewReconciler(fc, projects, services, 1, nil, nil)
+	r := discovery.NewReconciler(fc, projects, services, 1, nil)
 	if _, err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -774,7 +773,7 @@ func TestReconcileDriftStandaloneNeverDrifted(t *testing.T) {
 			{ID: "s1", Project: "", Name: "redis", ImageRef: "redis:7@sha256:y", State: "running"},
 		},
 	}
-	r := discovery.NewReconciler(fc, projects, services, 1, nil, nil)
+	r := discovery.NewReconciler(fc, projects, services, 1, nil)
 	if _, err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -812,7 +811,7 @@ func TestReconcileDriftOddNameDriftedWhenImageDiffersFromDeclared(t *testing.T) 
 			},
 		},
 	}
-	r := discovery.NewReconciler(fc, projects, services, 1, nil, nil)
+	r := discovery.NewReconciler(fc, projects, services, 1, nil)
 	if _, err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -850,7 +849,7 @@ func TestReconcileDriftOddNameNotDriftedWhenImageMatchesDeclared(t *testing.T) {
 			},
 		},
 	}
-	r := discovery.NewReconciler(fc, projects, services, 1, nil, nil)
+	r := discovery.NewReconciler(fc, projects, services, 1, nil)
 	if _, err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -893,7 +892,7 @@ func TestReconcileMarksBuildServiceLocal(t *testing.T) {
 			},
 		},
 	}
-	r := discovery.NewReconciler(fc, projects, services, 1, nil, nil)
+	r := discovery.NewReconciler(fc, projects, services, 1, nil)
 	if _, err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -937,7 +936,7 @@ func TestReconcileFlagsUnmanagedWhenConfigFilesMissing(t *testing.T) {
 			},
 		},
 	}
-	r := discovery.NewReconciler(fc, projects, services, 1, nil, nil)
+	r := discovery.NewReconciler(fc, projects, services, 1, nil)
 	if _, err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -976,7 +975,7 @@ func TestReconcileStandaloneNeverUnmanaged(t *testing.T) {
 			{ID: "s1", Project: "", Name: "redis", ImageRef: "redis:7", State: "running"},
 		},
 	}
-	r := discovery.NewReconciler(fc, projects, services, 1, nil, nil)
+	r := discovery.NewReconciler(fc, projects, services, 1, nil)
 	if _, err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -1015,7 +1014,7 @@ func TestReconcileReportsChangedOnlyOnRealChange(t *testing.T) {
 		{ID: "c1", Project: "app", Service: "web", ConfigFiles: []string{"docker-compose.yml"},
 			Name: "app_web_1", ImageRef: "nginx:latest", RepoDigest: "sha256:abc", State: "running"},
 	}}
-	r := discovery.NewReconciler(fc, projects, services, 1, nil, nil)
+	r := discovery.NewReconciler(fc, projects, services, 1, nil)
 
 	must := func(wantChanged bool, label string) {
 		t.Helper()
@@ -1038,100 +1037,6 @@ func TestReconcileReportsChangedOnlyOnRealChange(t *testing.T) {
 	must(false, "idle after removal")
 }
 
-// ── detect-cache invalidation on recreate (running digest change) ───────────
-
-func TestReconcileInvalidatesRemoteStateOnDigestChange(t *testing.T) {
-	db := openDB(t)
-	projects := store.NewProjects(db)
-	services := store.NewServices(db)
-	states := store.NewRemoteStates(db)
-
-	if err := states.Upsert(store.RemoteState{Repo: "nginx", Tag: "latest", RemoteDigest: "sha256:cached", Status: "ok"}); err != nil {
-		t.Fatal(err)
-	}
-
-	fc := &fakeCollector{containers: []docker.Container{
-		{ID: "c1", Project: "app", Service: "web", Name: "app_web_1", ImageRef: "nginx:latest", RepoDigest: "sha256:abc", State: "running"},
-	}}
-	r := discovery.NewReconciler(fc, projects, services, 1, nil, states)
-
-	// First reconcile: brand-new service (no prior stored digest) must NOT invalidate.
-	if _, err := r.Reconcile(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := states.Get("nginx", "latest"); err != nil {
-		t.Fatalf("after first reconcile (new service): Get = %v, want cached row still present", err)
-	}
-
-	// Second reconcile with the SAME digest must NOT invalidate.
-	if _, err := r.Reconcile(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := states.Get("nginx", "latest"); err != nil {
-		t.Fatalf("after unchanged-digest reconcile: Get = %v, want cached row still present", err)
-	}
-
-	// Third reconcile with a DIFFERENT digest (recreate) must invalidate.
-	fc.containers[0].RepoDigest = "sha256:xyz"
-	if _, err := r.Reconcile(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := states.Get("nginx", "latest"); !errors.Is(err, store.ErrRemoteStateNotFound) {
-		t.Fatalf("after digest-change reconcile: Get err = %v, want ErrRemoteStateNotFound", err)
-	}
-}
-
-func TestReconcileNilStatesDisablesInvalidation(t *testing.T) {
-	db := openDB(t)
-	projects := store.NewProjects(db)
-	services := store.NewServices(db)
-
-	fc := &fakeCollector{containers: []docker.Container{
-		{ID: "c1", Project: "app", Service: "web", Name: "app_web_1", ImageRef: "nginx:latest", RepoDigest: "sha256:abc", State: "running"},
-	}}
-	r := discovery.NewReconciler(fc, projects, services, 1, nil, nil)
-	if _, err := r.Reconcile(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	fc.containers[0].RepoDigest = "sha256:xyz"
-	// Must not panic with nil states, and must complete successfully.
-	if _, err := r.Reconcile(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestReconcileInvalidatesRemoteStateOnDigestChangeInManualProject(t *testing.T) {
-	db := openDB(t)
-	projects := store.NewProjects(db)
-	services := store.NewServices(db)
-	states := store.NewRemoteStates(db)
-
-	pid, err := projects.Upsert(store.Project{HostID: 1, Kind: "compose", Name: "manual-app", Source: "manual"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := services.Upsert(store.Service{
-		ProjectID: pid, Name: "api", ImageRef: "myapi:1", CurrentDigest: "sha256:old",
-		State: "running", ContainerIDs: []string{"m1"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := states.Upsert(store.RemoteState{Repo: "myapi", Tag: "1", RemoteDigest: "sha256:cached", Status: "ok"}); err != nil {
-		t.Fatal(err)
-	}
-
-	fc := &fakeCollector{containers: []docker.Container{
-		{ID: "m1", Project: "manual-app", Service: "api", Name: "manual-app_api_1", ImageRef: "myapi:1", RepoDigest: "sha256:new", State: "running"},
-	}}
-	r := discovery.NewReconciler(fc, projects, services, 1, nil, states)
-	if _, err := r.Reconcile(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := states.Get("myapi", "1"); !errors.Is(err, store.ErrRemoteStateNotFound) {
-		t.Fatalf("manual project recreate: Get err = %v, want ErrRemoteStateNotFound", err)
-	}
-}
-
 // ── auto-prune (gone service + empty project) ───────────────────────────────
 
 func TestReconcileAutoPrunesGoneServicePastGraceAndEmptyProject(t *testing.T) {
@@ -1146,7 +1051,7 @@ func TestReconcileAutoPrunesGoneServicePastGraceAndEmptyProject(t *testing.T) {
 	fc := &fakeCollector{containers: []docker.Container{
 		{ID: "c1", Project: "app", Service: "svc-a", Name: "app_svc-a_1", ImageRef: "img:1", State: "running"},
 	}}
-	r := discovery.NewReconciler(fc, projects, services, 1, settings, nil)
+	r := discovery.NewReconciler(fc, projects, services, 1, settings)
 	if _, err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -1215,7 +1120,7 @@ func TestReconcileGoneWithinGraceSurvives(t *testing.T) {
 	fc := &fakeCollector{containers: []docker.Container{
 		{ID: "c1", Project: "app", Service: "svc-a", Name: "app_svc-a_1", ImageRef: "img:1", State: "running"},
 	}}
-	r := discovery.NewReconciler(fc, projects, services, 1, settings, nil)
+	r := discovery.NewReconciler(fc, projects, services, 1, settings)
 	if _, err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -1262,7 +1167,7 @@ func TestReconcileAutoRemoveGoneDisabledKeepsAll(t *testing.T) {
 	fc := &fakeCollector{containers: []docker.Container{
 		{ID: "c1", Project: "app", Service: "svc-a", Name: "app_svc-a_1", ImageRef: "img:1", State: "running"},
 	}}
-	r := discovery.NewReconciler(fc, projects, services, 1, settings, nil)
+	r := discovery.NewReconciler(fc, projects, services, 1, settings)
 	if _, err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -1328,7 +1233,7 @@ func TestReconcileManualEmptyProjectNeverPruned(t *testing.T) {
 	}
 
 	fc := &fakeCollector{containers: nil}
-	r := discovery.NewReconciler(fc, projects, services, 1, settings, nil)
+	r := discovery.NewReconciler(fc, projects, services, 1, settings)
 	if _, err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -1368,7 +1273,7 @@ func TestReconcileNegativeGraceClampedNotPushedIntoFuture(t *testing.T) {
 	fc := &fakeCollector{containers: []docker.Container{
 		{ID: "c1", Project: "app", Service: "svc-a", Name: "app_svc-a_1", ImageRef: "img:1", State: "running"},
 	}}
-	setupR := discovery.NewReconciler(fc, projects, services, 1, nil, nil)
+	setupR := discovery.NewReconciler(fc, projects, services, 1, nil)
 	if _, err := setupR.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -1404,7 +1309,7 @@ func TestReconcileNegativeGraceClampedNotPushedIntoFuture(t *testing.T) {
 	if err := settings.Set("gone_grace_seconds", "-100"); err != nil {
 		t.Fatal(err)
 	}
-	pruneR := discovery.NewReconciler(fc, projects, services, 1, settings, nil)
+	pruneR := discovery.NewReconciler(fc, projects, services, 1, settings)
 	if _, err := pruneR.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -1469,7 +1374,7 @@ func TestReconcileGoneServiceInManualProjectNeverAutoDeleted(t *testing.T) {
 	}
 
 	fc := &fakeCollector{containers: nil}
-	r := discovery.NewReconciler(fc, projects, services, 1, settings, nil)
+	r := discovery.NewReconciler(fc, projects, services, 1, settings)
 	if _, err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -1509,7 +1414,7 @@ func TestReconcileFlagsAutoNamedStandalone(t *testing.T) {
 		},
 	}
 
-	r := discovery.NewReconciler(fc, projects, services, 1, nil, nil)
+	r := discovery.NewReconciler(fc, projects, services, 1, nil)
 	if _, err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}

@@ -28,34 +28,13 @@ func (f *fakeEngine) Enqueue(j store.Job) (int64, error) {
 }
 func (f *fakeEngine) Stream(id int64) (<-chan job.LogLine, error) { return f.ch, f.streamErr }
 
-// fakeChecker signals which services were checked. calledSync is set after a
-// short sleep so tests can deterministically assert the handler awaited
-// CheckServiceFresh before writing its response (a detached goroutine would race
-// this and fail intermittently at best).
+// fakeChecker signals which services were checked via CheckServicesFresh.
 type fakeChecker struct {
-	called             chan int64
-	calledSync         bool
-	checkAllErr        error
-	checkAllCall       int
 	servicesFreshCalls [][]int64
 	servicesFreshErr   error
 	// servicesFreshReopen records the reopen flag from the most recent
 	// CheckServicesFresh call, so tests can assert scope->reopen wiring.
 	servicesFreshReopen bool
-}
-
-func (f *fakeChecker) CheckServiceFresh(_ context.Context, id int64) error {
-	time.Sleep(10 * time.Millisecond)
-	f.calledSync = true
-	if f.called != nil {
-		f.called <- id
-	}
-	return nil
-}
-
-func (f *fakeChecker) CheckAllFresh(_ context.Context) error {
-	f.checkAllCall++
-	return f.checkAllErr
 }
 
 func (f *fakeChecker) CheckServicesFresh(_ context.Context, ids []int64, reopen bool, onDone func(done, total int)) error {

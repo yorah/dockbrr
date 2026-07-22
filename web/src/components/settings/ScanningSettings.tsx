@@ -6,7 +6,7 @@ import { SettingsCard, DefaultHint } from "@/components/settings/SettingsCard";
 import { HelpTooltip } from "@/components/settings/HelpTooltip";
 import { useSettingsForm, type SettingKey } from "@/hooks/useSettingsForm";
 
-const KEYS: SettingKey[] = ["poll_interval_seconds", "scan_on_start", "concurrency", "cache_ttl_seconds"];
+const KEYS: SettingKey[] = ["poll_interval_seconds", "scan_on_start", "concurrency"];
 
 const NUMBER_FIELDS: Array<{ key: SettingKey; label: string; help: string }> = [
   {
@@ -18,11 +18,6 @@ const NUMBER_FIELDS: Array<{ key: SettingKey; label: string; help: string }> = [
     key: "concurrency",
     label: "Concurrency",
     help: "Maximum number of registry checks run at once. Takes effect after a restart.",
-  },
-  {
-    key: "cache_ttl_seconds",
-    label: "Registry cache TTL (seconds)",
-    help: "How long a registry digest lookup is cached before dockbrr re-queries the registry.",
   },
 ];
 

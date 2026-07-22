@@ -73,8 +73,6 @@ type blockingChecker struct {
 	started chan struct{}
 }
 
-func (b *blockingChecker) CheckServiceFresh(context.Context, int64) error { return nil }
-func (b *blockingChecker) CheckAllFresh(context.Context) error            { return nil }
 func (b *blockingChecker) CheckServicesFresh(_ context.Context, ids []int64, _ bool, onDone func(done, total int)) error {
 	close(b.started)
 	<-b.release
@@ -157,5 +155,142 @@ func TestScanRunnerServiceScopeDoesNotStampLastCheckAll(t *testing.T) {
 	}
 	if v, _ := settings.Get("last_check_all"); v != "" {
 		t.Fatalf("service scope must not stamp last_check_all, got %q", v)
+	}
+}
+
+// abortableChecker blocks in CheckServicesFresh until either release is closed
+// or ctx is cancelled. cancelled records that the context path won (i.e. Abort
+// reached the sweep).
+type abortableChecker struct {
+	started   chan struct{}
+	release   chan struct{}
+	cancelled chan struct{}
+}
+
+func newAbortableChecker() *abortableChecker {
+	return &abortableChecker{
+		started:   make(chan struct{}),
+		release:   make(chan struct{}),
+		cancelled: make(chan struct{}),
+	}
+}
+
+func (a *abortableChecker) CheckServicesFresh(ctx context.Context, _ []int64, _ bool, _ func(done, total int)) error {
+	close(a.started)
+	select {
+	case <-a.release:
+	case <-ctx.Done():
+		close(a.cancelled)
+	}
+	return nil
+}
+
+func TestScanRunnerAbortCancelsRunAndSkipsStamp(t *testing.T) {
+	db, _, _ := seedProjectServices(t, 2)
+	bus := NewBus()
+	ch, cancelSub := bus.Subscribe()
+	defer cancelSub()
+	settings := storeSettings(db)
+	ac := newAbortableChecker()
+	sr := NewScanRunner(ac, storeServices(db), settings, bus)
+
+	if _, err := sr.Start("all", 0, 0); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	<-ac.started
+	sr.Abort()
+
+	select {
+	case <-ac.cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Abort did not cancel the sweep context")
+	}
+
+	// Run should wind down: not running, scan_finished published, NO scanned,
+	// last_check_all left blank.
+	types := drainEventTypes(t, ch, 300*time.Millisecond)
+	if !contains(types, "scan_finished") {
+		t.Fatalf("want scan_finished after abort, got %v", types)
+	}
+	if contains(types, "scanned") {
+		t.Fatalf("aborted run must not publish scanned, got %v", types)
+	}
+	if v, _ := settings.Get("last_check_all"); v != "" {
+		t.Fatalf("aborted run must not stamp last_check_all, got %q", v)
+	}
+	if sr.Snapshot().Running {
+		t.Fatal("runner still marked running after abort")
+	}
+}
+
+func TestScanRunnerAbortIdleIsNoOp(t *testing.T) {
+	db, _, _ := seedProjectServices(t, 1)
+	sr := NewScanRunner(&fakeChecker{}, storeServices(db), storeSettings(db), NewBus())
+	sr.Abort() // must not panic
+}
+
+func TestRunScheduledRunsSynchronouslyAndStamps(t *testing.T) {
+	db, _, _ := seedProjectServices(t, 2)
+	settings := storeSettings(db)
+	sr := NewScanRunner(&fakeChecker{}, storeServices(db), settings, NewBus())
+
+	if ran := sr.RunScheduled(context.Background()); !ran {
+		t.Fatal("RunScheduled returned false, want true")
+	}
+	// Synchronous: by return, the run is done and last_check_all is stamped.
+	if sr.Snapshot().Running {
+		t.Fatal("RunScheduled returned while still running (must be synchronous)")
+	}
+	if v, _ := settings.Get("last_check_all"); v == "" {
+		t.Fatal("RunScheduled did not stamp last_check_all")
+	}
+}
+
+func TestRunScheduledCancelledReturnsFalseAndSkipsStamp(t *testing.T) {
+	db, _, _ := seedProjectServices(t, 2)
+	settings := storeSettings(db)
+	ac := newAbortableChecker()
+	sr := NewScanRunner(ac, storeServices(db), settings, NewBus())
+
+	var ran bool
+	done := make(chan struct{})
+	go func() {
+		ran = sr.RunScheduled(context.Background())
+		close(done)
+	}()
+
+	<-ac.started
+	sr.Abort()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunScheduled did not return after Abort")
+	}
+
+	if ran {
+		t.Fatal("RunScheduled returned true for a cancelled sweep, want false")
+	}
+	if v, _ := settings.Get("last_check_all"); v != "" {
+		t.Fatalf("cancelled scheduled sweep must not stamp last_check_all, got %q", v)
+	}
+}
+
+func TestRunScheduledSkipsWhenBusy(t *testing.T) {
+	db, _, _ := seedProjectServices(t, 2)
+	bc := &blockingChecker{release: make(chan struct{}), started: make(chan struct{})}
+	sr := NewScanRunner(bc, storeServices(db), storeSettings(db), NewBus())
+
+	if _, err := sr.Start("all", 0, 0); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	<-bc.started
+	if ran := sr.RunScheduled(context.Background()); ran {
+		t.Fatal("RunScheduled ran while a manual scan held the guard, want skip")
+	}
+	close(bc.release)
+	deadline := time.Now().Add(2 * time.Second)
+	for sr.Snapshot().Running && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
 	}
 }

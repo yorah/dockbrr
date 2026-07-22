@@ -116,31 +116,6 @@ func TestRemoteStatesUpsertReplacesStatus(t *testing.T) {
 	}
 }
 
-func TestRemoteStatesInvalidateDeletesRow(t *testing.T) {
-	rs := store.NewRemoteStates(openImagesStore(t))
-	now := time.Now().UTC().Truncate(time.Second)
-	if err := rs.Upsert(store.RemoteState{
-		Repo: "r", Tag: "latest", RemoteDigest: "sha256:bbb",
-		ResolvedAt: &now, Status: "ok",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := rs.Invalidate("r", "latest"); err != nil {
-		t.Fatal(err)
-	}
-	_, err := rs.Get("r", "latest")
-	if !errors.Is(err, store.ErrRemoteStateNotFound) {
-		t.Fatalf("err = %v, want ErrRemoteStateNotFound after Invalidate", err)
-	}
-}
-
-func TestRemoteStatesInvalidateMissingRowIsNoop(t *testing.T) {
-	rs := store.NewRemoteStates(openImagesStore(t))
-	if err := rs.Invalidate("r", "nope"); err != nil {
-		t.Fatalf("Invalidate on missing row: %v, want nil", err)
-	}
-}
-
 func TestRemoteStatesGetMissingReturnsSentinel(t *testing.T) {
 	rs := store.NewRemoteStates(openImagesStore(t))
 	_, err := rs.Get("r", "nope")

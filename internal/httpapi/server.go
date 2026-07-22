@@ -25,15 +25,11 @@ type JobService interface {
 	Stream(id int64) (<-chan job.LogLine, error)
 }
 
-// Checker triggers read-only detection, either a fresh check of one service
-// (invalidating its detect cache first, so a manual check always does a full
-// re-scan) or a fresh sweep of a set of services (same cache invalidation,
-// per service). Both endpoints are manual/user-initiated, hence fresh; the
-// scheduler's cache-keeping sweep never comes through the API. *scan.Scanner
-// satisfies it. Detection does not go through the Job Engine (read-only).
+// Checker triggers read-only detection, checking a set of services and
+// reporting progress. Manual (single-service, project-scoped, or all-services)
+// and scheduled sweeps alike route through it. *scan.Scanner satisfies it.
+// Detection does not go through the Job Engine (read-only).
 type Checker interface {
-	CheckServiceFresh(ctx context.Context, serviceID int64) error
-	CheckAllFresh(ctx context.Context) error
 	// CheckServicesFresh checks each id fresh, reporting progress via onDone.
 	// reopen lifts the rolled_back auto-apply suppression per service (the
 	// manual "look again" gesture) and must only be true for scoped
@@ -125,6 +121,11 @@ func New(cfg config.Config, db *store.DB, deps Deps) *Server {
 
 func (s *Server) Handler() http.Handler { return s.mux }
 
+// ScanRunner exposes the process-wide scan-run so the scheduler can drive
+// periodic sweeps through the same single-flight runner the API uses (shared
+// progress, button-disable, and abort).
+func (s *Server) ScanRunner() *ScanRunner { return s.scan }
+
 // serviceName resolves a service id to its name for log lines, so an operator
 // reading "service 307" doesn't have to go look up which container that is.
 // Best-effort: an unknown id (or a Deps without Services, as in tests) logs "?".
@@ -183,6 +184,7 @@ func (s *Server) routes() {
 		r.Get("/api/services/{id}/logs", s.handleLogs)
 		r.Post("/api/scan", s.handleScanAll)
 		r.Get("/api/scan", s.handleScanStatus)
+		r.Delete("/api/scan", s.handleScanAbort)
 		r.Get("/api/services/{id}/events", s.handleServiceEvents)
 		r.Get("/api/jobs", s.handleListJobs)
 		r.Delete("/api/jobs", s.handleClearJobs)

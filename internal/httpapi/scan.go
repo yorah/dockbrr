@@ -40,3 +40,11 @@ func (s *Server) handleScanAll(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.scan.Snapshot())
 }
+
+// handleScanAbort cancels the in-flight scan-run. Idempotent: 204 whether or
+// not a scan was running. Read-only in effect (detection never mutates Docker),
+// but a non-GET call so it carries the CSRF header like other mutations.
+func (s *Server) handleScanAbort(w http.ResponseWriter, r *http.Request) {
+	s.scan.Abort()
+	w.WriteHeader(http.StatusNoContent)
+}
