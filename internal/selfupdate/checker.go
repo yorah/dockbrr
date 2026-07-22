@@ -21,6 +21,12 @@ const (
 	keyCache = "selfupdate_cache"
 )
 
+// ErrRateLimited signals that the GitHub releases/latest request was rejected for
+// primary rate-limit exhaustion (HTTP 403/429 with X-RateLimit-Remaining: 0). The
+// read endpoint surfaces it as the "add a GitHub token" hint; every other non-200
+// stays a generic error.
+var ErrRateLimited = errors.New("selfupdate: github rate limited")
+
 // cacheEntry is the single-row cache payload. Encoding all three fields under
 // one settings key makes writeCache a single atomic Set: a reader never sees a
 // half-written cache, so there is no partial-key state to guard against.
@@ -37,6 +43,12 @@ type Result struct {
 	HTMLURL         string    // release page URL
 	UpdateAvailable bool      // Latest's numeric core is greater than Current's
 	CheckedAt       time.Time // when Latest was last fetched from GitHub
+
+	// FetchErr is the soft signal for the read endpoint: it is set whenever a
+	// refresh attempt failed, whether a stale cache was then served (top-level
+	// error nil) or there was nothing to serve (top-level error non-nil). Never
+	// serialized; handleSelfUpdate classifies it into an error_kind.
+	FetchErr error `json:"-"`
 }
 
 // Checker resolves the latest release, caching it in the settings store so a
@@ -91,12 +103,15 @@ func (c *Checker) refresh(ctx context.Context, haveCache bool, tag, url string, 
 	if err != nil {
 		if haveCache {
 			// Best-effort: serve stale and leave checked_at untouched so the
-			// next request retries GitHub rather than waiting out the TTL.
+			// next request retries GitHub rather than waiting out the TTL. Stamp
+			// FetchErr so the read endpoint can still surface "couldn't refresh".
 			logger.Debugf("selfupdate: github fetch failed, serving stale cache: %v", err)
-			return c.result(tag, url, checkedAt), nil
+			res := c.result(tag, url, checkedAt)
+			res.FetchErr = err
+			return res, nil
 		}
 		logger.Debugf("selfupdate: github fetch failed, no cache: %v", err)
-		return Result{Current: c.current}, err
+		return Result{Current: c.current, FetchErr: err}, err
 	}
 
 	now := time.Now().UTC()
@@ -141,6 +156,10 @@ func (c *Checker) fetchLatest(ctx context.Context) (tag, htmlURL string, err err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
+		if (resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests) &&
+			resp.Header.Get("X-RateLimit-Remaining") == "0" {
+			return "", "", ErrRateLimited
+		}
 		return "", "", fmt.Errorf("github releases/latest: status %d", resp.StatusCode)
 	}
 	var body struct {
