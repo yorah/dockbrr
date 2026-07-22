@@ -386,6 +386,48 @@ func TestCheckServiceCurrentRowRateLimited(t *testing.T) {
 	}
 }
 
+// A 'current' baseline left rate-limited by an earlier scan must be re-resolved
+// on a later scan (the GitHub limit is transient; the digest is stable, so a
+// sticky rate_limited marker would blank the changelog forever). Regression:
+// HasResolvedCurrentAtDigest counted the marker as "resolved" and skipped retry.
+func TestCheckServiceRetriesRateLimitedCurrentRow(t *testing.T) {
+	db := openScanStore(t)
+	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
+	sid, _ := store.NewServices(db).Upsert(store.Service{
+		ProjectID: pid, Name: "app", ImageRef: "ghcr.io/acme/web:1.2.3",
+		CurrentDigest: "sha256:cur", ImageVersion: "1.2.3",
+	})
+	updates := store.NewUpdates(db)
+	det := fakeDetector{upd: nil}
+
+	// First scan: GitHub rate-limited, leaves the baseline marked rate_limited.
+	cl := &fakeChangelog{err: changelog.ErrRateLimited}
+	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil)
+	if err := s.CheckService(context.Background(), sid); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second scan: limit has reset, resolve now yields content. The stuck row must
+	// be retried (not skipped) and heal to real changelog text.
+	cl.err = nil
+	cl.text = "## 1.2.3\n\nnotes"
+	cl.url = "https://example.test/releases/1.2.3"
+	priorCalls := cl.calls
+	if err := s.CheckService(context.Background(), sid); err != nil {
+		t.Fatal(err)
+	}
+	if cl.calls == priorCalls {
+		t.Fatalf("resolve not retried on second scan (calls stayed %d)", cl.calls)
+	}
+	rows, _ := updates.ListLastAppliedByService()
+	if len(rows) != 1 {
+		t.Fatalf("want single current row, got %d", len(rows))
+	}
+	if rows[0].ChangelogText != "## 1.2.3\n\nnotes" || rows[0].ChangelogStatus != "" {
+		t.Fatalf("baseline not healed: text=%q status=%q", rows[0].ChangelogText, rows[0].ChangelogStatus)
+	}
+}
+
 // A service that reached a NEW digest out of band (e.g. dockbrr self-updated
 // its own container) must have its stale 'current' baseline replaced, not kept.
 // Regression: HasAnyByService blocked any rewrite, pinning the baseline (and its
