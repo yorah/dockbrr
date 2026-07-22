@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.11.0](https://github.com/yorah/dockbrr/compare/v0.10.3...v0.11.0) (2026-07-22)
+
+
+### Features
+
+* scan-run abort shares the runner with scheduled scans ([#74](https://github.com/yorah/dockbrr/issues/74)) ([7decb30](https://github.com/yorah/dockbrr/commit/7decb30aa9ec39b2b12705b84ffbb125c0c6b55c))
+
+
+### Bug Fixes
+
+* **changelog:** retry rate-limited current-version baseline ([#73](https://github.com/yorah/dockbrr/issues/73)) ([f8d621c](https://github.com/yorah/dockbrr/commit/f8d621caefc49fc4ab32390010a53d1077858d8c))
+
 ## [0.10.3](https://github.com/yorah/dockbrr/compare/v0.10.2...v0.10.3) (2026-07-21)
 
 
