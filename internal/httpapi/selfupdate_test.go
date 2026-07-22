@@ -329,6 +329,52 @@ func TestHandleApplyRoutesSelfToSelfUpdate(t *testing.T) {
 	}
 }
 
+func TestSelfUpdateEndpointRateLimited(t *testing.T) {
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	t.Cleanup(gh.Close)
+
+	srv, db, tok, csrf := authedServer(t, Deps{})
+	srv.deps = mergeDeps(srv.deps, selfUpdateDeps(t, db, gh.URL, "0.4.2"))
+
+	rec := authedGet(t, srv, "/api/updates/self?force=true", tok, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("best-effort contract: want 200, got %d", rec.Code)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out["error_kind"] != "rate_limited" {
+		t.Errorf("want error_kind rate_limited, got %v", out)
+	}
+	if out["update_available"] != false {
+		t.Errorf("rate-limited with no cache must not claim an update: %v", out)
+	}
+}
+
+func TestSelfUpdateEndpointUnreachable(t *testing.T) {
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	t.Cleanup(gh.Close)
+
+	srv, db, tok, csrf := authedServer(t, Deps{})
+	srv.deps = mergeDeps(srv.deps, selfUpdateDeps(t, db, gh.URL, "0.4.2"))
+
+	rec := authedGet(t, srv, "/api/updates/self?force=true", tok, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d", rec.Code)
+	}
+	var out map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	if out["error_kind"] != "unreachable" {
+		t.Errorf("non-rate-limit github error should be unreachable, got %v", out)
+	}
+}
+
 // TestHandleApplyNonSelfEnqueuesApply asserts a service whose container id
 // does not prefix-match SelfID still takes the ordinary apply path (202,
 // enqueues "apply"), i.e. the self-route only diverts dockbrr's own service.

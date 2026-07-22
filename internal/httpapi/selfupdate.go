@@ -36,6 +36,14 @@ func (s *Server) handleSelfUpdate(w http.ResponseWriter, r *http.Request) {
 	if !res.CheckedAt.IsZero() {
 		out["checked_at"] = res.CheckedAt.UTC().Format(time.RFC3339)
 	}
+	if res.FetchErr != nil {
+		if errors.Is(res.FetchErr, selfupdate.ErrRateLimited) {
+			out["error_kind"] = "rate_limited"
+		} else {
+			out["error_kind"] = "unreachable"
+		}
+		out["error"] = res.FetchErr.Error()
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
