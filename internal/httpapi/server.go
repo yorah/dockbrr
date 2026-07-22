@@ -183,6 +183,7 @@ func (s *Server) routes() {
 		r.Get("/api/services/{id}/logs", s.handleLogs)
 		r.Post("/api/scan", s.handleScanAll)
 		r.Get("/api/scan", s.handleScanStatus)
+		r.Delete("/api/scan", s.handleScanAbort)
 		r.Get("/api/services/{id}/events", s.handleServiceEvents)
 		r.Get("/api/jobs", s.handleListJobs)
 		r.Delete("/api/jobs", s.handleClearJobs)

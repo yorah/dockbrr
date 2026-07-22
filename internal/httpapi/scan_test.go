@@ -221,6 +221,47 @@ func TestScanReopenFlagByScope(t *testing.T) {
 	})
 }
 
+// TestScanAbortReturns204WhenIdle asserts DELETE /api/scan is a no-op success
+// (idempotent) when there is no scan in flight.
+func TestScanAbortReturns204WhenIdle(t *testing.T) {
+	s, _, tok, csrf := authedServer(t, Deps{})
+
+	req := authReq(httptest.NewRequest(http.MethodDelete, "/api/scan", nil), tok, csrf)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("DELETE /api/scan (idle) = %d, want 204; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestScanAbortRequiresAuth mirrors TestClearJobsRequiresAuth: DELETE /api/scan
+// sits in the authenticated route group, so a request with no session cookie
+// must never reach the handler.
+func TestScanAbortRequiresAuth(t *testing.T) {
+	s, _, _, _ := authedServer(t, Deps{})
+
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/api/scan", nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("code = %d, want 401", rec.Code)
+	}
+}
+
+// TestScanAbortRequiresCSRF mirrors TestClearJobsRequiresCSRF: DELETE is a
+// mutating method, so a session cookie without the CSRF header must be
+// rejected before reaching the handler.
+func TestScanAbortRequiresCSRF(t *testing.T) {
+	s, _, tok, _ := authedServer(t, Deps{})
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/scan", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: tok}) // cookie, no CSRF header
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("code = %d, want 403", rec.Code)
+	}
+}
+
 // TestScanAllFinishesDespiteCheckerError proves a background checker error is
 // swallowed rather than hanging or crashing the run: the endpoint still 202s
 // and the run still reaches scan_finished (ScanRunner discards the
