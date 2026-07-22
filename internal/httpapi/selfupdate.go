@@ -21,12 +21,26 @@ func (s *Server) handleSelfUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	// ?force=true (or 1) bypasses the cache TTL for the manual "Check for
 	// updates" action; the default poll keeps serving the cached verdict.
-	var res selfupdate.Result
 	if force := r.URL.Query().Get("force"); force == "true" || force == "1" {
-		res, _ = s.deps.SelfUpdate.CheckFresh(r.Context()) // soft error: res is still a valid verdict
-	} else {
-		res, _ = s.deps.SelfUpdate.Check(r.Context()) // soft error: res is still a valid verdict
+		// Manual check: a GitHub failure is reported, not masked. Returning a
+		// stale cache here would render identically to a fresh "up to date"
+		// verdict, so the user could never tell the check silently failed.
+		res, err := s.deps.SelfUpdate.CheckFresh(r.Context())
+		if err != nil {
+			writeJSONError(w, http.StatusBadGateway, errors.New("could not check for updates, try again later"))
+			return
+		}
+		writeSelfUpdate(w, res)
+		return
 	}
+	res, _ := s.deps.SelfUpdate.Check(r.Context()) // background poll: soft error, serve last-known
+	writeSelfUpdate(w, res)
+}
+
+// writeSelfUpdate renders a self-update verdict as the endpoint's JSON body.
+// checked_at is omitted when zero so a never-checked verdict carries no
+// timestamp (the frontend keys "have we checked yet?" off its presence).
+func writeSelfUpdate(w http.ResponseWriter, res selfupdate.Result) {
 	out := map[string]any{
 		"current":          res.Current,
 		"latest":           res.Latest,

@@ -176,7 +176,11 @@ func TestCheckFreshBypassesYoungCache(t *testing.T) {
 	}
 }
 
-func TestCheckFreshErrorServesStaleCache(t *testing.T) {
+func TestCheckFreshErrorSurfacesError(t *testing.T) {
+	// The manual "Check for updates" action must not mask a GitHub failure as a
+	// fresh verdict: even with a stale cache to fall back on, CheckFresh returns
+	// the fetch error so the endpoint can report the failure. (The background
+	// poll keeps swallowing it: see TestCheckGitHubErrorServesStaleCache.)
 	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "boom", http.StatusInternalServerError)
 	}))
@@ -186,11 +190,12 @@ func TestCheckFreshErrorServesStaleCache(t *testing.T) {
 	c := selfupdate.NewChecker(gh.Client(), s, "0.4.2", gh.URL, time.Hour, nil)
 
 	res, err := c.CheckFresh(context.Background())
-	if err != nil {
-		t.Fatalf("stale fallback should not error: %v", err)
+	if err == nil {
+		t.Fatal("CheckFresh must surface the fetch error, not swallow it")
 	}
-	if res.Latest != "v0.5.0" || !res.UpdateAvailable {
-		t.Errorf("want stale v0.5.0 served, got %+v", res)
+	// The stale body is still returned alongside the error as a last-known verdict.
+	if res.Latest != "v0.5.0" {
+		t.Errorf("want stale v0.5.0 body alongside the error, got %+v", res)
 	}
 }
 

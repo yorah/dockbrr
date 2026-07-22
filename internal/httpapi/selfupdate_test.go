@@ -86,6 +86,42 @@ func TestSelfUpdateEndpointForceBypassesCache(t *testing.T) {
 	}
 }
 
+func TestSelfUpdateEndpointForceErrorSurfaces(t *testing.T) {
+	// A forced manual check whose GitHub fetch fails must NOT masquerade as a
+	// successful "up to date" verdict: it returns a non-2xx so the UI can tell
+	// the user the check itself failed. A stale cache exists here, proving the
+	// surfaced error wins over the poll's best-effort stale fallback.
+	srv, db, tok, csrf := authedServer(t, Deps{})
+	d := selfUpdateDeps(t, db, erroringGHServer(t), "0.4.2")
+	srv.deps = mergeDeps(srv.deps, d)
+	seedSelfUpdateCache(t, d.Settings, "v9.0.0", time.Now().Add(-2*time.Hour).UTC())
+
+	rec := authedGet(t, srv, "/api/updates/self?force=true", tok, csrf)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("force + GitHub error = %d, want 502", rec.Code)
+	}
+	if msg := errorBody(t, rec); msg != "could not check for updates, try again later" {
+		t.Errorf("error message = %q", msg)
+	}
+}
+
+func TestSelfUpdateEndpointPollErrorSoftDegrades(t *testing.T) {
+	// The unforced background poll must stay best-effort: a GitHub failure with
+	// no cache degrades to update_available:false at 200, never a 5xx.
+	srv, db, tok, csrf := authedServer(t, Deps{})
+	srv.deps = mergeDeps(srv.deps, selfUpdateDeps(t, db, erroringGHServer(t), "0.4.2"))
+
+	rec := authedGet(t, srv, "/api/updates/self", tok, csrf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("poll + GitHub error = %d, want 200 (soft)", rec.Code)
+	}
+	var out map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	if out["update_available"] != false {
+		t.Errorf("poll soft-degrade should be false: %v", out)
+	}
+}
+
 func TestSelfUpdateEndpointNilDep(t *testing.T) {
 	// Deps without a SelfUpdate checker must degrade to update_available:false,
 	// never panic (mirrors the nil-dep tolerance of other handlers).
@@ -166,6 +202,19 @@ func errorBody(t *testing.T, rec *httptest.ResponseRecorder) string {
 		t.Fatal(err)
 	}
 	return out["error"]
+}
+
+// seedSelfUpdateCache plants the checker's single-row cache so a test can prove
+// the forced check surfaces a fetch error even when a stale fallback exists.
+func seedSelfUpdateCache(t *testing.T, s *store.Settings, tag string, at time.Time) {
+	t.Helper()
+	raw, err := json.Marshal(map[string]any{"tag": tag, "url": "https://stale", "checked_at": at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Set("selfupdate_cache", string(raw)); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // erroringGHServer always 500s, so the checker returns a genuine error (as
