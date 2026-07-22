@@ -610,10 +610,11 @@ func waitForDiscovery(ctx context.Context, ready <-chan struct{}, timeout time.D
 
 // runCheck runs one scheduled read-only sweep through the shared ScanRunner
 // (fresh detection, progress + abort + button-disable for free). Returns
-// whether the sweep ran; false means a manual scan held the single-flight
-// guard, so the caller skips this tick's auto-apply. The runner stamps
-// last_check_all and publishes "scanned" on completion, so runCheck no longer
-// does either.
+// whether the sweep COMPLETED; false means either a manual scan held the
+// single-flight guard (never ran) or the sweep was aborted/timed out
+// (partial), so the caller must skip this tick's auto-apply either way. The
+// runner stamps last_check_all and publishes "scanned" on completion, so
+// runCheck no longer does either.
 func runCheck(ctx context.Context, scanRunner *httpapi.ScanRunner) bool {
 	return scanRunner.RunScheduled(ctx)
 }

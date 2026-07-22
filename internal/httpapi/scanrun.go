@@ -74,8 +74,9 @@ func (sr *ScanRunner) Start(scope string, projectID, serviceID int64) (scanState
 // RunScheduled runs an all-scope sweep synchronously (the scheduler's path):
 // it returns only when the sweep completes, so the caller can auto-apply after.
 // Returns false without running if a scan is already in flight (blocked, not
-// preempting). The passed ctx is the scheduler's context, so a shutdown cancels
-// the sweep too.
+// preempting), and also false if the sweep started but did not complete
+// (aborted or timed out) so the caller must not auto-apply on a partial sweep.
+// The passed ctx is the scheduler's context, so a shutdown cancels the sweep too.
 func (sr *ScanRunner) RunScheduled(ctx context.Context) bool {
 	ids, err := sr.resolve("all", 0, 0)
 	if err != nil {
@@ -86,8 +87,7 @@ func (sr *ScanRunner) RunScheduled(ctx context.Context) bool {
 		logger.Infof("scan: scheduled tick skipped, a scan is already running")
 		return false
 	}
-	sr.execute(ctx, "all", ids)
-	return true
+	return sr.execute(ctx, "all", ids)
 }
 
 // Abort cancels the in-flight scan-run, if any. Idempotent: a no-op when idle.
@@ -131,7 +131,9 @@ func (sr *ScanRunner) resolve(scope string, projectID, serviceID int64) ([]int64
 // COMPLETED all-scope sweep stamps last_check_all + publishes "scanned". An
 // aborted run (ctx cancelled) leaves the "Last scan" tile untouched. It always
 // publishes "scan_finished" so the UI clears the bar and re-enables buttons.
-func (sr *ScanRunner) execute(parent context.Context, scope string, ids []int64) {
+// Returns whether the sweep completed (ctx.Err() == nil), so RunScheduled can
+// report completion rather than merely "ran" to the scheduler's auto-apply gate.
+func (sr *ScanRunner) execute(parent context.Context, scope string, ids []int64) bool {
 	ctx, cancel := context.WithTimeout(parent, scanRunTimeout)
 	sr.mu.Lock()
 	sr.cancel = cancel
@@ -150,7 +152,8 @@ func (sr *ScanRunner) execute(parent context.Context, scope string, ids []int64)
 		sr.publish(Event{Type: "scan_progress", Done: done, Total: total})
 	})
 
-	if ctx.Err() == nil && (scope == "all" || scope == "") {
+	completed := ctx.Err() == nil
+	if completed && (scope == "all" || scope == "") {
 		now := time.Now().UTC().Format(time.RFC3339)
 		if err := sr.settings.Set("last_check_all", now); err != nil {
 			logger.Errorf("scan: record last_check_all: %v", err)
@@ -163,6 +166,7 @@ func (sr *ScanRunner) execute(parent context.Context, scope string, ids []int64)
 	sr.state = scanState{Running: false}
 	sr.mu.Unlock()
 	sr.publish(Event{Type: "scan_finished"})
+	return completed
 }
 
 func (sr *ScanRunner) publish(e Event) {

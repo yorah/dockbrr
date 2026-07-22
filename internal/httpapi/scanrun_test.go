@@ -246,6 +246,36 @@ func TestRunScheduledRunsSynchronouslyAndStamps(t *testing.T) {
 	}
 }
 
+func TestRunScheduledCancelledReturnsFalseAndSkipsStamp(t *testing.T) {
+	db, _, _ := seedProjectServices(t, 2)
+	settings := storeSettings(db)
+	ac := newAbortableChecker()
+	sr := NewScanRunner(ac, storeServices(db), settings, NewBus())
+
+	var ran bool
+	done := make(chan struct{})
+	go func() {
+		ran = sr.RunScheduled(context.Background())
+		close(done)
+	}()
+
+	<-ac.started
+	sr.Abort()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunScheduled did not return after Abort")
+	}
+
+	if ran {
+		t.Fatal("RunScheduled returned true for a cancelled sweep, want false")
+	}
+	if v, _ := settings.Get("last_check_all"); v != "" {
+		t.Fatalf("cancelled scheduled sweep must not stamp last_check_all, got %q", v)
+	}
+}
+
 func TestRunScheduledSkipsWhenBusy(t *testing.T) {
 	db, _, _ := seedProjectServices(t, 2)
 	bc := &blockingChecker{release: make(chan struct{}), started: make(chan struct{})}
