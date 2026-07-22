@@ -156,14 +156,6 @@ func (r *RemoteStates) Upsert(s RemoteState) error {
 	return err
 }
 
-// Invalidate drops the cached remote state for (repo, tag) so the next detect
-// does a full network resolve + semver scan instead of the digest-only
-// short-circuit. Called when a service's running image changed (recreate).
-func (r *RemoteStates) Invalidate(repo, tag string) error {
-	_, err := r.db.Exec(`DELETE FROM image_remote_state WHERE repo=? AND tag=?`, repo, tag)
-	return err
-}
-
 func (r *RemoteStates) Get(repo, tag string) (RemoteState, error) {
 	var (
 		s          RemoteState

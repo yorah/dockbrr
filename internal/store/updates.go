@@ -173,26 +173,6 @@ func (u *Updates) SupersedeAllOpen(serviceID int64) (int64, error) {
 	return res.RowsAffected()
 }
 
-// SupersedeOpenAtDigest marks a still-available update whose to_digest equals
-// reachedDigest as superseded: the service is now RUNNING that digest, so the
-// row's target was reached outside the apply path (e.g. dockbrr's own
-// container recreated, or an out-of-band update). Unlike SupersedeAllOpen it
-// leaves updates targeting OTHER digests open; the digest-only cache-hit
-// detect path uses it because that path never runs the semver tag scan and so
-// cannot judge whether a different-tag target is still current. Returns rows
-// affected.
-func (u *Updates) SupersedeOpenAtDigest(serviceID int64, reachedDigest string) (int64, error) {
-	res, err := u.db.Exec(
-		`UPDATE updates SET status='superseded'
-		   WHERE service_id=? AND status='available' AND to_digest=?`,
-		serviceID, reachedDigest,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return res.RowsAffected()
-}
-
 // RecordDrift upserts the (service_id, to_digest) update and supersedes the
 // service's other still-open updates, all in ONE transaction, and reports
 // whether the update row was newly created. On an existing row it refreshes the
