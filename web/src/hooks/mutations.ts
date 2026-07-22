@@ -86,6 +86,16 @@ export function useScanAll() {
   });
 }
 
+// Abort the in-flight scan-run (DELETE /api/scan -> 204). The scan-run store
+// clears from the SSE scan_finished the abort triggers, so there is no
+// onSuccess state change here.
+export function useScanAbort() {
+  return useMutation({
+    mutationFn: () => apiFetch<void>("/api/scan", { method: "DELETE" }),
+    onError: scanError,
+  });
+}
+
 // Scoped sweep of one project (single request, not a per-service fan-out).
 export function useProjectScan() {
   return useMutation({
