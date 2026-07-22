@@ -308,6 +308,9 @@ func (s *Scanner) CheckAllFresh(ctx context.Context) error {
 func (s *Scanner) CheckServicesFresh(ctx context.Context, ids []int64, reopen bool, onDone func(done, total int)) error {
 	total := len(ids)
 	for i, id := range ids {
+		if ctx.Err() != nil {
+			break // aborted or timed out: stop the sweep, keep partial results
+		}
 		if reopen {
 			if err := s.CheckServiceFresh(ctx, id); err != nil {
 				logger.Errorf("scan: check service %d: %v", id, err)

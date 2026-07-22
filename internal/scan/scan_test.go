@@ -582,6 +582,22 @@ func TestCheckAllKeepsCache(t *testing.T) {
 	}
 }
 
+func TestCheckServicesFreshStopsOnCancelledContext(t *testing.T) {
+	sc, svcIDs := newScannerWithServices(t, 3)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled before the sweep starts
+
+	var calls int
+	if err := sc.CheckServicesFresh(ctx, svcIDs, false, func(done, total int) {
+		calls++
+	}); err != nil {
+		t.Fatalf("CheckServicesFresh: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("onDone called %d time(s), want 0 (cancelled ctx must stop the sweep before any service)", calls)
+	}
+}
+
 func TestCheckServicesFreshReportsProgressPerService(t *testing.T) {
 	sc, svcIDs := newScannerWithServices(t, 3) // helper mirrors existing scan_test setup; returns 3 seeded service ids
 	var got [][2]int
