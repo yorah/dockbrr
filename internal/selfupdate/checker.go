@@ -71,29 +71,39 @@ func (c *Checker) Check(ctx context.Context) (Result, error) {
 	if haveCache && time.Since(checkedAt) < c.ttl {
 		return c.result(tag, url, checkedAt), nil
 	}
-	return c.refresh(ctx, haveCache, tag, url, checkedAt)
+	// The background poll is best-effort: a GitHub outage must never surface in
+	// the UI, so a stale cache is served with a nil error.
+	return c.refresh(ctx, true, haveCache, tag, url, checkedAt)
 }
 
-// CheckFresh always refetches from GitHub, ignoring the cache TTL. It shares
-// Check's best-effort contract: on a GitHub error it serves a stale cache when
-// one exists (nil error), and only errors when there is nothing to fall back on.
-// Used by the manual "Check for updates" action, which must reflect a
-// brand-new release rather than a verdict cached minutes ago.
+// CheckFresh always refetches from GitHub, ignoring the cache TTL. Used by the
+// manual "Check for updates" action, which must reflect a brand-new release
+// rather than a verdict cached minutes ago. Unlike Check, it does NOT swallow a
+// fetch failure: it returns the error (alongside the stale body, if any) so the
+// endpoint can tell the user the check itself failed instead of masquerading a
+// stale cache as a fresh "up to date" verdict.
 func (c *Checker) CheckFresh(ctx context.Context) (Result, error) {
 	tag, url, checkedAt, haveCache := c.readCache()
-	return c.refresh(ctx, haveCache, tag, url, checkedAt)
+	return c.refresh(ctx, false, haveCache, tag, url, checkedAt)
 }
 
 // refresh performs the GitHub fetch, cache-write on success, and stale-cache
-// fallback on failure shared by Check and CheckFresh.
-func (c *Checker) refresh(ctx context.Context, haveCache bool, tag, url string, checkedAt time.Time) (Result, error) {
+// fallback on failure shared by Check and CheckFresh. bestEffort controls the
+// failure contract: the poll (bestEffort=true) serves a stale cache with a nil
+// error; the manual check (bestEffort=false) returns the same stale body but
+// surfaces the error so the caller can report the failure.
+func (c *Checker) refresh(ctx context.Context, bestEffort, haveCache bool, tag, url string, checkedAt time.Time) (Result, error) {
 	fTag, fURL, err := c.fetchLatest(ctx)
 	if err != nil {
 		if haveCache {
-			// Best-effort: serve stale and leave checked_at untouched so the
-			// next request retries GitHub rather than waiting out the TTL.
+			// Serve stale and leave checked_at untouched so the next request
+			// retries GitHub rather than waiting out the TTL. The poll swallows
+			// the error; the manual check surfaces it.
 			logger.Debugf("selfupdate: github fetch failed, serving stale cache: %v", err)
-			return c.result(tag, url, checkedAt), nil
+			if bestEffort {
+				return c.result(tag, url, checkedAt), nil
+			}
+			return c.result(tag, url, checkedAt), err
 		}
 		logger.Debugf("selfupdate: github fetch failed, no cache: %v", err)
 		return Result{Current: c.current}, err
