@@ -125,6 +125,11 @@ func New(cfg config.Config, db *store.DB, deps Deps) *Server {
 
 func (s *Server) Handler() http.Handler { return s.mux }
 
+// ScanRunner exposes the process-wide scan-run so the scheduler can drive
+// periodic sweeps through the same single-flight runner the API uses (shared
+// progress, button-disable, and abort).
+func (s *Server) ScanRunner() *ScanRunner { return s.scan }
+
 // serviceName resolves a service id to its name for log lines, so an operator
 // reading "service 307" doesn't have to go look up which container that is.
 // Best-effort: an unknown id (or a Deps without Services, as in tests) logs "?".

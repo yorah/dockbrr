@@ -320,35 +320,16 @@ func run(args []string, getenv func(string) string) error {
 		}()
 	}
 
-	// Scheduler: periodic read-only detection + gated auto-apply. Safe without
-	// Docker (empty service set → no-op). First tick is one interval out, so a
-	// short-lived boot (tests) performs no network I/O.
-	//
-	// nextScan carries the loop's next tick time (unix seconds, 0 = unset) out to
-	// /api/status. It cannot be derived from last_check_all + poll_interval: a
-	// manual scan stamps last_check_all without resetting the ticker.
+	// nextScan carries the scheduler loop's next tick time (unix seconds, 0 =
+	// unset) out to /api/status. It cannot be derived from last_check_all +
+	// poll_interval: a manual scan stamps last_check_all without resetting the
+	// ticker.
 	var nextScan atomic.Int64
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		schedulerLoop(ctx, settings, scanner, services, projects, updates, engine, bus, &nextScan, discoveryReady)
-	}()
 
-	// Pruner: ages out finished job history. Store-only, no Docker.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		pruneLoop(ctx, settings, jobs)
-	}()
-
-	// Session GC: ages out expired session rows. Store-only, no Docker.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		sessionGCLoop(ctx, sessions)
-	}()
-
-	// HTTP server.
+	// HTTP server. Built here, before the scheduler goroutine below, so the
+	// scheduler can drive its periodic sweeps through srv.ScanRunner(), the
+	// same single-flight runner the API uses (shared progress, button-disable,
+	// and abort).
 	deps := httpapi.Deps{
 		Sealer: sealer, Users: users, Sessions: sessions, Credentials: creds,
 		Settings: settings, Services: services, Projects: projects, Updates: updates,
@@ -382,6 +363,32 @@ func run(args []string, getenv func(string) string) error {
 		deps.DockerLogs = dockerProbe
 	}
 	srv := httpapi.New(cfg, db, deps)
+
+	// Scheduler: periodic read-only detection + gated auto-apply. Safe without
+	// Docker (empty service set → no-op). First tick is one interval out, so a
+	// short-lived boot (tests) performs no network I/O. Runs through
+	// srv.ScanRunner() so scheduled sweeps get progress, button-disable, and
+	// abort for free, same as a manual scan from the API.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		schedulerLoop(ctx, settings, srv.ScanRunner(), services, projects, updates, engine, &nextScan, discoveryReady)
+	}()
+
+	// Pruner: ages out finished job history. Store-only, no Docker.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		pruneLoop(ctx, settings, jobs)
+	}()
+
+	// Session GC: ages out expired session rows. Store-only, no Docker.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		sessionGCLoop(ctx, sessions)
+	}()
+
 	// BaseContext ties every request's context to the signal-cancelled ctx, so a
 	// SIGINT/SIGTERM cancels in-flight requests too. Without it, long-lived SSE
 	// streams (/api/events/stream, job logs) keep their request open and block
@@ -538,8 +545,8 @@ func debounce(ctx context.Context, in <-chan struct{}, d time.Duration) <-chan s
 // scan_on_start waits on it, bounded by discoveryReadyTimeout, so a fresh boot
 // after a stack recreate checks the just-reconciled service rows instead of
 // racing discovery and silently scanning stale ones. May be nil (tests).
-func schedulerLoop(ctx context.Context, settings *store.Settings, scanner *scan.Scanner,
-	services *store.Services, projects *store.Projects, updates *store.Updates, engine *job.Engine, bus *httpapi.Bus,
+func schedulerLoop(ctx context.Context, settings *store.Settings, scanRunner *httpapi.ScanRunner,
+	services *store.Services, projects *store.Projects, updates *store.Updates, engine *job.Engine,
 	nextScan *atomic.Int64, discoveryReady <-chan struct{}) {
 	interval := settingDuration(settings, "poll_interval_seconds", 15*time.Minute)
 	ticker := time.NewTicker(interval)
@@ -552,12 +559,16 @@ func schedulerLoop(ctx context.Context, settings *store.Settings, scanner *scan.
 	// same gate the ticker uses, so this only changes behavior for projects a
 	// user already opted into auto-update. It does not reset the ticker: the
 	// next tick stays one full interval from boot, just with fresh data (and,
-	// where configured, a fresh apply) in the meantime.
+	// where configured, a fresh apply) in the meantime. runCheck's bool return
+	// gates the apply: a manual scan already holding the ScanRunner's
+	// single-flight guard skips this sweep (false), so it must skip the apply
+	// too rather than acting on stale/no data.
 	if settings.GetBoolDefault("scan_on_start", true) {
 		waitForDiscovery(ctx, discoveryReady, discoveryReadyTimeout)
 		logger.Infof("scheduler: running startup check (scan_on_start)")
-		runCheck(ctx, settings, scanner, bus)
-		autoApply(services, projects, updates, engine)
+		if runCheck(ctx, scanRunner) {
+			autoApply(services, projects, updates, engine)
+		}
 	}
 
 	for {
@@ -566,8 +577,9 @@ func schedulerLoop(ctx context.Context, settings *store.Settings, scanner *scan.
 			return
 		case <-ticker.C:
 			logger.Infof("scheduler: running scheduled check")
-			runCheck(ctx, settings, scanner, bus)
-			autoApply(services, projects, updates, engine)
+			if runCheck(ctx, scanRunner) {
+				autoApply(services, projects, updates, engine)
+			}
 			if next := settingDuration(settings, "poll_interval_seconds", 15*time.Minute); next != interval {
 				interval = next
 				ticker.Reset(interval)
@@ -597,20 +609,14 @@ func waitForDiscovery(ctx context.Context, ready <-chan struct{}, timeout time.D
 	}
 }
 
-// runCheck is the read-only half of a scheduler pass: detect drift across every
-// service, stamp last_check_all, tell the UI. Mutation (auto-apply) is a
-// separate call the caller makes afterward; both the ticker and the boot
-// scan do it.
-func runCheck(ctx context.Context, settings *store.Settings, scanner *scan.Scanner, bus *httpapi.Bus) {
-	if err := scanner.CheckAll(ctx); err != nil {
-		logger.Errorf("scheduler: check-all: %v", err)
-	}
-	if err := settings.Set("last_check_all", time.Now().UTC().Format(time.RFC3339)); err != nil {
-		logger.Errorf("scheduler: record last_check_all: %v", err)
-	}
-	// Push a refresh hint so the dashboard's "Last scan" tile updates
-	// immediately instead of waiting for its 60s poll (or a page reload).
-	bus.Publish(httpapi.Event{Type: "scanned"})
+// runCheck runs one scheduled read-only sweep through the shared ScanRunner
+// (fresh detection, progress + abort + button-disable for free). Returns
+// whether the sweep ran; false means a manual scan held the single-flight
+// guard, so the caller skips this tick's auto-apply. The runner stamps
+// last_check_all and publishes "scanned" on completion, so runCheck no longer
+// does either.
+func runCheck(ctx context.Context, scanRunner *httpapi.ScanRunner) bool {
+	return scanRunner.RunScheduled(ctx)
 }
 
 // pruneLoop ages out finished job history: it prunes once at boot, then every
