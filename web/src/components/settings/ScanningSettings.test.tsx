@@ -17,7 +17,6 @@ const SETTINGS: Settings = {
   concurrency: "4",
   health_timeout_seconds: "60",
   health_poll_seconds: "3",
-  cache_ttl_seconds: "300",
   write_back_compose: "false",
   auto_remove_gone: "false",
   default_auto_update_enabled: "false",
@@ -25,9 +24,8 @@ const SETTINGS: Settings = {
   job_retention_days: "30",
   github_token_set: false,
   restart_required: [],
-  // poll_interval_seconds and concurrency sit on their server-side default;
-  // cache_ttl_seconds deliberately diverges so both dimmed/undimmed branches
-  // of the "default" hint are exercised.
+  // poll_interval_seconds and concurrency both sit on their server-side
+  // default, so the "default" hint is exercised for both.
   defaults: { poll_interval_seconds: "900", concurrency: "4" },
 };
 
@@ -77,7 +75,6 @@ describe("ScanningSettings", () => {
     expect(await screen.findByLabelText(/^poll interval/i)).toHaveValue(900);
     expect(screen.getByLabelText(/scan on launch/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/concurrency/i)).toHaveValue(4);
-    expect(screen.getByLabelText(/registry cache ttl/i)).toHaveValue(300);
     // Updates-page fields must not leak onto this page.
     expect(screen.queryByLabelText(/health timeout/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/job history retention/i)).not.toBeInTheDocument();
@@ -124,9 +121,7 @@ describe("ScanningSettings", () => {
     renderPage();
 
     const concurrency = await screen.findByLabelText(/concurrency/i);
-    const cacheTtl = screen.getByLabelText(/registry cache ttl/i);
     expect(concurrency).toHaveClass("text-muted-foreground");
-    expect(cacheTtl).not.toHaveClass("text-muted-foreground");
     expect(screen.getAllByText("default")).toHaveLength(2); // poll interval + concurrency
 
     await user.clear(concurrency);

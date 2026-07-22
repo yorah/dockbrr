@@ -29,7 +29,7 @@ const fetchMock = vi.fn(async (url: string) => {
   if (u.includes("/api/settings")) {
     return json({
       poll_interval_seconds: "900", scan_on_start: "true", concurrency: "4",
-      health_timeout_seconds: "60", health_poll_seconds: "3", cache_ttl_seconds: "300",
+      health_timeout_seconds: "60", health_poll_seconds: "3",
       write_back_compose: "false", auto_remove_gone: "false", gone_grace_seconds: "86400",
       job_retention_days: "30", github_token_set: false, restart_required: [], defaults: {},
     });

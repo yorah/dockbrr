@@ -13,7 +13,6 @@ const SETTINGS: Settings = {
   concurrency: "4",
   health_timeout_seconds: "60",
   health_poll_seconds: "3",
-  cache_ttl_seconds: "300",
   write_back_compose: "false",
   auto_remove_gone: "false",
   default_auto_update_enabled: "false",
