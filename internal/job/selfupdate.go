@@ -15,6 +15,7 @@ import (
 type SelfDocker interface {
 	ContainerImageRef(ctx context.Context, id string) (string, error)
 	ImagePull(ctx context.Context, ref string) error
+	ImageVersion(ctx context.Context, ref string) (string, error)
 	SpawnUpdater(ctx context.Context, image string, cmd []string, socketPath string) (string, error)
 }
 
@@ -83,6 +84,17 @@ func (u *SelfUpdater) Handle(ctx context.Context, job store.Job) {
 		fail("pull " + newImage + " failed: " + err.Error())
 		return
 	}
+	// A release's GitHub tag (which drives res.UpdateAvailable) is published
+	// BEFORE GoReleaser pushes the image to the registry. In that window a
+	// floating tag like :latest still resolves to the OLD image, so the pull
+	// above succeeds without advancing the version. Confirm the pulled image
+	// really is the release we intend to install; otherwise dockbrr would
+	// "successfully" restart into the same old version and the update would keep
+	// reappearing. The update stays available (correctly) for a later retry.
+	if msg := verifyPulledVersion(ctx, u.docker, newImage, res.Latest); msg != "" {
+		fail(msg)
+		return
+	}
 	cmd := []string{"self-update-swap", "--socket", u.socket, "--target", u.selfID, "--image", newImage}
 	if _, err := u.docker.SpawnUpdater(ctx, currentRef, cmd, u.socket); err != nil {
 		fail("could not start the update helper: " + err.Error())
@@ -91,6 +103,29 @@ func (u *SelfUpdater) Handle(ctx context.Context, job store.Job) {
 	emit("pulled " + newImage + "; restarting into the new version (dockbrr will be briefly unavailable)")
 	logger.Infof("self-update: job %d spawned helper, restarting into %s", job.ID, newImage)
 	_ = u.jobs.Finish(job.ID, "success", nil, "")
+}
+
+// verifyPulledVersion returns "" when the just-pulled newImage carries a
+// version (its org.opencontainers.image.version label) at least as new as the
+// intended release `latest`, and a user-facing failure message otherwise. It is
+// deliberately fail-closed: an unreadable, missing, or unparsable label aborts
+// the swap rather than restarting into an unknown image, since every genuine
+// dockbrr release image is stamped with a clean semver label.
+func verifyPulledVersion(ctx context.Context, dc SelfDocker, newImage, latest string) string {
+	got, err := dc.ImageVersion(ctx, newImage)
+	if err != nil {
+		return "could not read the pulled image's version: " + err.Error()
+	}
+	gotCore, okGot := detect.ParseCore(got)
+	wantCore, okWant := detect.ParseCore(latest)
+	if okGot && okWant && !detect.CoreLess(gotCore, wantCore) {
+		return ""
+	}
+	pulled := got
+	if pulled == "" {
+		pulled = "an image with no version label"
+	}
+	return "the " + latest + " image is not published to the registry yet (pulled " + pulled + "); the update stays available, try again in a few minutes"
 }
 
 // targetSelfImage computes the image the self-update should move to. A

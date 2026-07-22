@@ -28,11 +28,13 @@ func TestTargetSelfImage(t *testing.T) {
 }
 
 type fakeSelfDocker struct {
-	imageRef   string
-	pulled     string
-	pullErr    error
-	spawnedCmd []string
-	spawnErr   error
+	imageRef     string
+	pulled       string
+	pullErr      error
+	imageVersion string
+	versionErr   error
+	spawnedCmd   []string
+	spawnErr     error
 }
 
 func (f *fakeSelfDocker) ContainerImageRef(ctx context.Context, id string) (string, error) {
@@ -41,6 +43,9 @@ func (f *fakeSelfDocker) ContainerImageRef(ctx context.Context, id string) (stri
 func (f *fakeSelfDocker) ImagePull(ctx context.Context, ref string) error {
 	f.pulled = ref
 	return f.pullErr
+}
+func (f *fakeSelfDocker) ImageVersion(ctx context.Context, ref string) (string, error) {
+	return f.imageVersion, f.versionErr
 }
 func (f *fakeSelfDocker) SpawnUpdater(ctx context.Context, image string, cmd []string, socket string) (string, error) {
 	f.spawnedCmd = cmd
@@ -108,7 +113,7 @@ func TestSelfUpdaterNoUpdateAvailable(t *testing.T) {
 
 func TestSelfUpdaterHappyPath(t *testing.T) {
 	jobs, emitter := newJobFixture(t)
-	fd := &fakeSelfDocker{imageRef: "ghcr.io/yorah/dockbrr:1.1.0"}
+	fd := &fakeSelfDocker{imageRef: "ghcr.io/yorah/dockbrr:1.1.0", imageVersion: "1.2.0"}
 	ck := fakeChecker{res: selfupdate.Result{Latest: "v1.2.0", UpdateAvailable: true}}
 	u := NewSelfUpdater(jobs, emitter, fd, ck, "abc123def456", "/var/run/docker.sock")
 
@@ -147,6 +152,64 @@ func TestSelfUpdaterPullFailureKeepsRunning(t *testing.T) {
 
 	if fd.spawnedCmd != nil {
 		t.Errorf("helper spawned despite pull failure: %v", fd.spawnedCmd)
+	}
+	got, _ := jobs.Get(j.ID)
+	if got.Status != "failed" {
+		t.Errorf("job status = %q, want failed", got.Status)
+	}
+}
+
+// TestSelfUpdaterStaleRegistryImageAborts covers the release-window race: the
+// GitHub tag for v1.2.0 exists (update available) but GoReleaser has not pushed
+// the image yet, so pulling the floating :latest tag resolves to the OLD 1.1.0
+// image. The pull succeeds, but the swap must NOT proceed and the job must fail
+// (not falsely report success), leaving the update available for a later retry.
+func TestSelfUpdaterStaleRegistryImageAborts(t *testing.T) {
+	jobs, _ := newJobFixture(t)
+	var lines []string
+	emitter := recordingEmitter{lines: &lines}
+	fd := &fakeSelfDocker{imageRef: "ghcr.io/yorah/dockbrr:latest", imageVersion: "1.1.0"}
+	ck := fakeChecker{res: selfupdate.Result{Latest: "v1.2.0", UpdateAvailable: true}}
+	u := NewSelfUpdater(jobs, emitter, fd, ck, "abc123def456", "/var/run/docker.sock")
+
+	j := enqueueSelfUpdate(t, jobs)
+	u.Handle(context.Background(), j)
+
+	if fd.pulled != "ghcr.io/yorah/dockbrr:latest" {
+		t.Errorf("pulled = %q, want floating latest", fd.pulled)
+	}
+	if fd.spawnedCmd != nil {
+		t.Errorf("helper spawned despite stale registry image: %v", fd.spawnedCmd)
+	}
+	got, _ := jobs.Get(j.ID)
+	if got.Status != "failed" {
+		t.Errorf("job status = %q, want failed (no false success)", got.Status)
+	}
+	found := false
+	for _, l := range lines {
+		if strings.Contains(l, "not published to the registry yet") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("lines = %v, want a not-published-yet explanation", lines)
+	}
+}
+
+// TestSelfUpdaterUnlabeledImageAborts: an image with no version label cannot be
+// verified as the intended release, so the updater fails closed rather than
+// restarting into an unknown image.
+func TestSelfUpdaterUnlabeledImageAborts(t *testing.T) {
+	jobs, emitter := newJobFixture(t)
+	fd := &fakeSelfDocker{imageRef: "ghcr.io/yorah/dockbrr:1.1.0", imageVersion: ""}
+	ck := fakeChecker{res: selfupdate.Result{Latest: "v1.2.0", UpdateAvailable: true}}
+	u := NewSelfUpdater(jobs, emitter, fd, ck, "abc123def456", "/var/run/docker.sock")
+
+	j := enqueueSelfUpdate(t, jobs)
+	u.Handle(context.Background(), j)
+
+	if fd.spawnedCmd != nil {
+		t.Errorf("helper spawned despite unverifiable image: %v", fd.spawnedCmd)
 	}
 	got, _ := jobs.Get(j.ID)
 	if got.Status != "failed" {
