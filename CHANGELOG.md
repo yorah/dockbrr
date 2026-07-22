@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/yorah/dockbrr/compare/v0.11.0...v0.11.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **selfupdate:** verify pulled image version before swap ([#76](https://github.com/yorah/dockbrr/issues/76)) ([da3e066](https://github.com/yorah/dockbrr/commit/da3e0665c8e8a7a75dd60be93cc6bc2b5ccccf0e))
+
 ## [0.11.0](https://github.com/yorah/dockbrr/compare/v0.10.3...v0.11.0) (2026-07-22)
 
 
