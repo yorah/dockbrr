@@ -171,8 +171,7 @@ func run(args []string, getenv func(string) string) error {
 	// Registry + detection + changelog + scan (read-only path).
 	plat := registry.HostPlatform()
 	resolver := registry.NewResolver(creds)
-	cacheTTL := func() time.Duration { return settingDuration(settings, "cache_ttl_seconds", 10*time.Minute) }
-	detector := detect.NewDetector(resolver, updates, images, states, events, tagCache, plat, cacheTTL)
+	detector := detect.NewDetector(resolver, updates, images, states, events, tagCache, plat)
 
 	httpClient := &http.Client{Timeout: httpClientTTL}
 	tokenFn := func() string {
