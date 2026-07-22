@@ -73,8 +73,6 @@ type blockingChecker struct {
 	started chan struct{}
 }
 
-func (b *blockingChecker) CheckServiceFresh(context.Context, int64) error { return nil }
-func (b *blockingChecker) CheckAllFresh(context.Context) error            { return nil }
 func (b *blockingChecker) CheckServicesFresh(_ context.Context, ids []int64, _ bool, onDone func(done, total int)) error {
 	close(b.started)
 	<-b.release
@@ -177,8 +175,6 @@ func newAbortableChecker() *abortableChecker {
 	}
 }
 
-func (a *abortableChecker) CheckServiceFresh(context.Context, int64) error { return nil }
-func (a *abortableChecker) CheckAllFresh(context.Context) error            { return nil }
 func (a *abortableChecker) CheckServicesFresh(ctx context.Context, _ []int64, _ bool, _ func(done, total int)) error {
 	close(a.started)
 	select {

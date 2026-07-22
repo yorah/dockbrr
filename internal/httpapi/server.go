@@ -25,15 +25,11 @@ type JobService interface {
 	Stream(id int64) (<-chan job.LogLine, error)
 }
 
-// Checker triggers read-only detection, either a fresh check of one service
-// (invalidating its detect cache first, so a manual check always does a full
-// re-scan) or a fresh sweep of a set of services (same cache invalidation,
-// per service). Both endpoints are manual/user-initiated, hence fresh; the
-// scheduler's cache-keeping sweep never comes through the API. *scan.Scanner
-// satisfies it. Detection does not go through the Job Engine (read-only).
+// Checker triggers read-only detection, checking a set of services and
+// reporting progress. Manual (single-service, project-scoped, or all-services)
+// and scheduled sweeps alike route through it. *scan.Scanner satisfies it.
+// Detection does not go through the Job Engine (read-only).
 type Checker interface {
-	CheckServiceFresh(ctx context.Context, serviceID int64) error
-	CheckAllFresh(ctx context.Context) error
 	// CheckServicesFresh checks each id fresh, reporting progress via onDone.
 	// reopen lifts the rolled_back auto-apply suppression per service (the
 	// manual "look again" gesture) and must only be true for scoped

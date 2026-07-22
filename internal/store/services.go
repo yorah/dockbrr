@@ -229,7 +229,7 @@ func (s *Services) UpdateImageRef(id int64, imageRef string) error {
 	return err
 }
 
-// List returns every service (used by the scheduler's CheckAll pass).
+// List returns every service (used by the scheduler's sweep).
 func (s *Services) List() ([]Service, error) {
 	rows, err := s.db.Query(
 		`SELECT id, project_id, name, container_ids, image_ref, current_digest,

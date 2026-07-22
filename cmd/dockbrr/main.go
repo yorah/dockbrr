@@ -192,7 +192,7 @@ func run(args []string, getenv func(string) string) error {
 	// Event bus: fans dashboard-refresh hints to SSE subscribers. Only main wires
 	// it, so job/scan stay free of an httpapi import (no cycle).
 	bus := httpapi.NewBus()
-	scanner := scan.New(detector, clResolver, services, updates, images, states, func(id int64) {
+	scanner := scan.New(detector, clResolver, services, updates, images, func(id int64) {
 		bus.Publish(httpapi.Event{Type: "detected", ServiceID: id})
 	})
 
@@ -258,7 +258,7 @@ func run(args []string, getenv func(string) string) error {
 		} else if n > 0 {
 			logger.Infof("job engine: re-queued %d interrupted job(s)", n)
 		}
-		reconciler := discovery.NewReconciler(dc, projects, services, 1, settings, states)
+		reconciler := discovery.NewReconciler(dc, projects, services, 1, settings)
 
 		var inner sync.WaitGroup
 		inner.Add(2)

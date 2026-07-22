@@ -28,14 +28,6 @@ type Changelog interface {
 	Resolve(ctx context.Context, u store.Update, img registry.RemoteImage) (text, url string, err error)
 }
 
-// stateInvalidator drops a service's cached remote-resolution so the next detect
-// does a full network resolve + semver scan instead of the digest-only
-// short-circuit. *store.RemoteStates satisfies it. A manual check uses it so the
-// button always re-scans; the periodic poll does not, keeping the cache.
-type stateInvalidator interface {
-	Invalidate(repo, tag string) error
-}
-
 // Scanner ties detection + changelog + persistence together.
 type Scanner struct {
 	detector  Detector
@@ -43,9 +35,6 @@ type Scanner struct {
 	services  *store.Services
 	updates   *store.Updates
 	images    *store.Images
-	// states, when non-nil, invalidates a service's detect cache before a manual
-	// CheckServiceFresh so the button forces a full re-scan.
-	states stateInvalidator
 	// notify, when non-nil, is called with the service id whenever CheckService
 	// finds a fresh update. It is a plain callback so scan never imports httpapi
 	// (avoids an import cycle); only cmd/dockbrr wires it to the event bus.
@@ -62,27 +51,15 @@ type Scanner struct {
 
 // New builds a Scanner. notify may be nil; when set it is called with the
 // service id on each fresh detection (used to push a "detected" refresh hint).
-// states may be nil (disables the manual-check cache invalidation).
-func New(detector Detector, cl Changelog, services *store.Services, updates *store.Updates, images *store.Images, states stateInvalidator, notify func(serviceID int64)) *Scanner {
-	return &Scanner{detector: detector, changelog: cl, services: services, updates: updates, images: images, states: states, notify: notify, notifiedTo: make(map[int64]string)}
+func New(detector Detector, cl Changelog, services *store.Services, updates *store.Updates, images *store.Images, notify func(serviceID int64)) *Scanner {
+	return &Scanner{detector: detector, changelog: cl, services: services, updates: updates, images: images, notify: notify, notifiedTo: make(map[int64]string)}
 }
 
-// CheckServiceFresh invalidates the service's cached remote-resolution, then runs
-// CheckService. The invalidation forces detect past its digest-only cache
-// short-circuit so a manual "Check" always does a full network + semver scan
-// (and thus re-resolves the changelog). The periodic poll calls CheckService
-// directly and keeps the cache for efficiency.
+// CheckServiceFresh runs CheckService, first lifting the rolled_back
+// suppression: a manual check is the explicit "look again" gesture (RecordDrift
+// preserves rolled_back on scheduled polls so auto-apply can never re-apply a
+// just-reverted target on its own).
 func (s *Scanner) CheckServiceFresh(ctx context.Context, serviceID int64) error {
-	if s.states != nil {
-		svc, err := s.services.Get(serviceID)
-		if err != nil {
-			return err
-		}
-		s.invalidateFor(svc)
-	}
-	// A manual check is the explicit "look again" gesture, so it also lifts the
-	// rolled_back suppression (RecordDrift preserves rolled_back on scheduled
-	// polls so auto-apply can never re-apply a just-reverted target on its own).
 	if s.updates != nil {
 		if n, err := s.updates.ReopenRolledBack(serviceID); err != nil {
 			logger.Errorf("scan: reopen rolled-back updates (service %d): %v", serviceID, err)
@@ -91,17 +68,6 @@ func (s *Scanner) CheckServiceFresh(ctx context.Context, serviceID int64) error 
 		}
 	}
 	return s.CheckService(ctx, serviceID)
-}
-
-// invalidateFor drops svc's cached remote-resolution so the next detect does a
-// full network resolve + semver scan. Best-effort: a failure is logged and the
-// check proceeds against the (possibly cached) state.
-func (s *Scanner) invalidateFor(svc store.Service) {
-	repo, tag := detect.SplitRef(svc.ImageRef)
-	if err := s.states.Invalidate(repo, tag); err != nil {
-		logger.Errorf("scan: invalidate detect cache (service %d (%s)): %v", svc.ID, svc.Name, err)
-	}
-	logger.Debugf("scan: manual re-check service %d (%s) (cache invalidated)", svc.ID, svc.Name)
 }
 
 // CheckService detects drift for one service and, on a fresh update, resolves +
@@ -267,41 +233,14 @@ func (s *Scanner) markNotified(serviceID int64, toDigest string) bool {
 	return true
 }
 
-// CheckAll runs CheckService over every service. Per-service errors are logged,
-// never abort the sweep. This is the scheduler's path: it keeps the detect
-// cache, so within the cache TTL a service takes the cheap digest-only route.
-func (s *Scanner) CheckAll(ctx context.Context) error {
-	return s.checkAll(ctx, false)
-}
-
-// CheckAllFresh is CheckAll with the detect cache invalidated per service, so
-// every service gets a full network resolve + semver scan. The manual "Check
-// all" button uses it: a user-initiated sweep means "look again now", the same
-// contract as the per-service check button. It does NOT lift the rolled_back
-// suppression; only the targeted per-service check does that.
-func (s *Scanner) CheckAllFresh(ctx context.Context) error {
-	svcs, err := s.services.List()
-	if err != nil {
-		return err
-	}
-	ids := make([]int64, len(svcs))
-	for i, sv := range svcs {
-		ids[i] = sv.ID
-	}
-	logger.Infof("scan: checking %d service(s)", len(ids))
-	return s.CheckServicesFresh(ctx, ids, false, nil)
-}
-
-// CheckServicesFresh invalidates each service's detect cache and checks it,
-// invoking onDone(done, total) after every service completes (whether it
-// detected drift, found nothing, or errored). Per-service errors are logged
-// and the sweep continues, matching checkAll. onDone may be nil.
+// CheckServicesFresh checks each id, invoking onDone(done, total) after every
+// service completes (whether it detected drift, found nothing, or errored).
+// Per-service errors are logged and the sweep continues. onDone may be nil.
 //
 // reopen controls whether each service also gets the rolled_back suppression
 // lifted (the "manual look-again" gesture): when true, each id goes through
-// CheckServiceFresh (invalidate + ReopenRolledBack + CheckService); when
-// false, it's invalidate + CheckService only, matching the historic
-// CheckAllFresh behavior. A sweep across every service must NEVER reopen: that
+// CheckServiceFresh (ReopenRolledBack + CheckService); when false, it's
+// CheckService only. A sweep across every service must NEVER reopen: that
 // would make a just-rolled-back update auto-apply-eligible again service-wide.
 // Scoped (single-service or single-project) manual checks must reopen, so
 // they match the original per-service "Check now" contract.
@@ -315,38 +254,13 @@ func (s *Scanner) CheckServicesFresh(ctx context.Context, ids []int64, reopen bo
 			if err := s.CheckServiceFresh(ctx, id); err != nil {
 				logger.Errorf("scan: check service %d: %v", id, err)
 			}
-		} else if svc, err := s.services.Get(id); err != nil {
-			logger.Errorf("scan: load service %d: %v", id, err)
-		} else {
-			if s.states != nil {
-				s.invalidateFor(svc)
-			}
-			if err := s.CheckService(ctx, id); err != nil {
-				logger.Errorf("scan: check service %d (%s): %v", id, svc.Name, err)
-			}
+		} else if err := s.CheckService(ctx, id); err != nil {
+			logger.Errorf("scan: check service %d: %v", id, err)
 		}
 		if onDone != nil {
 			onDone(i+1, total)
 		}
 	}
-	return nil
-}
-
-func (s *Scanner) checkAll(ctx context.Context, fresh bool) error {
-	svcs, err := s.services.List()
-	if err != nil {
-		return err
-	}
-	logger.Infof("scan: checking %d service(s)", len(svcs))
-	for _, svc := range svcs {
-		if fresh && s.states != nil {
-			s.invalidateFor(svc)
-		}
-		if err := s.CheckService(ctx, svc.ID); err != nil {
-			logger.Errorf("scan: check service %d (%s): %v", svc.ID, svc.Name, err)
-		}
-	}
-	logger.Debugf("scan: check-all complete (%d service(s))", len(svcs))
 	return nil
 }
 

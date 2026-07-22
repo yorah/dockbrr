@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"dockbrr/internal/compose"
-	"dockbrr/internal/detect"
 	"dockbrr/internal/discovery/dockername"
 	"dockbrr/internal/docker"
 	"dockbrr/internal/store"
@@ -180,12 +179,6 @@ type Reconciler struct {
 	// settings gates the auto-prune pass (auto_remove_gone / gone_grace_seconds).
 	// nil disables pruning entirely (e.g. in tests that don't exercise it).
 	settings *store.Settings
-	// states caches remote-resolution outcomes. When a service's running digest
-	// changes across reconciles (recreate/redeploy), its (repo,tag) cache entry
-	// is invalidated so the next detect scan does a full network resolve
-	// instead of the short-circuit. nil disables invalidation entirely (e.g. in
-	// tests that don't exercise it).
-	states *store.RemoteStates
 	// lastSig fingerprints the last reconciled discovery surface so Reconcile
 	// can report whether anything observable changed (dedups the "reconciled"
 	// refresh hint). Reconcile has a single caller (reconcileLoop) on one
@@ -195,10 +188,9 @@ type Reconciler struct {
 }
 
 // NewReconciler constructs a Reconciler. settings may be nil to disable the
-// auto-prune pass (gone-service / empty-project hard deletion). states may be
-// nil to disable detect-cache invalidation on running-digest change.
-func NewReconciler(src Collector, projects *store.Projects, services *store.Services, hostID int64, settings *store.Settings, states *store.RemoteStates) *Reconciler {
-	return &Reconciler{src: src, projects: projects, services: services, hostID: hostID, settings: settings, states: states}
+// auto-prune pass (gone-service / empty-project hard deletion).
+func NewReconciler(src Collector, projects *store.Projects, services *store.Services, hostID int64, settings *store.Settings) *Reconciler {
+	return &Reconciler{src: src, projects: projects, services: services, hostID: hostID, settings: settings}
 }
 
 // Reconcile runs one discovery cycle:
@@ -310,29 +302,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) (changed bool, err error) {
 			// parse error: leave declared/buildLocal empty -> nothing marked this cycle.
 		}
 
-		// Prior stored digests, keyed by service name, for detect-cache
-		// invalidation below. Only fetched when invalidation is enabled (states
-		// non-nil) to avoid an extra query per project on the hot path.
-		var priorDigest map[string]string
-		if r.states != nil {
-			storedSvcs, err := r.services.ListByProject(pid)
-			if err != nil {
-				return false, err
-			}
-			priorDigest = make(map[string]string, len(storedSvcs))
-			for _, sv := range storedSvcs {
-				priorDigest[sv.Name] = sv.CurrentDigest
-			}
-		}
-
 		for _, s := range g.Services {
-			if r.states != nil {
-				prev := priorDigest[s.Name] // "" if new/unknown service
-				if prev != "" && prev != s.CurrentDigest {
-					repo, tag := detect.SplitRef(s.ImageRef)
-					_ = r.states.Invalidate(repo, tag) // best-effort: never fail the reconcile
-				}
-			}
 			if _, err := r.services.Upsert(store.Service{
 				ProjectID:      pid,
 				Name:           s.Name,
