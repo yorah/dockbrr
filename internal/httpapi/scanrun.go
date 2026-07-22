@@ -145,7 +145,7 @@ func (sr *ScanRunner) execute(parent context.Context, scope string, ids []int64)
 	// Scoped (service/project) runs lift the rolled_back suppression; an
 	// all-services sweep must never reopen (see the original comment).
 	reopen := scope != "all" && scope != ""
-	_ = sr.checker.CheckServicesFresh(ctx, ids, reopen, func(done, total int) {
+	_, _ = sr.checker.CheckServicesFresh(ctx, ids, reopen, func(done, total int) {
 		sr.mu.Lock()
 		sr.state.Done = done
 		sr.mu.Unlock()

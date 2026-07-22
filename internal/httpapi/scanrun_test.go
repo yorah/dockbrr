@@ -73,7 +73,7 @@ type blockingChecker struct {
 	started chan struct{}
 }
 
-func (b *blockingChecker) CheckServicesFresh(_ context.Context, ids []int64, _ bool, onDone func(done, total int)) error {
+func (b *blockingChecker) CheckServicesFresh(_ context.Context, ids []int64, _ bool, onDone func(done, total int)) (bool, error) {
 	close(b.started)
 	<-b.release
 	for i := range ids {
@@ -81,7 +81,7 @@ func (b *blockingChecker) CheckServicesFresh(_ context.Context, ids []int64, _ b
 			onDone(i+1, len(ids))
 		}
 	}
-	return nil
+	return false, nil
 }
 
 func TestScanRunnerSingleFlight(t *testing.T) {
@@ -175,14 +175,14 @@ func newAbortableChecker() *abortableChecker {
 	}
 }
 
-func (a *abortableChecker) CheckServicesFresh(ctx context.Context, _ []int64, _ bool, _ func(done, total int)) error {
+func (a *abortableChecker) CheckServicesFresh(ctx context.Context, _ []int64, _ bool, _ func(done, total int)) (bool, error) {
 	close(a.started)
 	select {
 	case <-a.release:
 	case <-ctx.Done():
 		close(a.cancelled)
 	}
-	return nil
+	return false, nil
 }
 
 func TestScanRunnerAbortCancelsRunAndSkipsStamp(t *testing.T) {

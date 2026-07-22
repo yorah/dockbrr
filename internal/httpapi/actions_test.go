@@ -37,7 +37,7 @@ type fakeChecker struct {
 	servicesFreshReopen bool
 }
 
-func (f *fakeChecker) CheckServicesFresh(_ context.Context, ids []int64, reopen bool, onDone func(done, total int)) error {
+func (f *fakeChecker) CheckServicesFresh(_ context.Context, ids []int64, reopen bool, onDone func(done, total int)) (bool, error) {
 	f.servicesFreshCalls = append(f.servicesFreshCalls, ids)
 	f.servicesFreshReopen = reopen
 	for i := range ids {
@@ -45,7 +45,7 @@ func (f *fakeChecker) CheckServicesFresh(_ context.Context, ids []int64, reopen 
 			onDone(i+1, len(ids))
 		}
 	}
-	return f.servicesFreshErr
+	return false, f.servicesFreshErr
 }
 
 func actionDeps(db *store.DB, eng *fakeEngine, chk *fakeChecker) Deps {
