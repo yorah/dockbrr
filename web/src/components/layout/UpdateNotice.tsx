@@ -31,13 +31,16 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
   const [jobId, setJobId] = useState<number | null>(null);
   const job = useJob(jobId ?? 0, jobId !== null);
   const status = job.data?.status;
-  // A terminal status (success/failed/canceled) re-arms the button on its own,
-  // no state reset needed: useJob stops polling once terminal, and a retry
-  // replaces jobId via the mutation's onSuccess below. (Clearing jobId in the
-  // failure effect would be a setState-in-effect the render rules disallow.)
+  // Only a FAILED/canceled job re-arms the button, so the user can retry (a
+  // retry replaces jobId via the mutation's onSuccess below; clearing jobId in
+  // the failure effect would be a setState-in-effect the render rules disallow).
+  // Success must NOT re-arm: the job reports success the instant the swap helper
+  // is spawned, while this (old) server is still briefly alive and the page has
+  // not yet reloaded. Re-arming there let a fast user reclick and enqueue a
+  // second self_update in that window. Staying disabled until the reconnect
+  // reload replaces the page closes it.
   const applying =
-    apply.isPending ||
-    (jobId !== null && status !== "success" && status !== "failed" && status !== "canceled");
+    apply.isPending || (jobId !== null && status !== "failed" && status !== "canceled");
 
   useEffect(() => {
     if (status !== "failed" && status !== "canceled") return;
