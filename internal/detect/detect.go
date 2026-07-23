@@ -17,6 +17,7 @@ type Resolver interface {
 	Resolve(ctx context.Context, ref string, plat registry.Platform) (registry.RemoteImage, error)
 	ListTags(ctx context.Context, repo string) ([]string, error)
 	ConfigDigest(ctx context.Context, ref string, plat registry.Platform) (string, error)
+	Head(ctx context.Context, ref string) (string, error)
 }
 
 // Detector compares a service's running digest against remote registry state
@@ -65,6 +66,18 @@ func (d *Detector) Detect(ctx context.Context, svc store.Service) (*store.Update
 	// probes it, and the dashboard reads it as intentional rather than an error.
 	if svc.ImageLocal {
 		_ = d.states.Upsert(store.RemoteState{Repo: repo, Tag: tag, Status: "local", ResolvedAt: &now})
+		return nil, nil
+	}
+
+	// Steady-state fast path: for a floating tag whose running version has already
+	// been named (version_resolved), a HEAD confirms the tag still serves the
+	// running digest without the manifest + config-blob GET that Resolve does
+	// every cycle solely to re-read labels already stored. Restricted to floating
+	// tags: an exact-pinned tag still needs the newer-semver scan (ListTags) even
+	// when its own digest is unchanged, so it cannot short-circuit here. A HEAD
+	// error or a moved digest declines the shortcut and falls through to the
+	// authoritative Resolve below.
+	if d.headShortcut(ctx, svc, repo, tag, now) {
 		return nil, nil
 	}
 
@@ -197,6 +210,49 @@ func (d *Detector) Detect(ctx context.Context, svc store.Service) (*store.Update
 	severity := Severity(fromVer, toVer)
 
 	return d.record(svc, targetTag, targetRemote.Digest, fromVer, toVer, severity)
+}
+
+// headShortcut handles the steady-state HEAD-only confirmation for an
+// up-to-date floating service, returning true when it fully handled the cycle
+// (digest unchanged: remote-state timestamp refreshed, stale updates closed).
+// It returns false — deferring to a full Resolve — for an ineligible tag (exact
+// pin, still needs the semver scan), an image whose running version has never
+// been resolved (the full path must name it first), a HEAD error, or a moved
+// digest. It is behaviorally equivalent to the full up-to-date path for an
+// eligible service: recordImage would only rewrite the identical existing row,
+// and resolveCurrentVersion early-returns once version_resolved is set.
+func (d *Detector) headShortcut(ctx context.Context, svc store.Service, repo, tag string, now time.Time) bool {
+	if d.images == nil {
+		return false
+	}
+	if ClassifyTag(repo+":"+tag) != TagFloating {
+		return false // exact tag: the newer-semver scan still needs a full cycle
+	}
+	img, err := d.images.GetByDigest(repo, svc.CurrentDigest)
+	if err != nil || !img.VersionResolved {
+		return false // never fully resolved for this digest: take the full path
+	}
+	served, err := d.resolver.Head(ctx, svc.ImageRef)
+	if err != nil || served != svc.CurrentDigest {
+		// HEAD failed, or the tag moved (a new digest, or the running side is a
+		// platform digest the index HEAD can't match): let Resolve decide.
+		return false
+	}
+	// Unchanged. Refresh the cache timestamp, preserving the stored manifest
+	// labels so the full-replace Upsert does not blank them.
+	labels := "{}"
+	if prev, perr := d.states.Get(repo, tag); perr == nil && prev.ManifestLabels != "" {
+		labels = prev.ManifestLabels
+	}
+	if uerr := d.states.Upsert(store.RemoteState{
+		Repo: repo, Tag: tag, RemoteDigest: served,
+		ManifestLabels: labels, Status: "ok", ResolvedAt: &now,
+	}); uerr != nil {
+		logger.Warnf("detect: refresh remote_state %s:%s (head shortcut): %v", repo, tag, uerr)
+	}
+	d.closeStaleUpdates(svc.ID)
+	logger.Tracef("detect: %s unchanged via HEAD %s (shortcut)", svc.ImageRef, shortDigest(served))
+	return true
 }
 
 // record persists the drift (transactionally, via RecordDrift) and emits a
