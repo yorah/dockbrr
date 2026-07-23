@@ -150,6 +150,10 @@ func (s *GitHubSource) Resolve(ctx context.Context, in Input) (Result, error) {
 	if !exists {
 		return Result{}, nil // repo does not exist: defer
 	}
+	// Keep only releases matching the image's variant flavor (e.g. libtorrentv1),
+	// so a dual-version image does not resolve to a co-published sibling variant
+	// that shares its app-core. No-op when the image has no flavor.
+	rels = filterByFlavor(rels, extractFlavor(in.Version))
 	want := tgt.tags(in.Version)
 	target, ok := findRelease(rels, want, in.Version)
 	if !ok {
@@ -387,11 +391,84 @@ func spanLink(owner, name, fromTag, toTag string, reachedFrom bool) string {
 }
 
 // normalizeTag strips the release-tag decorations dockbrr treats as noise
-// (a leading "<name>-" package prefix, "release-", "v") so a tag can be parsed as
-// semver: "znc-1.10.2-ls183" -> "1.10.2-ls183", "release-1.31.2" -> "1.31.2".
+// (a leading "<name>-" package prefix, "release-", "v") and truncates at the
+// first "_", which precedes a downstream second version in LinuxServer.io's
+// dual-version tags ("libtorrentv1-5.2.3_v1.2.20-ls126" -> "5.2.3"), so the
+// app-core can be parsed as semver. "znc-1.10.2-ls183" -> "1.10.2-ls183",
+// "release-1.31.2" -> "1.31.2".
 func normalizeTag(tag string) string {
 	tag = detect.StripNamePrefix(tag)
-	return strings.TrimPrefix(strings.TrimPrefix(tag, "release-"), "v")
+	tag = strings.TrimPrefix(strings.TrimPrefix(tag, "release-"), "v")
+	if i := strings.IndexByte(tag, '_'); i >= 0 {
+		tag = tag[:i]
+	}
+	return tag
+}
+
+// buildSuffixRe matches the version suffixes that are build counters, not
+// variant flavors: LinuxServer.io's "lsNNN". extractFlavor treats such a
+// segment (and any pre-release marker) as "no flavor".
+var buildSuffixRe = regexp.MustCompile(`(?i)^ls\d+$`)
+
+// extractFlavor returns the variant flavor encoded in a version's suffix, or ""
+// when there is none. The flavor is the first "-"-separated segment after a
+// numeric core, unless that segment is a build counter (lsNNN) or a pre-release
+// marker (rc/beta/...), which name a build rather than a variant. Examples:
+// "5.2.3-libtorrentv1" -> "libtorrentv1", "5.2.3-alpine" -> "alpine",
+// "1.10.2-ls183" -> "", "5.2.3" -> "", "master-omnibus" -> "".
+// Only the first "-"-segment after the core is inspected. A variant literally
+// named like a pre-release word (e.g. "beta") is treated as no-flavor, which
+// fails safe (filtering is simply disabled). A flavor placed further right
+// (e.g. "5.2.3-arm64-libtorrentv1") yields the leading segment ("arm64")
+// instead: this only degrades safely via filterByFlavor's monotonic zero-match
+// fallback, so if a release tag happens to carry that wrong segment the filter
+// can narrow incorrectly. Such multi-segment suffixes are not seen in practice.
+func extractFlavor(version string) string {
+	v := detect.StripNamePrefix(strings.TrimSpace(version))
+	v = strings.TrimPrefix(v, "v")
+	i := strings.IndexByte(v, '-')
+	if i < 0 {
+		return ""
+	}
+	if _, ok := detect.ParseCore(v[:i]); !ok {
+		return "" // suffix does not follow a numeric core: not a flavor
+	}
+	seg := v[i+1:]
+	if j := strings.IndexByte(seg, '-'); j >= 0 {
+		seg = seg[:j]
+	}
+	if seg == "" || buildSuffixRe.MatchString(seg) || prereleaseRe.MatchString(seg) {
+		return ""
+	}
+	return seg
+}
+
+// filterByFlavor narrows rels to the releases whose tag carries flavor, so a
+// flavored image (e.g. "libtorrentv1") resolves to its own variant's notes and
+// not a co-published sibling variant that shares the same app-core. It only
+// narrows when flavor is non-empty AND at least one release matches, so an image
+// with no flavor, or a flavor absent from every release, keeps today's behavior.
+// flavor must match a whole "-"/"_"-delimited segment of the tag, not merely
+// appear as a substring: a short flavor like "v1" must not match inside an
+// unrelated segment such as "v10.2.1".
+func filterByFlavor(rels []ghRelease, flavor string) []ghRelease {
+	if flavor == "" {
+		return rels
+	}
+	isDelim := func(r rune) bool { return r == '-' || r == '_' }
+	var kept []ghRelease
+	for _, rel := range rels {
+		for _, seg := range strings.FieldsFunc(rel.TagName, isDelim) {
+			if seg == flavor {
+				kept = append(kept, rel)
+				break
+			}
+		}
+	}
+	if len(kept) == 0 {
+		return rels
+	}
+	return kept
 }
 
 // coreComponents counts the leading dot-separated numeric components of a

@@ -875,3 +875,66 @@ func TestGitHubReleasesErrorNoRawChangelogPreservesError(t *testing.T) {
 		t.Fatalf("res = %+v, want empty when nothing resolved", res)
 	}
 }
+
+func TestGitHubLinuxServerDualVersionFlavor(t *testing.T) {
+	// qbittorrent ships two libtorrent variants sharing app-core 5.2.3; a
+	// libtorrentv1 image must resolve to the v1 release notes, not the v2 sibling.
+	srv := ghServer(t, map[string][]ghRel{
+		"linuxserver/docker-qbittorrent": {
+			{TagName: "5.2.3_v2.0.13-ls469", HTMLURL: "v2url", Body: "v2 notes"},
+			{TagName: "libtorrentv1-5.2.3_v1.2.20-ls126", HTMLURL: "https://github.com/linuxserver/docker-qbittorrent/releases/tag/libtorrentv1-5.2.3_v1.2.20-ls126", Body: "libtorrent v1 notes"},
+		},
+	}, nil, "")
+	s := changelog.NewGitHubSource(srv.Client(), srv.URL, srv.URL, func() string { return "" }, nil, time.Hour)
+	in := changelog.Input{
+		Image: registry.RemoteImage{
+			Ref:    "ghcr.io/linuxserver/qbittorrent:5.2.3-libtorrentv1",
+			Labels: map[string]string{"org.opencontainers.image.source": "https://github.com/linuxserver/docker-qbittorrent"},
+		},
+		Version: "5.2.3-libtorrentv1",
+	}
+	res, err := s.Resolve(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "libtorrent v1 notes") {
+		t.Errorf("Text = %q, want the v1 notes", res.Text)
+	}
+	if strings.Contains(res.Text, "v2 notes") {
+		t.Errorf("Text = %q, must not contain the v2 sibling notes", res.Text)
+	}
+	if res.URL != "https://github.com/linuxserver/docker-qbittorrent/releases/tag/libtorrentv1-5.2.3_v1.2.20-ls126" {
+		t.Errorf("URL = %q, want the v1 release url", res.URL)
+	}
+}
+
+func TestGitHubLinuxServerDualVersionRange(t *testing.T) {
+	// 5.2.2 -> 5.2.3 libtorrentv1: the span must stay within the v1 variant.
+	srv := ghServer(t, map[string][]ghRel{
+		"linuxserver/docker-qbittorrent": {
+			{TagName: "5.2.3_v2.0.13-ls469", HTMLURL: "v2new", Body: "v2 latest notes"},
+			{TagName: "libtorrentv1-5.2.3_v1.2.20-ls126", HTMLURL: "https://github.com/linuxserver/docker-qbittorrent/releases/tag/libtorrentv1-5.2.3_v1.2.20-ls126", Body: "v1 five two three notes"},
+			{TagName: "5.2.2_v2.0.13-ls465", HTMLURL: "v2old", Body: "v2 old notes"},
+			{TagName: "libtorrentv1-5.2.2_v1.2.20-ls123", HTMLURL: "v1old", Body: "v1 five two two notes"},
+		},
+	}, nil, "")
+	s := changelog.NewGitHubSource(srv.Client(), srv.URL, srv.URL, func() string { return "" }, nil, time.Hour)
+	in := changelog.Input{
+		Image: registry.RemoteImage{
+			Ref:    "ghcr.io/linuxserver/qbittorrent:5.2.3-libtorrentv1",
+			Labels: map[string]string{"org.opencontainers.image.source": "https://github.com/linuxserver/docker-qbittorrent"},
+		},
+		FromVersion: "5.2.2-libtorrentv1",
+		Version:     "5.2.3-libtorrentv1",
+	}
+	res, err := s.Resolve(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "v1 five two three notes") {
+		t.Errorf("Text = %q, want the v1 5.2.3 notes", res.Text)
+	}
+	if strings.Contains(res.Text, "v2 latest notes") || strings.Contains(res.Text, "v2 old notes") {
+		t.Errorf("Text = %q, must not contain v2 notes", res.Text)
+	}
+}
