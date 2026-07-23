@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.12.1](https://github.com/yorah/dockbrr/compare/v0.12.0...v0.12.1) (2026-07-23)
+
+
+### Bug Fixes
+
+* **changelog:** resolve notes for dual-version variant tags ([#86](https://github.com/yorah/dockbrr/issues/86)) ([cc956de](https://github.com/yorah/dockbrr/commit/cc956de0ac1fb7282a922909e059c5c056d5b83e))
+
+
+### Performance Improvements
+
+* **detect:** HEAD-first steady-state check for floating tags ([#84](https://github.com/yorah/dockbrr/issues/84)) ([c757fd9](https://github.com/yorah/dockbrr/commit/c757fd9f889cbdb96a0ab95154bb02b6eda37ae1))
+
 ## [0.12.0](https://github.com/yorah/dockbrr/compare/v0.11.2...v0.12.0) (2026-07-23)
 
 
