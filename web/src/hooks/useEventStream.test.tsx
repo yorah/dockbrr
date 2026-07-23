@@ -7,10 +7,12 @@ import { keys } from "@/api/keys";
 import { __resetBusyServices, markServiceBusy, useBusyServices } from "@/hooks/useBusyServices";
 import { __resetScanRun, useScanRun } from "@/hooks/useScanRun";
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() }, Toaster: () => null }));
+import { toast } from "sonner";
 import { useEventStream, __setEventSourceFactory, __setReloadForTest } from "./useEventStream";
 
 beforeEach(() => __resetBusyServices());
 beforeEach(() => __resetScanRun());
+beforeEach(() => vi.mocked(toast.error).mockClear());
 afterEach(() => __resetScanRun());
 
 class FakeES {
@@ -317,6 +319,25 @@ describe("useEventStream", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  test("scan_finished with rate_limited toasts the token hint", async () => {
+    __setEventSourceFactory((url) => new FakeES(url) as unknown as EventSource);
+    const { W } = wrapper();
+    renderHook(() => useEventStream(true), { wrapper: W });
+    await waitFor(() => expect(FakeES.last).not.toBeNull());
+    act(() => FakeES.last!.emit(JSON.stringify({ type: "scan_finished", rate_limited: true })));
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect((toast.error as any).mock.calls[0][0]).toMatch(/GitHub token/);
+  });
+
+  test("scan_finished without rate_limited does not toast", async () => {
+    __setEventSourceFactory((url) => new FakeES(url) as unknown as EventSource);
+    const { W } = wrapper();
+    renderHook(() => useEventStream(true), { wrapper: W });
+    await waitFor(() => expect(FakeES.last).not.toBeNull());
+    act(() => FakeES.last!.emit(JSON.stringify({ type: "scan_finished" })));
+    expect(toast.error).not.toHaveBeenCalled();
   });
 
   test("disabled opens nothing", () => {
