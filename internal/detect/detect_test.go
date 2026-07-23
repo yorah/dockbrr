@@ -61,6 +61,20 @@ func (f fakeResolver) ListTags(_ context.Context, _ string) ([]string, error) {
 	return f.tags, f.tagsErr
 }
 
+// Head returns the served digest for ref (the byRef override, else img),
+// mirroring Resolve's digest. Backs the detector's steady-state HEAD shortcut.
+func (f fakeResolver) Head(_ context.Context, ref string) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	if f.byRef != nil {
+		if img, ok := f.byRef[ref]; ok {
+			return img.Digest, nil
+		}
+	}
+	return f.img.Digest, nil
+}
+
 func (f fakeResolver) ConfigDigest(_ context.Context, ref string, _ registry.Platform) (string, error) {
 	if f.configSeen != nil {
 		f.configSeen[ref]++
@@ -171,6 +185,117 @@ func TestDetectNoUpdateWhenDigestMatches(t *testing.T) {
 // worker.MarkApplied runs, so the update stays 'available'. The next detect
 // finds the tag already up to date and must supersede it, otherwise the
 // dashboard keeps rendering the running image with the stale from_version.
+// headCountingResolver counts Resolve and Head calls so a test can prove the
+// steady-state fast path HEADs the tag instead of doing a full manifest+config
+// Resolve every cycle.
+type headCountingResolver struct {
+	fakeResolver
+	resolveCalls *int
+	headCalls    *int
+}
+
+func (c headCountingResolver) Resolve(ctx context.Context, ref string, plat registry.Platform) (registry.RemoteImage, error) {
+	*c.resolveCalls++
+	return c.fakeResolver.Resolve(ctx, ref, plat)
+}
+
+func (c headCountingResolver) Head(ctx context.Context, ref string) (string, error) {
+	*c.headCalls++
+	return c.fakeResolver.Head(ctx, ref)
+}
+
+// A floating service that is up to date and already version-resolved must, on a
+// later cycle, confirm its digest with a cheap HEAD and skip the full Resolve
+// (which only re-reads labels already stored). The first cycle resolves fully
+// and names the version (here a conclusive no-match sets version_resolved); the
+// second cycle takes the HEAD shortcut.
+func TestDetectFloatingUpToDateUsesHeadShortcut(t *testing.T) {
+	db := newDB(t)
+	svc := seedSvc(t, db, "acme/app:latest", "sha256:same", false)
+
+	resolveCalls, headCalls := 0, 0
+	r := headCountingResolver{
+		// latest serves the running digest (up to date); no labels + empty config
+		// digest drive resolveCurrentVersion to a conclusive no-match, which still
+		// marks the image version_resolved (negative cache).
+		fakeResolver: fakeResolver{img: registry.RemoteImage{Digest: "sha256:same", PlatformDigest: "sha256:same"}},
+		resolveCalls: &resolveCalls,
+		headCalls:    &headCalls,
+	}
+	det := newDetector(db, r)
+
+	// Cycle 1: full resolve, up to date, version_resolved persisted.
+	if u, err := det.Detect(context.Background(), svc); err != nil || u != nil {
+		t.Fatalf("cycle 1: u=%+v err=%v, want nil,nil", u, err)
+	}
+	if resolveCalls != 1 {
+		t.Fatalf("cycle 1: Resolve calls = %d, want 1", resolveCalls)
+	}
+	img, err := store.NewImages(db).GetByDigest("acme/app", "sha256:same")
+	if err != nil || !img.VersionResolved {
+		t.Fatalf("cycle 1: image row version_resolved=%v err=%v, want resolved", img.VersionResolved, err)
+	}
+
+	// Cycle 2: unchanged digest + already resolved -> HEAD only, no Resolve.
+	resolveCalls, headCalls = 0, 0
+	if u, err := det.Detect(context.Background(), svc); err != nil || u != nil {
+		t.Fatalf("cycle 2: u=%+v err=%v, want nil,nil", u, err)
+	}
+	if headCalls != 1 {
+		t.Fatalf("cycle 2: Head calls = %d, want 1", headCalls)
+	}
+	if resolveCalls != 0 {
+		t.Fatalf("cycle 2: Resolve calls = %d, want 0 (HEAD shortcut skipped)", resolveCalls)
+	}
+	// Remote state stays ok and labels are preserved (not clobbered to nothing).
+	rs, err := store.NewRemoteStates(db).Get("acme/app", "latest")
+	if err != nil || rs.Status != "ok" || rs.RemoteDigest != "sha256:same" {
+		t.Fatalf("cycle 2: remote_state = %+v err=%v", rs, err)
+	}
+}
+
+// A floating service whose tag has MOVED (HEAD digest differs from the running
+// one) must not be short-circuited: the full Resolve runs and records the drift.
+func TestDetectFloatingHeadShortcutFallsThroughOnMove(t *testing.T) {
+	db := newDB(t)
+	svc := seedSvc(t, db, "acme/app:latest", "sha256:old", false)
+
+	resolveCalls, headCalls := 0, 0
+	r := headCountingResolver{
+		fakeResolver: fakeResolver{img: registry.RemoteImage{Digest: "sha256:old", PlatformDigest: "sha256:old"}},
+		resolveCalls: &resolveCalls,
+		headCalls:    &headCalls,
+	}
+	det := newDetector(db, r)
+
+	// Cycle 1: up to date + version_resolved.
+	if _, err := det.Detect(context.Background(), svc); err != nil {
+		t.Fatal(err)
+	}
+
+	// Cycle 2: latest now serves a new digest. HEAD sees the move, the shortcut
+	// declines, and the full Resolve records the drift.
+	moved := headCountingResolver{
+		fakeResolver: fakeResolver{img: registry.RemoteImage{
+			Digest: "sha256:new", PlatformDigest: "sha256:new",
+			Labels: map[string]string{"org.opencontainers.image.version": "2.0.0"},
+		}},
+		resolveCalls: &resolveCalls,
+		headCalls:    &headCalls,
+	}
+	resolveCalls, headCalls = 0, 0
+	u, err := newDetector(db, moved).Detect(context.Background(), svc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u == nil || u.ToDigest != "sha256:new" {
+		t.Fatalf("expected drift to sha256:new, got %+v", u)
+	}
+	if resolveCalls == 0 {
+		t.Fatal("Resolve not called after a HEAD-detected move; shortcut must fall through")
+	}
+}
+
 func TestDetectUpToDateSupersedesStaleOpenUpdate(t *testing.T) {
 	db := newDB(t)
 	svc := seedSvc(t, db, "ghcr.io/yorah/dockbrr:latest", "sha256:v041", false)
