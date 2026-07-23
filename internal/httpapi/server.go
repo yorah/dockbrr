@@ -34,7 +34,7 @@ type Checker interface {
 	// reopen lifts the rolled_back auto-apply suppression per service (the
 	// manual "look again" gesture) and must only be true for scoped
 	// (service/project) runs, never for an all-services sweep.
-	CheckServicesFresh(ctx context.Context, ids []int64, reopen bool, onDone func(done, total int)) error
+	CheckServicesFresh(ctx context.Context, ids []int64, reopen bool, onDone func(done, total int)) (bool, error)
 }
 
 // DockerPinger re-probes daemon liveness on each /api/status request so the

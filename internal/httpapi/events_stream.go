@@ -25,6 +25,10 @@ type Event struct {
 	// GET /api/scan snapshot self-heals dropped events on mount/reconnect.
 	Done  int `json:"done,omitempty"`
 	Total int `json:"total,omitempty"`
+	// RateLimited rides on a scan_finished event from a MANUAL sweep whose
+	// changelog resolution hit the GitHub rate limit, so the UI can show the
+	// "add a token" hint once per run. Scheduled sweeps never set it.
+	RateLimited bool `json:"rate_limited,omitempty"`
 }
 
 // Bus fans events out to SSE subscribers. Publish is non-blocking: a slow

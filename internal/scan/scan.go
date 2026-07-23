@@ -60,27 +60,42 @@ func New(detector Detector, cl Changelog, services *store.Services, updates *sto
 // preserves rolled_back on scheduled polls so auto-apply can never re-apply a
 // just-reverted target on its own).
 func (s *Scanner) CheckServiceFresh(ctx context.Context, serviceID int64) error {
+	_, err := s.checkServiceFresh(ctx, serviceID)
+	return err
+}
+
+// checkServiceFresh is CheckServiceFresh's internal form, additionally reporting
+// whether a changelog resolve hit the GitHub rate limit.
+func (s *Scanner) checkServiceFresh(ctx context.Context, serviceID int64) (rateLimited bool, err error) {
 	if s.updates != nil {
-		if n, err := s.updates.ReopenRolledBack(serviceID); err != nil {
-			logger.Errorf("scan: reopen rolled-back updates (service %d): %v", serviceID, err)
+		if n, rerr := s.updates.ReopenRolledBack(serviceID); rerr != nil {
+			logger.Errorf("scan: reopen rolled-back updates (service %d): %v", serviceID, rerr)
 		} else if n > 0 {
 			logger.Infof("scan: service %d manual check reopened %d rolled-back update(s)", serviceID, n)
 		}
 	}
-	return s.CheckService(ctx, serviceID)
+	return s.checkService(ctx, serviceID)
 }
 
 // CheckService detects drift for one service and, on a fresh update, resolves +
 // persists its changelog. A changelog miss/failure is non-fatal.
 func (s *Scanner) CheckService(ctx context.Context, serviceID int64) error {
+	_, err := s.checkService(ctx, serviceID)
+	return err
+}
+
+// checkService is CheckService's internal form: it additionally reports whether a
+// changelog resolve returned changelog.ErrRateLimited, so a sweep can surface an
+// aggregate "add a token" hint.
+func (s *Scanner) checkService(ctx context.Context, serviceID int64) (rateLimited bool, err error) {
 	svc, err := s.services.Get(serviceID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	logger.Debugf("scan: checking service %d (%s) ref=%s", svc.ID, svc.Name, svc.ImageRef)
 	upd, err := s.detector.Detect(ctx, svc)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if upd == nil {
 		logger.Debugf("scan: service %d (%s) up to date", svc.ID, svc.Name)
@@ -94,10 +109,11 @@ func (s *Scanner) CheckService(ctx context.Context, serviceID int64) error {
 		// dashboard can show what the running version shipped. Skipped when a
 		// surfaced row (open/applied/dismissed) already provides one; superseded
 		// rows do not count, so a self-updated service still gets a baseline.
-		if err := s.ensureCurrentChangelog(ctx, svc); err != nil {
-			logger.Errorf("scan: ensure current changelog (service %d (%s)): %v", svc.ID, svc.Name, err)
+		rl, cerr := s.ensureCurrentChangelog(ctx, svc)
+		if cerr != nil {
+			logger.Errorf("scan: ensure current changelog (service %d (%s)): %v", svc.ID, svc.Name, cerr)
 		}
-		return nil // up-to-date / unmonitorable
+		return rl, nil // up-to-date / unmonitorable
 	}
 	logger.Infof("scan: update available service %d (%s): %s -> %s [%s]",
 		svc.ID, svc.Name, refLabel(upd.FromVersion, upd.FromDigest), refLabel(upd.ToVersion, upd.ToDigest), upd.Severity)
@@ -120,6 +136,7 @@ func (s *Scanner) CheckService(ctx context.Context, serviceID int64) error {
 		if serr := s.updates.SetChangelogStatus(upd.ID, "rate_limited"); serr != nil {
 			logger.Errorf("scan: persist changelog status (update %d): %v", upd.ID, serr)
 		}
+		return true, nil
 	case err != nil:
 		logger.Errorf("scan: changelog resolve (service %d (%s)): %v", serviceID, svc.Name, err)
 	case text != "" || url != "":
@@ -127,7 +144,7 @@ func (s *Scanner) CheckService(ctx context.Context, serviceID int64) error {
 			logger.Errorf("scan: persist changelog (update %d): %v", upd.ID, serr)
 		}
 	}
-	return nil
+	return false, nil
 }
 
 // ensureCurrentChangelog writes a synthetic status='current' update row for an
@@ -140,16 +157,16 @@ func (s *Scanner) CheckService(ctx context.Context, serviceID int64) error {
 // Stale baselines at other digests are dropped first (the image can move out of
 // band, e.g. dockbrr self-updating its own container), and a baseline is
 // (re)resolved unless one is already cached for the running digest.
-func (s *Scanner) ensureCurrentChangelog(ctx context.Context, svc store.Service) error {
+func (s *Scanner) ensureCurrentChangelog(ctx context.Context, svc store.Service) (rateLimited bool, err error) {
 	if svc.CurrentDigest == "" {
-		return nil // nothing to key the row on
+		return false, nil // nothing to key the row on
 	}
 	// A prior baseline pinned to a now-superseded digest is stale: the running
 	// image moved out of band (e.g. dockbrr self-updated its own container), so
 	// drop it before deciding whether to write a fresh one. 'current' rows are
 	// immune to supersede, so nothing else ever clears them.
 	if _, derr := s.updates.DeleteStaleCurrent(svc.ID, svc.CurrentDigest); derr != nil {
-		return derr
+		return false, derr
 	}
 	// A surfaced row (an open available/dismissed/rolled_back update, or an
 	// applied one) already gives the dashboard a changelog; the synthetic
@@ -158,9 +175,9 @@ func (s *Scanner) ensureCurrentChangelog(ctx context.Context, svc store.Service)
 	// dockbrr self-update leaves one, still gets a baseline (the greyed-changelog
 	// fix: gating on "any non-current row" wrongly blocked that).
 	if surfaced, serr := s.updates.HasSurfacedByService(svc.ID); serr != nil {
-		return serr
+		return false, serr
 	} else if surfaced {
-		return nil
+		return false, nil
 	}
 	// A baseline already RESOLVED for this digest: its changelog is cached, so
 	// don't re-hit the changelog source's API. A baseline whose resolve came back
@@ -168,9 +185,9 @@ func (s *Scanner) ensureCurrentChangelog(ctx context.Context, svc store.Service)
 	// here (self-heals an instance left with an empty/rate-limited baseline by an
 	// earlier miss or a transient GitHub rate limit that has since reset).
 	if resolved, herr := s.updates.HasResolvedCurrentAtDigest(svc.ID, svc.CurrentDigest); herr != nil {
-		return herr
+		return false, herr
 	} else if resolved {
-		return nil
+		return false, nil
 	}
 
 	repo, tag := detect.SplitRef(svc.ImageRef)
@@ -200,7 +217,7 @@ func (s *Scanner) ensureCurrentChangelog(ctx context.Context, svc store.Service)
 	}
 	id, err := s.updates.Upsert(row)
 	if err != nil {
-		return err
+		return false, err
 	}
 	row.ID = id
 
@@ -211,14 +228,15 @@ func (s *Scanner) ensureCurrentChangelog(ctx context.Context, svc store.Service)
 		if serr := s.updates.SetChangelogStatus(id, "rate_limited"); serr != nil {
 			logger.Errorf("scan: persist changelog status (current row %d): %v", id, serr)
 		}
+		return true, nil
 	case err != nil:
-		return err
+		return false, err
 	case text != "" || url != "":
 		if serr := s.updates.SetChangelog(id, url, text); serr != nil {
 			logger.Errorf("scan: persist changelog (current row %d): %v", id, serr)
 		}
 	}
-	return nil
+	return false, nil
 }
 
 // markNotified records that serviceID's standing drift now targets toDigest and
@@ -235,7 +253,9 @@ func (s *Scanner) markNotified(serviceID int64, toDigest string) bool {
 }
 
 // CheckServicesFresh checks each id, invoking onDone(done, total) after every
-// service completes (whether it detected drift, found nothing, or errored).
+// service completes (whether it detected drift, found nothing, or errored), and
+// reports whether any changelog resolve during the sweep hit the GitHub rate
+// limit (so the caller can surface an aggregate "add a token" hint).
 // Per-service errors are logged and the sweep continues. onDone may be nil.
 //
 // reopen controls whether each service also gets the rolled_back suppression
@@ -245,24 +265,33 @@ func (s *Scanner) markNotified(serviceID int64, toDigest string) bool {
 // would make a just-rolled-back update auto-apply-eligible again service-wide.
 // Scoped (single-service or single-project) manual checks must reopen, so
 // they match the original per-service "Check now" contract.
-func (s *Scanner) CheckServicesFresh(ctx context.Context, ids []int64, reopen bool, onDone func(done, total int)) error {
+func (s *Scanner) CheckServicesFresh(ctx context.Context, ids []int64, reopen bool, onDone func(done, total int)) (bool, error) {
 	total := len(ids)
+	rateLimited := false
 	for i, id := range ids {
 		if ctx.Err() != nil {
 			break // aborted or timed out: stop the sweep, keep partial results
 		}
+		var (
+			rl   bool
+			cerr error
+		)
 		if reopen {
-			if err := s.CheckServiceFresh(ctx, id); err != nil {
-				logger.Errorf("scan: check service %d: %v", id, err)
-			}
-		} else if err := s.CheckService(ctx, id); err != nil {
-			logger.Errorf("scan: check service %d: %v", id, err)
+			rl, cerr = s.checkServiceFresh(ctx, id)
+		} else {
+			rl, cerr = s.checkService(ctx, id)
+		}
+		if cerr != nil {
+			logger.Errorf("scan: check service %d: %v", id, cerr)
+		}
+		if rl {
+			rateLimited = true
 		}
 		if onDone != nil {
 			onDone(i+1, total)
 		}
 	}
-	return nil
+	return rateLimited, nil
 }
 
 // refLabel prefers a human version, falling back to a short digest, for log

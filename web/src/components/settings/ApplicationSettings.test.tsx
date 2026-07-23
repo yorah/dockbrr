@@ -108,6 +108,14 @@ describe("ApplicationSettings", () => {
     expect(screen.queryByText("27.3.1")).not.toBeInTheDocument();
   });
 
+  it("shows a token hint line + settings link when the self-update check is rate-limited", async () => {
+    const RL: SelfUpdate = { current: "0.1.0-dev", update_available: false, error_kind: "rate_limited", error: "rate limited" };
+    renderPage(FULL, RL);
+    expect(await screen.findByText(/GitHub rate limit reached/i)).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: /Add a GitHub token/i });
+    expect(link).toHaveAttribute("href", "/settings/registries");
+  });
+
   it("invalidates settings, registries, and log config after a successful import", async () => {
     vi.stubGlobal(
       "fetch",

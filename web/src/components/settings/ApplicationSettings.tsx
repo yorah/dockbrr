@@ -105,6 +105,20 @@ export function ApplicationSettings() {
           <InfoRow label="Commit" value={commit} sub={data.commit_dirty ? "working tree was dirty at build time" : undefined} />
           <InfoRow label="Build date" value={formatDate(data.build_date)} />
         </Rows>
+        {su?.error_kind === "rate_limited" && (
+          <p className="mt-2 text-xs text-warning" role="status">
+            GitHub rate limit reached.{" "}
+            <a href="/settings/registries" className="text-primary hover:underline">
+              Add a GitHub token
+            </a>{" "}
+            in Settings to raise the limit.
+          </p>
+        )}
+        {su?.error_kind === "unreachable" && (
+          <p className="mt-2 text-xs text-warning" role="status">
+            Couldn't reach GitHub to check for updates. Try again shortly.
+          </p>
+        )}
       </SettingsCard>
 
       <SettingsCard title="Runtime" description="Server runtime information.">

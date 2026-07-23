@@ -76,6 +76,7 @@ export function useEventStream(enabled = true) {
           job_id?: number;
           done?: number;
           total?: number;
+          rate_limited?: boolean;
         };
         switch (ev.type) {
           case "detected":
@@ -120,6 +121,11 @@ export function useEventStream(enabled = true) {
             void qc.invalidateQueries({ queryKey: keys.updates });
             void qc.invalidateQueries({ queryKey: keys.projects });
             void qc.invalidateQueries({ queryKey: keys.status });
+            if (ev.rate_limited) {
+              notify.error(
+                "GitHub rate limit reached during the scan. Add a GitHub token in Settings to raise the limit.",
+              );
+            }
             break;
         }
       } catch { /* ignore malformed frames */ }

@@ -587,7 +587,7 @@ func TestCheckServicesFreshStopsOnCancelledContext(t *testing.T) {
 	cancel() // already cancelled before the sweep starts
 
 	var calls int
-	if err := sc.CheckServicesFresh(ctx, svcIDs, false, func(done, total int) {
+	if _, err := sc.CheckServicesFresh(ctx, svcIDs, false, func(done, total int) {
 		calls++
 	}); err != nil {
 		t.Fatalf("CheckServicesFresh: %v", err)
@@ -600,7 +600,7 @@ func TestCheckServicesFreshStopsOnCancelledContext(t *testing.T) {
 func TestCheckServicesFreshReportsProgressPerService(t *testing.T) {
 	sc, svcIDs := newScannerWithServices(t, 3) // helper mirrors existing scan_test setup; returns 3 seeded service ids
 	var got [][2]int
-	err := sc.CheckServicesFresh(context.Background(), svcIDs, false, func(done, total int) {
+	_, err := sc.CheckServicesFresh(context.Background(), svcIDs, false, func(done, total int) {
 		got = append(got, [2]int{done, total})
 	})
 	if err != nil {
@@ -616,7 +616,7 @@ func TestCheckServicesFreshContinuesPastMissingService(t *testing.T) {
 	sc, svcIDs := newScannerWithServices(t, 2)
 	ids := append([]int64{999999}, svcIDs...) // 999999 does not exist
 	var calls int
-	err := sc.CheckServicesFresh(context.Background(), ids, false, func(done, total int) { calls++ })
+	_, err := sc.CheckServicesFresh(context.Background(), ids, false, func(done, total int) { calls++ })
 	if err != nil {
 		t.Fatalf("want nil error (per-service errors are logged, not returned), got %v", err)
 	}
@@ -693,11 +693,44 @@ func TestCheckServicesFreshReopenTrueLiftsRolledBack(t *testing.T) {
 	}
 
 	s := scan.New(fakeDetector{}, &fakeChangelog{}, store.NewServices(db), updates, store.NewImages(db), nil)
-	if err := s.CheckServicesFresh(context.Background(), []int64{sid}, true, nil); err != nil {
+	if _, err := s.CheckServicesFresh(context.Background(), []int64{sid}, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := updates.Get(uid); got.Status != "available" {
 		t.Fatalf("status = %q, want available (reopen=true lifts rolled_back suppression)", got.Status)
+	}
+}
+
+func TestCheckServicesFreshBubblesRateLimited(t *testing.T) {
+	db := openScanStore(t)
+	pid, _ := store.NewProjects(db).Upsert(store.Project{HostID: 1, Kind: "compose", Name: "p", Source: "discovered"})
+	sid, _ := store.NewServices(db).Upsert(store.Service{
+		ProjectID: pid, Name: "app", ImageRef: "ghcr.io/acme/web:1.2.3", CurrentDigest: "sha256:old",
+	})
+	updates := store.NewUpdates(db)
+	uid, _ := updates.Upsert(store.Update{ServiceID: sid, ToDigest: "sha256:new", Tag: "1.3.0", Status: "available"})
+
+	det := fakeDetector{upd: &store.Update{ID: uid, ServiceID: sid, ToDigest: "sha256:new", Tag: "1.3.0"}}
+	cl := &fakeChangelog{err: changelog.ErrRateLimited}
+	s := scan.New(det, cl, store.NewServices(db), updates, store.NewImages(db), nil)
+
+	rateLimited, err := s.CheckServicesFresh(context.Background(), []int64{sid}, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rateLimited {
+		t.Fatal("sweep should report rateLimited when a changelog resolve is rate-limited")
+	}
+}
+
+func TestCheckServicesFreshNoRateLimitWhenClean(t *testing.T) {
+	s, ids := newScannerWithServices(t, 2) // up-to-date services, no drift
+	rateLimited, err := s.CheckServicesFresh(context.Background(), ids, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rateLimited {
+		t.Fatal("clean sweep must not report rateLimited")
 	}
 }
 
@@ -719,7 +752,7 @@ func TestCheckServicesFreshReopenFalseKeepsRolledBack(t *testing.T) {
 	}
 
 	s := scan.New(fakeDetector{}, &fakeChangelog{}, store.NewServices(db), updates, store.NewImages(db), nil)
-	if err := s.CheckServicesFresh(context.Background(), []int64{sid}, false, nil); err != nil {
+	if _, err := s.CheckServicesFresh(context.Background(), []int64{sid}, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := updates.Get(uid); got.Status != "rolled_back" {

@@ -3,6 +3,7 @@ package selfupdate_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -176,11 +177,7 @@ func TestCheckFreshBypassesYoungCache(t *testing.T) {
 	}
 }
 
-func TestCheckFreshErrorSurfacesError(t *testing.T) {
-	// The manual "Check for updates" action must not mask a GitHub failure as a
-	// fresh verdict: even with a stale cache to fall back on, CheckFresh returns
-	// the fetch error so the endpoint can report the failure. (The background
-	// poll keeps swallowing it: see TestCheckGitHubErrorServesStaleCache.)
+func TestCheckFreshErrorServesStaleCache(t *testing.T) {
 	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "boom", http.StatusInternalServerError)
 	}))
@@ -190,12 +187,11 @@ func TestCheckFreshErrorSurfacesError(t *testing.T) {
 	c := selfupdate.NewChecker(gh.Client(), s, "0.4.2", gh.URL, time.Hour, nil)
 
 	res, err := c.CheckFresh(context.Background())
-	if err == nil {
-		t.Fatal("CheckFresh must surface the fetch error, not swallow it")
+	if err != nil {
+		t.Fatalf("stale fallback should not error: %v", err)
 	}
-	// The stale body is still returned alongside the error as a last-known verdict.
-	if res.Latest != "v0.5.0" {
-		t.Errorf("want stale v0.5.0 body alongside the error, got %+v", res)
+	if res.Latest != "v0.5.0" || !res.UpdateAvailable {
+		t.Errorf("want stale v0.5.0 served, got %+v", res)
 	}
 }
 
@@ -268,6 +264,45 @@ func TestFetchSendsBearerToken(t *testing.T) {
 				t.Errorf("Authorization = %q, want %q", gotAuth, tc.wantHeader)
 			}
 		})
+	}
+}
+
+func TestCheckRateLimitNoCacheClassified(t *testing.T) {
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	t.Cleanup(gh.Close)
+	c := selfupdate.NewChecker(gh.Client(), newSettings(t), "0.4.2", gh.URL, time.Hour, nil)
+
+	res, err := c.Check(context.Background())
+	if !errors.Is(err, selfupdate.ErrRateLimited) {
+		t.Fatalf("want ErrRateLimited top-level error, got %v", err)
+	}
+	if !errors.Is(res.FetchErr, selfupdate.ErrRateLimited) {
+		t.Errorf("FetchErr should carry ErrRateLimited: %+v", res)
+	}
+}
+
+func TestCheckRateLimitStaleServeStampsFetchErr(t *testing.T) {
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	t.Cleanup(gh.Close)
+	s := newSettings(t)
+	seedCache(t, s, "v0.5.0", "https://stale", time.Now().Add(-2*time.Hour).UTC())
+	c := selfupdate.NewChecker(gh.Client(), s, "0.4.2", gh.URL, time.Hour, nil)
+
+	res, err := c.Check(context.Background())
+	if err != nil {
+		t.Fatalf("stale serve must not return a top-level error: %v", err)
+	}
+	if res.Latest != "v0.5.0" {
+		t.Errorf("want stale v0.5.0 served, got %+v", res)
+	}
+	if !errors.Is(res.FetchErr, selfupdate.ErrRateLimited) {
+		t.Errorf("FetchErr should carry ErrRateLimited even when stale served: %+v", res)
 	}
 }
 

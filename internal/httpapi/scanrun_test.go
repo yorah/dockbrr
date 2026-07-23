@@ -73,7 +73,7 @@ type blockingChecker struct {
 	started chan struct{}
 }
 
-func (b *blockingChecker) CheckServicesFresh(_ context.Context, ids []int64, _ bool, onDone func(done, total int)) error {
+func (b *blockingChecker) CheckServicesFresh(_ context.Context, ids []int64, _ bool, onDone func(done, total int)) (bool, error) {
 	close(b.started)
 	<-b.release
 	for i := range ids {
@@ -81,7 +81,7 @@ func (b *blockingChecker) CheckServicesFresh(_ context.Context, ids []int64, _ b
 			onDone(i+1, len(ids))
 		}
 	}
-	return nil
+	return false, nil
 }
 
 func TestScanRunnerSingleFlight(t *testing.T) {
@@ -175,14 +175,14 @@ func newAbortableChecker() *abortableChecker {
 	}
 }
 
-func (a *abortableChecker) CheckServicesFresh(ctx context.Context, _ []int64, _ bool, _ func(done, total int)) error {
+func (a *abortableChecker) CheckServicesFresh(ctx context.Context, _ []int64, _ bool, _ func(done, total int)) (bool, error) {
 	close(a.started)
 	select {
 	case <-a.release:
 	case <-ctx.Done():
 		close(a.cancelled)
 	}
-	return nil
+	return false, nil
 }
 
 func TestScanRunnerAbortCancelsRunAndSkipsStamp(t *testing.T) {
@@ -273,6 +273,73 @@ func TestRunScheduledCancelledReturnsFalseAndSkipsStamp(t *testing.T) {
 	}
 	if v, _ := settings.Get("last_check_all"); v != "" {
 		t.Fatalf("cancelled scheduled sweep must not stamp last_check_all, got %q", v)
+	}
+}
+
+// rlChecker reports a GitHub rate-limit from its sweep, for asserting the
+// scan_finished event carries rate_limited only on a manual run.
+type rlChecker struct{}
+
+func (rlChecker) CheckServicesFresh(_ context.Context, ids []int64, _ bool, onDone func(done, total int)) (bool, error) {
+	if onDone != nil {
+		onDone(len(ids), len(ids))
+	}
+	return true, nil
+}
+
+func TestManualScanPublishesRateLimited(t *testing.T) {
+	bus := NewBus()
+	ch, cancel := bus.Subscribe()
+	defer cancel()
+	db, _, _ := seedProjectServices(t, 1)
+	sr := NewScanRunner(rlChecker{}, storeServices(db), storeSettings(db), bus)
+
+	if _, err := sr.Start("all", 0, 0); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	var got bool
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case e := <-ch:
+			if e.Type == "scan_finished" {
+				got = e.RateLimited
+				goto done
+			}
+		case <-deadline:
+			t.Fatal("no scan_finished event")
+		}
+	}
+done:
+	if !got {
+		t.Fatal("manual sweep that hit the rate limit must set scan_finished.rate_limited")
+	}
+}
+
+func TestScheduledScanDoesNotPublishRateLimited(t *testing.T) {
+	bus := NewBus()
+	ch, cancel := bus.Subscribe()
+	defer cancel()
+	db, _, _ := seedProjectServices(t, 1)
+	sr := NewScanRunner(rlChecker{}, storeServices(db), storeSettings(db), bus)
+
+	if ok := sr.RunScheduled(context.Background()); !ok {
+		t.Fatal("scheduled run should complete")
+	}
+	// Drain events; scan_finished must NOT carry rate_limited for a scheduled run.
+	for {
+		select {
+		case e := <-ch:
+			if e.Type == "scan_finished" && e.RateLimited {
+				t.Fatal("scheduled sweep must not set rate_limited")
+			}
+			if e.Type == "scan_finished" {
+				return
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("no scan_finished event")
+		}
 	}
 }
 

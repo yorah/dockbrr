@@ -4,6 +4,7 @@ import { apiFetch, ApiError } from "@/api/client";
 import { keys } from "@/api/keys";
 import type { Scope, SelfUpdate } from "@/api/types";
 import { clearDismissedUpdate } from "@/hooks/useDismissedUpdate";
+import { selfUpdateErrorMessage } from "@/lib/selfUpdate";
 
 const invalidate = (qc: QueryClient, ...ks: readonly (readonly unknown[])[]) =>
   Promise.all(ks.map((queryKey) => qc.invalidateQueries({ queryKey })));
@@ -217,6 +218,8 @@ export function useCheckForUpdates() {
     onSuccess: (data) => {
       qc.setQueryData(keys.selfUpdate, data);
       clearDismissedUpdate();
+      const msg = selfUpdateErrorMessage(data.error_kind);
+      if (msg) notify.error(msg);
     },
     onError: toastError,
   });
