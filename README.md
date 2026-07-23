@@ -27,6 +27,7 @@ message broker, nothing else to run alongside it.
   containers, and offers one-click rollback if the health check fails.
 - Optionally auto-applies updates on a schedule, per project and per service, off by
   default.
+- Notices when a newer dockbrr release exists and can update itself with one click.
 
 ## Screenshots
 
