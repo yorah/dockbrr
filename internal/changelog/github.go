@@ -416,6 +416,11 @@ var buildSuffixRe = regexp.MustCompile(`(?i)^ls\d+$`)
 // marker (rc/beta/...), which name a build rather than a variant. Examples:
 // "5.2.3-libtorrentv1" -> "libtorrentv1", "5.2.3-alpine" -> "alpine",
 // "1.10.2-ls183" -> "", "5.2.3" -> "", "master-omnibus" -> "".
+// Only the first "-"-segment after the core is inspected, so a flavor placed
+// further right (e.g. "5.2.3-arm64-libtorrentv1") is not detected; and a variant
+// literally named like a pre-release word (e.g. "beta") is treated as no-flavor.
+// Both cases fail safe: filterByFlavor's monotonic contract means a missed
+// flavor simply disables filtering rather than filtering incorrectly.
 func extractFlavor(version string) string {
 	v := detect.StripNamePrefix(strings.TrimSpace(version))
 	v = strings.TrimPrefix(v, "v")
@@ -441,14 +446,21 @@ func extractFlavor(version string) string {
 // not a co-published sibling variant that shares the same app-core. It only
 // narrows when flavor is non-empty AND at least one release matches, so an image
 // with no flavor, or a flavor absent from every release, keeps today's behavior.
+// flavor must match a whole "-"/"_"-delimited segment of the tag, not merely
+// appear as a substring: a short flavor like "v1" must not match inside an
+// unrelated segment such as "v10.2.1".
 func filterByFlavor(rels []ghRelease, flavor string) []ghRelease {
 	if flavor == "" {
 		return rels
 	}
+	isDelim := func(r rune) bool { return r == '-' || r == '_' }
 	var kept []ghRelease
 	for _, rel := range rels {
-		if strings.Contains(rel.TagName, flavor) {
-			kept = append(kept, rel)
+		for _, seg := range strings.FieldsFunc(rel.TagName, isDelim) {
+			if seg == flavor {
+				kept = append(kept, rel)
+				break
+			}
 		}
 	}
 	if len(kept) == 0 {

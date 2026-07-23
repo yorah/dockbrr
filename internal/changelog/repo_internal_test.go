@@ -69,6 +69,20 @@ func TestFilterByFlavor(t *testing.T) {
 	}
 }
 
+func TestFilterByFlavorSegmentBoundary(t *testing.T) {
+	// "v1" must match only as a whole "-"/"_"-delimited segment, not as a raw
+	// substring: "5.2.3_v10.2.1-ls200" contains "v1" as a substring (inside
+	// "v10.2.1") but does not carry a "v1" segment, so it must be rejected.
+	rels := []ghRelease{
+		{TagName: "5.2.3-v1_x-ls1"},
+		{TagName: "5.2.3_v10.2.1-ls200"},
+	}
+	got := filterByFlavor(rels, "v1")
+	if len(got) != 1 || got[0].TagName != "5.2.3-v1_x-ls1" {
+		t.Errorf("got %+v, want only the true v1-segment release", got)
+	}
+}
+
 func TestLatestStableRelease(t *testing.T) {
 	t.Run("picks highest stable, skips prerelease", func(t *testing.T) {
 		rels := []ghRelease{
