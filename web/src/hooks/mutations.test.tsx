@@ -181,4 +181,28 @@ describe("useCheckForUpdates", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(localStorage.getItem(DISMISS_KEY)).toBeNull();
   });
+
+  test("toasts the token hint when the check is rate-limited", async () => {
+    server.use(
+      http.get("/api/updates/self", () =>
+        HttpResponse.json({ update_available: false, error_kind: "rate_limited", error: "rate limited" }),
+      ),
+    );
+    const { W } = wrapper();
+    const { result } = renderHook(() => useCheckForUpdates(), { wrapper: W });
+    result.current.mutate();
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect((toast.error as any).mock.calls[0][0]).toMatch(/GitHub token/);
+  });
+
+  test("no toast on a clean check", async () => {
+    server.use(
+      http.get("/api/updates/self", () => HttpResponse.json({ update_available: false })),
+    );
+    const { W } = wrapper();
+    const { result } = renderHook(() => useCheckForUpdates(), { wrapper: W });
+    result.current.mutate();
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(toast.error).not.toHaveBeenCalled();
+  });
 });

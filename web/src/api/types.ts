@@ -113,6 +113,9 @@ export interface SelfUpdate {
   html_url?: string;
   update_available: boolean;
   checked_at?: string;
+  /** Set when the last GitHub check failed; drives the token hint. */
+  error?: string;
+  error_kind?: "rate_limited" | "unreachable";
 }
 export interface CommandPreview { pull: string; up: string }
 export interface Me { username: string }

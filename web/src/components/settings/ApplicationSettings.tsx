@@ -8,6 +8,7 @@ import { keys } from "@/api/keys";
 import { useSystemInfo, useSelfUpdate } from "@/hooks/queries";
 import { useCheckForUpdates } from "@/hooks/mutations";
 import { useNow } from "@/hooks/useNow";
+import { selfUpdateErrorMessage } from "@/lib/selfUpdate";
 import { Button } from "@/components/ui/button";
 import { SettingsCard } from "@/components/settings/SettingsCard";
 import { InfoRow } from "@/components/settings/InfoRow";
@@ -81,6 +82,7 @@ export function ApplicationSettings() {
       ? `${su.latest} available${rel ? ` (checked ${rel})` : ""}`
       : `Up to date${rel ? ` (checked ${rel})` : ""}`
     : undefined;
+  const checkError = selfUpdateErrorMessage(su?.error_kind);
 
   return (
     <div className="space-y-4">
@@ -105,6 +107,14 @@ export function ApplicationSettings() {
           <InfoRow label="Commit" value={commit} sub={data.commit_dirty ? "working tree was dirty at build time" : undefined} />
           <InfoRow label="Build date" value={formatDate(data.build_date)} />
         </Rows>
+        {checkError && (
+          <p className="mt-2 text-xs text-warning" role="status">
+            {checkError}{" "}
+            <a href="/settings/registries" className="text-primary hover:underline">
+              Add a GitHub token
+            </a>
+          </p>
+        )}
       </SettingsCard>
 
       <SettingsCard title="Runtime" description="Server runtime information.">
