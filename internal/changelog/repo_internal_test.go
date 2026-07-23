@@ -26,11 +26,46 @@ func TestNormalizeTag(t *testing.T) {
 		{"v1.31.2", "1.31.2"},
 		{"1.31.2", "1.31.2"},
 		{"6.3.0.10514-ls311", "6.3.0.10514-ls311"},
+		{"libtorrentv1-5.2.3_v1.2.20-ls126", "5.2.3"},
 	}
 	for _, c := range cases {
 		if got := normalizeTag(c.in); got != c.want {
 			t.Errorf("normalizeTag(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+func TestExtractFlavor(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"5.2.3-libtorrentv1", "libtorrentv1"},
+		{"5.2.3-alpine", "alpine"},
+		{"1.10.2-ls183", ""},
+		{"6.3.0.10514-ls311", ""},
+		{"5.2.3", ""},
+		{"v1.2.3-rc1", ""},
+		{"master-omnibus", ""},
+	}
+	for _, c := range cases {
+		if got := extractFlavor(c.in); got != c.want {
+			t.Errorf("extractFlavor(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestFilterByFlavor(t *testing.T) {
+	rels := []ghRelease{
+		{TagName: "libtorrentv1-5.2.3_v1.2.20-ls126"},
+		{TagName: "5.2.3_v2.0.13-ls469"},
+	}
+	got := filterByFlavor(rels, "libtorrentv1")
+	if len(got) != 1 || got[0].TagName != "libtorrentv1-5.2.3_v1.2.20-ls126" {
+		t.Errorf("got %+v, want only the libtorrentv1 release", got)
+	}
+	if got := filterByFlavor(rels, ""); len(got) != 2 {
+		t.Errorf("empty flavor must not filter, got %d", len(got))
+	}
+	if got := filterByFlavor(rels, "alpine"); len(got) != 2 {
+		t.Errorf("non-matching flavor must not filter (monotonic safety), got %d", len(got))
 	}
 }
 
