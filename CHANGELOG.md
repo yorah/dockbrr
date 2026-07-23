@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/yorah/dockbrr/compare/v0.11.2...v0.12.0) (2026-07-23)
+
+
+### Features
+
+* surface GitHub errors on update checks with a token hint ([#81](https://github.com/yorah/dockbrr/issues/81)) ([a555054](https://github.com/yorah/dockbrr/commit/a555054a2d25e22dc55ad9ceda69588a22c95353))
+
 ## [0.11.2](https://github.com/yorah/dockbrr/compare/v0.11.1...v0.11.2) (2026-07-22)
 
 
