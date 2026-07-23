@@ -67,7 +67,7 @@ func (sr *ScanRunner) Start(scope string, projectID, serviceID int64) (scanState
 		return sr.Snapshot(), ErrScanBusy
 	}
 	st := sr.Snapshot()
-	go sr.execute(context.Background(), scope, ids)
+	go sr.execute(context.Background(), scope, ids, true)
 	return st, nil
 }
 
@@ -87,7 +87,7 @@ func (sr *ScanRunner) RunScheduled(ctx context.Context) bool {
 		logger.Infof("scan: scheduled tick skipped, a scan is already running")
 		return false
 	}
-	return sr.execute(ctx, "all", ids)
+	return sr.execute(ctx, "all", ids, false)
 }
 
 // Abort cancels the in-flight scan-run, if any. Idempotent: a no-op when idle.
@@ -133,7 +133,7 @@ func (sr *ScanRunner) resolve(scope string, projectID, serviceID int64) ([]int64
 // publishes "scan_finished" so the UI clears the bar and re-enables buttons.
 // Returns whether the sweep completed (ctx.Err() == nil), so RunScheduled can
 // report completion rather than merely "ran" to the scheduler's auto-apply gate.
-func (sr *ScanRunner) execute(parent context.Context, scope string, ids []int64) bool {
+func (sr *ScanRunner) execute(parent context.Context, scope string, ids []int64, manual bool) bool {
 	ctx, cancel := context.WithTimeout(parent, scanRunTimeout)
 	sr.mu.Lock()
 	sr.cancel = cancel
@@ -145,7 +145,7 @@ func (sr *ScanRunner) execute(parent context.Context, scope string, ids []int64)
 	// Scoped (service/project) runs lift the rolled_back suppression; an
 	// all-services sweep must never reopen (see the original comment).
 	reopen := scope != "all" && scope != ""
-	_, _ = sr.checker.CheckServicesFresh(ctx, ids, reopen, func(done, total int) {
+	rateLimited, _ := sr.checker.CheckServicesFresh(ctx, ids, reopen, func(done, total int) {
 		sr.mu.Lock()
 		sr.state.Done = done
 		sr.mu.Unlock()
@@ -165,7 +165,7 @@ func (sr *ScanRunner) execute(parent context.Context, scope string, ids []int64)
 	sr.cancel = nil
 	sr.state = scanState{Running: false}
 	sr.mu.Unlock()
-	sr.publish(Event{Type: "scan_finished"})
+	sr.publish(Event{Type: "scan_finished", RateLimited: manual && rateLimited})
 	return completed
 }
 
