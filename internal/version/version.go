@@ -6,7 +6,7 @@ package version
 // -ldflags "-X dockbrr/internal/version.Version=<tag>" (see .goreleaser.yaml).
 // The literal below is kept in sync with releases by release-please via the
 // x-release-please-version annotation.
-var Version = "0.10.3" // x-release-please-version
+var Version = "0.11.2" // x-release-please-version
 
 // Commit, CommitDirty and BuildDate are stamped at link time via -ldflags -X
 // (see mise.toml build task and .goreleaser.yaml). They are the authoritative

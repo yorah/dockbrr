@@ -181,8 +181,9 @@ func (s *Scanner) ensureCurrentChangelog(ctx context.Context, svc store.Service)
 	}
 	// A baseline already RESOLVED for this digest: its changelog is cached, so
 	// don't re-hit the changelog source's API. A baseline whose resolve came back
-	// empty is not resolved, so it falls through and retries here (self-heals an
-	// instance left with an empty baseline by an earlier miss).
+	// empty OR only rate-limited is not resolved, so it falls through and retries
+	// here (self-heals an instance left with an empty/rate-limited baseline by an
+	// earlier miss or a transient GitHub rate limit that has since reset).
 	if resolved, herr := s.updates.HasResolvedCurrentAtDigest(svc.ID, svc.CurrentDigest); herr != nil {
 		return false, herr
 	} else if resolved {

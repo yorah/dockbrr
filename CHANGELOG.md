@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.11.2](https://github.com/yorah/dockbrr/compare/v0.11.1...v0.11.2) (2026-07-22)
+
+
+### Bug Fixes
+
+* **selfupdate:** surface manual check failures instead of masking them ([#78](https://github.com/yorah/dockbrr/issues/78)) ([0a611e0](https://github.com/yorah/dockbrr/commit/0a611e09a869ba3d4630aa8077312a31e871f68b))
+* **web:** keep the self-update button disabled after the job succeeds ([#80](https://github.com/yorah/dockbrr/issues/80)) ([7744b43](https://github.com/yorah/dockbrr/commit/7744b43b7b7e5f6f61448744a0cfa457cc1bf7b7))
+
+## [0.11.1](https://github.com/yorah/dockbrr/compare/v0.11.0...v0.11.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **selfupdate:** verify pulled image version before swap ([#76](https://github.com/yorah/dockbrr/issues/76)) ([da3e066](https://github.com/yorah/dockbrr/commit/da3e0665c8e8a7a75dd60be93cc6bc2b5ccccf0e))
+
+## [0.11.0](https://github.com/yorah/dockbrr/compare/v0.10.3...v0.11.0) (2026-07-22)
+
+
+### Features
+
+* scan-run abort shares the runner with scheduled scans ([#74](https://github.com/yorah/dockbrr/issues/74)) ([7decb30](https://github.com/yorah/dockbrr/commit/7decb30aa9ec39b2b12705b84ffbb125c0c6b55c))
+
+
+### Bug Fixes
+
+* **changelog:** retry rate-limited current-version baseline ([#73](https://github.com/yorah/dockbrr/issues/73)) ([f8d621c](https://github.com/yorah/dockbrr/commit/f8d621caefc49fc4ab32390010a53d1077858d8c))
+
 ## [0.10.3](https://github.com/yorah/dockbrr/compare/v0.10.2...v0.10.3) (2026-07-21)
 
 

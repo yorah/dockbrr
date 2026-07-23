@@ -402,18 +402,22 @@ func (u *Updates) HasSurfacedByService(serviceID int64) (bool, error) {
 }
 
 // HasResolvedCurrentAtDigest reports whether a synthetic 'current' baseline row
-// already exists for the service at digest AND has a changelog resolved onto it
-// (text/url present, or a rate_limited marker the dashboard still opens on).
-// scan uses it to skip re-resolving a cached baseline, so it stays off the
-// changelog source's API. A baseline whose resolve came back empty is NOT
-// "resolved", so it falls through and retries on the next scan (self-healing an
-// instance left with an empty baseline by an earlier transient miss).
+// already exists for the service at digest AND has real changelog content
+// (text/url present). scan uses it to skip re-resolving a cached baseline, so it
+// stays off the changelog source's API. A baseline whose resolve came back empty
+// is NOT "resolved", so it falls through and retries on the next scan
+// (self-healing an instance left with an empty baseline by an earlier transient
+// miss). A rate_limited marker is likewise NOT "resolved": the limit is transient
+// (GitHub's window resets within the hour) but the baseline's digest is stable,
+// so counting the marker as resolved would pin the row on a permanent "rate limit
+// reached" state forever. Retrying costs one API call per scan and self-heals
+// once the window resets.
 func (u *Updates) HasResolvedCurrentAtDigest(serviceID int64, digest string) (bool, error) {
 	var one int
 	err := u.db.QueryRow(
 		`SELECT 1 FROM updates
 		   WHERE service_id=? AND status='current' AND to_digest=?
-		     AND (changelog_text<>'' OR changelog_url<>'' OR changelog_status<>'') LIMIT 1`,
+		     AND (changelog_text<>'' OR changelog_url<>'') LIMIT 1`,
 		serviceID, digest,
 	).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {

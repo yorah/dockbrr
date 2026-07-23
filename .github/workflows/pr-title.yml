@@ -1,0 +1,35 @@
+name: PR Title
+
+# Squash is the only merge strategy here, so the squash commit message is the PR
+# title. release-please reads that message to decide the next release, so a title
+# without a conventional-commit type (feat:/fix:/...) silently skips the release.
+# This lints the title on every edit to catch it before merge.
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  lint:
+    name: validate title
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Types release-please understands; keep in sync with commit conventions.
+          types: |
+            feat
+            fix
+            perf
+            refactor
+            build
+            chore
+            ci
+            docs
+            style
+            test
+            revert

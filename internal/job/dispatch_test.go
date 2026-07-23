@@ -13,8 +13,9 @@ import (
 // fakeDispatchSelfDocker is a job.SelfDocker spy used to observe whether a
 // self_update job actually reached the SelfUpdater's Handle.
 type fakeDispatchSelfDocker struct {
-	imageRef string
-	pulled   string
+	imageRef     string
+	pulled       string
+	imageVersion string
 }
 
 func (f *fakeDispatchSelfDocker) ContainerImageRef(_ context.Context, _ string) (string, error) {
@@ -23,6 +24,9 @@ func (f *fakeDispatchSelfDocker) ContainerImageRef(_ context.Context, _ string) 
 func (f *fakeDispatchSelfDocker) ImagePull(_ context.Context, ref string) error {
 	f.pulled = ref
 	return nil
+}
+func (f *fakeDispatchSelfDocker) ImageVersion(_ context.Context, _ string) (string, error) {
+	return f.imageVersion, nil
 }
 func (f *fakeDispatchSelfDocker) SpawnUpdater(_ context.Context, _ string, _ []string, _ string) (string, error) {
 	return "helper123", nil
@@ -141,7 +145,7 @@ func TestDispatcherRoutesStandaloneApplyToSDK(t *testing.T) {
 func TestDispatcherRoutesSelfUpdateToUpdater(t *testing.T) {
 	db := openJobDB(t)
 	jobs := store.NewJobs(db)
-	fd := &fakeDispatchSelfDocker{imageRef: "ghcr.io/yorah/dockbrr:1.1.0"}
+	fd := &fakeDispatchSelfDocker{imageRef: "ghcr.io/yorah/dockbrr:1.1.0", imageVersion: "1.2.0"}
 	ck := fakeDispatchChecker{res: selfupdate.Result{Latest: "v1.2.0", UpdateAvailable: true}}
 	u := job.NewSelfUpdater(jobs, nil, fd, ck, "abc123def456", "/var/run/docker.sock")
 

@@ -150,6 +150,44 @@ describe("UpdateNotice", () => {
     }
   });
 
+  test("stays disabled after the job succeeds, so a quick reclick can't re-fire it before the reload", async () => {
+    let posts = 0;
+    let polls = 0;
+    server.use(
+      http.get("/api/updates/self", () => HttpResponse.json(available)),
+      http.post("/api/updates/self/apply", () => {
+        posts++;
+        return HttpResponse.json({ job_id: 9 });
+      }),
+      http.get("/api/jobs/9", () => {
+        polls++;
+        // First poll still running; then terminal success. Success lands the
+        // instant the swap helper is spawned, while the old server is briefly
+        // still alive and before the SSE reconnect reloads the page.
+        return HttpResponse.json({ id: 9, type: "self_update", status: polls === 1 ? "running" : "success" });
+      }),
+    );
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    try {
+      renderWithClient(<UpdateNotice collapsed={false} />);
+      await userEvent.click(await screen.findByRole("button", { name: /update now/i }));
+      await waitFor(() => expect(posts).toBe(1));
+
+      // Wait for the job poll to reach terminal success (2nd poll fires ~1.5s
+      // after the first per useJob's interval, hence the extended timeout).
+      await waitFor(() => expect(polls).toBeGreaterThanOrEqual(2), { timeout: 3000 });
+
+      // Success is in. A fast user reclicking before the server restarts the
+      // page must not enqueue a second self_update: the button stays disabled,
+      // so the reclick is a no-op and posts stays at 1.
+      await userEvent.click(screen.getByRole("button", { name: /updating|update now/i }));
+      expect(posts).toBe(1);
+      expect(screen.queryByRole("button", { name: /^update now$/i })).not.toBeInTheDocument();
+    } finally {
+      confirmSpy.mockRestore();
+    }
+  });
+
   test("Update now does not apply when the self-update confirm is cancelled", async () => {
     let posted = false;
     server.use(
