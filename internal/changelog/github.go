@@ -416,11 +416,13 @@ var buildSuffixRe = regexp.MustCompile(`(?i)^ls\d+$`)
 // marker (rc/beta/...), which name a build rather than a variant. Examples:
 // "5.2.3-libtorrentv1" -> "libtorrentv1", "5.2.3-alpine" -> "alpine",
 // "1.10.2-ls183" -> "", "5.2.3" -> "", "master-omnibus" -> "".
-// Only the first "-"-segment after the core is inspected, so a flavor placed
-// further right (e.g. "5.2.3-arm64-libtorrentv1") is not detected; and a variant
-// literally named like a pre-release word (e.g. "beta") is treated as no-flavor.
-// Both cases fail safe: filterByFlavor's monotonic contract means a missed
-// flavor simply disables filtering rather than filtering incorrectly.
+// Only the first "-"-segment after the core is inspected. A variant literally
+// named like a pre-release word (e.g. "beta") is treated as no-flavor, which
+// fails safe (filtering is simply disabled). A flavor placed further right
+// (e.g. "5.2.3-arm64-libtorrentv1") yields the leading segment ("arm64")
+// instead: this only degrades safely via filterByFlavor's monotonic zero-match
+// fallback, so if a release tag happens to carry that wrong segment the filter
+// can narrow incorrectly. Such multi-segment suffixes are not seen in practice.
 func extractFlavor(version string) string {
 	v := detect.StripNamePrefix(strings.TrimSpace(version))
 	v = strings.TrimPrefix(v, "v")
