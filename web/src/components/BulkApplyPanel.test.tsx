@@ -17,7 +17,7 @@ class FakeES {
 }
 
 // Every test mounts a JobLogView via the auto-expanded row, which opens an
-// EventSource — always route it through the fake so no real ES/network is hit.
+// EventSource, always route it through the fake so no real ES/network is hit.
 beforeEach(() => __setEventSourceFactory((url) => new FakeES(url) as unknown as EventSource));
 afterEach(() => __setEventSourceFactory(null));
 

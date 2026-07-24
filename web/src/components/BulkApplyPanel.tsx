@@ -77,7 +77,7 @@ export function BulkApplyPanel({ jobs, serviceNames, onClose }: BulkApplyPanelPr
     >
       <header className="mb-2 flex items-center justify-between">
         <h2 className="text-sm font-medium">
-          Applying {jobs.length} update{jobs.length > 1 ? "s" : ""} — {done}/{jobs.length} done, {failed} failed
+          Applying {jobs.length} update{jobs.length > 1 ? "s" : ""} · {done}/{jobs.length} done, {failed} failed
         </h2>
         <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close apply panel">
           Close
