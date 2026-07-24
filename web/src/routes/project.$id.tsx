@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useParams } from "@tanstack/react-router";
 import { Filters } from "@/components/Filters";
 import { ApplyAllButton, CheckAllButton } from "@/components/BulkActions";
@@ -42,6 +42,7 @@ export function ProjectRoute() {
   // A batch of exactly 1 renders the plain single panel (no bulk chrome).
   const openBatch = (jobs: AppliedJob[]) =>
     setPanel(jobs.length === 1 ? { kind: "single", jobId: jobs[0].jobId } : { kind: "bulk", jobs });
+  const closePanel = useCallback(() => setPanel(null), []);
 
   // The project filter is pinned to the route param: a status/search change
   // must never widen the scope back to every project. Memoized so joinRows'
@@ -166,10 +167,10 @@ export function ProjectRoute() {
       )}
 
       {panel?.kind === "single" && (
-        <ApplyPanel key={panel.jobId} jobId={panel.jobId} onClose={() => setPanel(null)} />
+        <ApplyPanel key={panel.jobId} jobId={panel.jobId} onClose={closePanel} />
       )}
       {panel?.kind === "bulk" && (
-        <BulkApplyPanel jobs={panel.jobs} serviceNames={serviceNames} onClose={() => setPanel(null)} />
+        <BulkApplyPanel jobs={panel.jobs} serviceNames={serviceNames} onClose={closePanel} />
       )}
     </div>
   );

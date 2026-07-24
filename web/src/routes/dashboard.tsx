@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Plus } from "lucide-react";
 import { Filters } from "@/components/Filters";
 import { ApplyAllButton, ScanAllButton } from "@/components/BulkActions";
@@ -46,6 +46,7 @@ export function DashboardRoute() {
   // A batch of exactly 1 renders the plain single panel (no bulk chrome).
   const openBatch = (jobs: AppliedJob[]) =>
     setPanel(jobs.length === 1 ? { kind: "single", jobId: jobs[0].jobId } : { kind: "bulk", jobs });
+  const closePanel = useCallback(() => setPanel(null), []);
   const [addOpen, setAddOpen] = useState(false);
 
   const { rows, projects, updates: updatesData, updatesByService, isLoading, isError } = useDashboardRows(filters);
@@ -173,10 +174,10 @@ export function DashboardRoute() {
           rollback swap from a previous job); a multi-job batch renders the
           bulk panel instead. */}
       {panel?.kind === "single" && (
-        <ApplyPanel key={panel.jobId} jobId={panel.jobId} onClose={() => setPanel(null)} />
+        <ApplyPanel key={panel.jobId} jobId={panel.jobId} onClose={closePanel} />
       )}
       {panel?.kind === "bulk" && (
-        <BulkApplyPanel jobs={panel.jobs} serviceNames={serviceNames} onClose={() => setPanel(null)} />
+        <BulkApplyPanel jobs={panel.jobs} serviceNames={serviceNames} onClose={closePanel} />
       )}
 
       <AddProjectDialog open={addOpen} onOpenChange={setAddOpen} />

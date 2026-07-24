@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useJobLog } from "@/hooks/useJobLog";
-import { useJob } from "@/hooks/queries";
+import { useJob, TERMINAL_JOB_STATUSES, FAILED_JOB_STATUSES } from "@/hooks/queries";
 import { keys } from "@/api/keys";
 import { RollbackButton } from "@/components/RollbackButton";
 
@@ -9,8 +9,6 @@ import { RollbackButton } from "@/components/RollbackButton";
 // failed|canceled, the SAME string for a successful apply AND rollback. We
 // disambiguate the success wording by the job's type. (succeeded/apply_failed/
 // rolled_back are EVENT kinds, not job statuses, so do not key off them here.)
-const FAILED_STATUSES = new Set(["failed", "canceled"]);
-const TERMINAL_STATUSES = new Set(["success", "failed", "canceled"]);
 const AUTO_CLOSE_SUCCESS_MS = 4000;
 
 // Success wording per job type; rollback keeps its warning tone.
@@ -33,7 +31,7 @@ function StatusLine({ status, type, error, closingIn }: { status?: string; type?
     }
     return <p className="text-sm font-medium text-success">{label}{suffix}</p>;
   }
-  if (status && FAILED_STATUSES.has(status)) {
+  if (status && FAILED_JOB_STATUSES.has(status)) {
     return (
       <p role="alert" className="text-sm font-medium text-danger">
         {error || (status === "canceled" ? "Canceled" : "Job failed")}
@@ -88,7 +86,7 @@ export function JobLogView({ jobId: initialJobId, readOnly = false, autoClose = 
   // next focus refetch, and this closes that freshness gap. Skipped in readOnly
   // (history viewer) where the job is already in the past.
   useEffect(() => {
-    if (readOnly || !status || !TERMINAL_STATUSES.has(status)) return;
+    if (readOnly || !status || !TERMINAL_JOB_STATUSES.has(status)) return;
     void qc.invalidateQueries({ queryKey: keys.projects });
     void qc.invalidateQueries({ queryKey: keys.updates });
     void qc.invalidateQueries({ queryKey: keys.jobs });
@@ -138,7 +136,7 @@ export function JobLogView({ jobId: initialJobId, readOnly = false, autoClose = 
           ))
         )}
       </div>
-      {!readOnly && status && FAILED_STATUSES.has(status) && (
+      {!readOnly && status && FAILED_JOB_STATUSES.has(status) && (
         <div className="mt-3 flex justify-end">
           <RollbackButton originalJobId={jobId} onRollback={setJobId} />
         </div>

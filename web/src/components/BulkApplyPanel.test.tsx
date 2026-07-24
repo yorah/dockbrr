@@ -81,3 +81,11 @@ test("expanding a row subscribes to that job's log", async () => {
   await userEvent.click(within(dbRow).getByRole("button"));
   await waitFor(() => expect(FakeES.last?.url).toContain("/api/jobs/101/logs"));
 });
+
+test("the first running row auto-expands once statuses load, with no click", async () => {
+  server.use(jobHandler({ 100: "success", 101: "running" }));
+  renderWithClient(<BulkApplyPanel jobs={jobs} serviceNames={names} onClose={vi.fn()} />);
+  // Job 101 ("db") is the only running job; its row must auto-open and
+  // subscribe to its log without any user interaction.
+  await waitFor(() => expect(FakeES.last?.url).toContain("/api/jobs/101/logs"));
+});

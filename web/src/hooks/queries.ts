@@ -47,6 +47,11 @@ export const useProjectCompose = (id: number, enabled = true) =>
     queryKey: keys.projectCompose(id), enabled,
     queryFn: () => apiFetch<ComposeFiles>(`/api/projects/${id}/compose`),
   });
+// Terminal + failure job-status vocabularies (store/jobs.go). Shared so the
+// single-job panel, the bulk panel, and the poll interval never drift.
+export const TERMINAL_JOB_STATUSES: ReadonlySet<string> = new Set(["success", "failed", "canceled"]);
+export const FAILED_JOB_STATUSES: ReadonlySet<string> = new Set(["failed", "canceled"]);
+
 // Shared query options for a single job, so useJob (one job) and useQueries
 // (a bulk apply's N jobs) build identical keys/fetchers/polling. Terminal job
 // statuses per store/jobs.go: success|failed|canceled. Stop polling once the
@@ -57,7 +62,7 @@ export function jobQueryOptions(id: number) {
     queryFn: () => apiFetch<Job>(`/api/jobs/${id}`),
     refetchInterval: (q: { state: { data?: Job } }) => {
       const s = q.state.data?.status;
-      return s && ["success", "failed", "canceled"].includes(s) ? false : 1500;
+      return s && TERMINAL_JOB_STATUSES.has(s) ? false : 1500;
     },
   };
 }
