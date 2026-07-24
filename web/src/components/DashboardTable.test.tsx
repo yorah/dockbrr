@@ -270,6 +270,8 @@ test("Apply all enqueues one service-scope apply per pending update, never a pro
       applied.push({ id: String(params.id), scope: body.scope });
       return HttpResponse.json({ job_id: Number(params.id) });
     }),
+    http.get("/api/jobs/:id", ({ params }) =>
+      HttpResponse.json({ id: Number(params.id), type: "apply", status: "running", scope: "service", exit_code: null, error: "" })),
   );
   const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
   try {
@@ -316,6 +318,8 @@ test("Apply all excludes a gone service's pending update, even with Show removed
       applied.push({ id: String(params.id), scope: body.scope });
       return HttpResponse.json({ job_id: Number(params.id) });
     }),
+    http.get("/api/jobs/:id", ({ params }) =>
+      HttpResponse.json({ id: Number(params.id), type: "apply", status: "running", scope: "service", exit_code: null, error: "" })),
   );
   const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
   try {
@@ -453,6 +457,8 @@ test("global Check all runs a full scan; global Apply all applies each available
       applied.push({ id: String(params.id), scope: body.scope });
       return HttpResponse.json({ job_id: Number(params.id) });
     }),
+    http.get("/api/jobs/:id", ({ params }) =>
+      HttpResponse.json({ id: Number(params.id), type: "apply", status: "running", scope: "service", exit_code: null, error: "" })),
   );
   const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
   try {

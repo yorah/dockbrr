@@ -9,11 +9,12 @@ import { ReviewDrawer } from "@/components/ReviewDrawer";
 import { ChangelogDrawer } from "@/components/ChangelogDrawer";
 import { LogsDrawer } from "@/components/LogsDrawer";
 import { ApplyPanel } from "@/components/ApplyPanel";
+import { BulkApplyPanel } from "@/components/BulkApplyPanel";
 import { AddProjectDialog } from "@/components/AddProjectDialog";
 import { Button } from "@/components/ui/button";
 import { useDashboardRows, type FilterState } from "@/hooks/useDashboardRows";
 import { useStatus } from "@/hooks/queries";
-import type { Project, Service, Update } from "@/api/types";
+import type { AppliedJob, Project, Service, Update } from "@/api/types";
 
 const DEFAULT_FILTERS: FilterState = {
   onlyUpdates: false,
@@ -34,8 +35,17 @@ export function DashboardRoute() {
   const [selected, setSelected] = useState<Selected | null>(null);
   const [changelogFor, setChangelogFor] = useState<{ update: Update; service: Service } | null>(null);
   const [logsFor, setLogsFor] = useState<Service | null>(null);
-  // Set by ReviewDrawer's onApplied. Task 13 wires this job id into the live-log/health-gate panel.
-  const [appliedJobId, setAppliedJobId] = useState<number | null>(null);
+  // Set by ReviewDrawer's onApplied / a row Apply / a project or global Apply-all,
+  // so the live-log/health-gate panel can be opened for the enqueued job(s).
+  type PanelState =
+    | { kind: "single"; jobId: number }
+    | { kind: "bulk"; jobs: AppliedJob[] }
+    | null;
+  const [panel, setPanel] = useState<PanelState>(null);
+
+  // A batch of exactly 1 renders the plain single panel (no bulk chrome).
+  const openBatch = (jobs: AppliedJob[]) =>
+    setPanel(jobs.length === 1 ? { kind: "single", jobId: jobs[0].jobId } : { kind: "bulk", jobs });
   const [addOpen, setAddOpen] = useState(false);
 
   const { rows, projects, updates: updatesData, updatesByService, isLoading, isError } = useDashboardRows(filters);
@@ -47,6 +57,9 @@ export function DashboardRoute() {
     projects.flatMap((p) => p.services).filter((s) => s.state === "gone").map((s) => s.id),
   );
   const applicableUpdates = updatesData.filter((u) => !goneServiceIds.has(u.service_id));
+  const serviceNames = new Map<number, string>(
+    projects.flatMap((p) => p.services.map((s) => [s.id, s.name] as [number, string])),
+  );
 
   const looseDefaultOpen = filters.search !== "" || filters.status !== "" || filters.onlyUpdates;
 
@@ -69,7 +82,7 @@ export function DashboardRoute() {
             <ScanAllButton ariaLabel="Check all services" />
             <ApplyAllButton
               updates={applicableUpdates}
-              onApplied={setAppliedJobId}
+              onApplied={openBatch}
               scopeNoun="across all projects"
               ariaLabel="Apply all available updates"
             />
@@ -112,7 +125,8 @@ export function DashboardRoute() {
           looseDefaultOpen={looseDefaultOpen}
           filtersActive={looseDefaultOpen}
           updatesByService={updatesByService}
-          onApplied={setAppliedJobId}
+          onApplied={(jobId) => setPanel({ kind: "single", jobId })}
+          onAppliedBatch={openBatch}
           onReview={(update, service, project) => {
             // Guard against being invoked with no open update (defense in depth:
             // DashboardTable already disables the button and gates the Enter key).
@@ -147,21 +161,22 @@ export function DashboardRoute() {
           project={selected.project}
           onClose={() => setSelected(null)}
           onApplied={(jobId) => {
-            setAppliedJobId(jobId);
+            setPanel({ kind: "single", jobId });
             setSelected(null);
           }}
         />
       )}
 
-      {/* Live-log / health-gate panel for the job the ReviewDrawer just applied.
-          Keyed by job id so each apply starts a fresh panel (resetting any
-          in-place rollback swap from a previous job). */}
-      {appliedJobId !== null && (
-        <ApplyPanel
-          key={appliedJobId}
-          jobId={appliedJobId}
-          onClose={() => setAppliedJobId(null)}
-        />
+      {/* Live-log / health-gate panel for the job(s) just enqueued by a row
+          Apply, a project or global Apply-all, or the ReviewDrawer. Keyed by
+          job id so each apply starts a fresh panel (resetting any in-place
+          rollback swap from a previous job); a multi-job batch renders the
+          bulk panel instead. */}
+      {panel?.kind === "single" && (
+        <ApplyPanel key={panel.jobId} jobId={panel.jobId} onClose={() => setPanel(null)} />
+      )}
+      {panel?.kind === "bulk" && (
+        <BulkApplyPanel jobs={panel.jobs} serviceNames={serviceNames} onClose={() => setPanel(null)} />
       )}
 
       <AddProjectDialog open={addOpen} onOpenChange={setAddOpen} />

@@ -9,9 +9,10 @@ import { ReviewDrawer } from "@/components/ReviewDrawer";
 import { ChangelogDrawer } from "@/components/ChangelogDrawer";
 import { LogsDrawer } from "@/components/LogsDrawer";
 import { ApplyPanel } from "@/components/ApplyPanel";
+import { BulkApplyPanel } from "@/components/BulkApplyPanel";
 import { useDashboardRows, type FilterState } from "@/hooks/useDashboardRows";
 import { useStatus } from "@/hooks/queries";
-import type { Project, Service, Update } from "@/api/types";
+import type { AppliedJob, Project, Service, Update } from "@/api/types";
 
 interface Selected {
   update: Update;
@@ -30,7 +31,17 @@ export function ProjectRoute() {
   const [selected, setSelected] = useState<Selected | null>(null);
   const [changelogFor, setChangelogFor] = useState<{ update: Update; service: Service } | null>(null);
   const [logsFor, setLogsFor] = useState<Service | null>(null);
-  const [appliedJobId, setAppliedJobId] = useState<number | null>(null);
+  // Set by ReviewDrawer's onApplied / a row Apply / a project or global Apply-all,
+  // so the live-log/health-gate panel can be opened for the enqueued job(s).
+  type PanelState =
+    | { kind: "single"; jobId: number }
+    | { kind: "bulk"; jobs: AppliedJob[] }
+    | null;
+  const [panel, setPanel] = useState<PanelState>(null);
+
+  // A batch of exactly 1 renders the plain single panel (no bulk chrome).
+  const openBatch = (jobs: AppliedJob[]) =>
+    setPanel(jobs.length === 1 ? { kind: "single", jobId: jobs[0].jobId } : { kind: "bulk", jobs });
 
   // The project filter is pinned to the route param: a status/search change
   // must never widen the scope back to every project. Memoized so joinRows'
@@ -48,6 +59,9 @@ export function ProjectRoute() {
   const applicableProjectUpdates = project
     ? projectUpdates.filter((u) => project.services.find((s) => s.id === u.service_id)?.state !== "gone")
     : [];
+  const serviceNames = new Map<number, string>(
+    (project?.services ?? []).map((s) => [s.id, s.name] as [number, string]),
+  );
 
   if (isLoading) {
     return (
@@ -89,7 +103,7 @@ export function ProjectRoute() {
             />
             <ApplyAllButton
               updates={applicableProjectUpdates}
-              onApplied={setAppliedJobId}
+              onApplied={openBatch}
               scopeNoun={`in "${project.name}"`}
               ariaLabel={`Apply all available updates in ${project.name}`}
             />
@@ -111,7 +125,8 @@ export function ProjectRoute() {
         <DashboardTable
           rows={rows}
           updatesByService={updatesByService}
-          onApplied={setAppliedJobId}
+          onApplied={(jobId) => setPanel({ kind: "single", jobId })}
+          onAppliedBatch={openBatch}
           onReview={(update, service, proj) => {
             if (!update) return;
             setSelected({ update, service, project: proj });
@@ -144,14 +159,17 @@ export function ProjectRoute() {
           project={selected.project}
           onClose={() => setSelected(null)}
           onApplied={(jobId) => {
-            setAppliedJobId(jobId);
+            setPanel({ kind: "single", jobId });
             setSelected(null);
           }}
         />
       )}
 
-      {appliedJobId !== null && (
-        <ApplyPanel key={appliedJobId} jobId={appliedJobId} onClose={() => setAppliedJobId(null)} />
+      {panel?.kind === "single" && (
+        <ApplyPanel key={panel.jobId} jobId={panel.jobId} onClose={() => setPanel(null)} />
+      )}
+      {panel?.kind === "bulk" && (
+        <BulkApplyPanel jobs={panel.jobs} serviceNames={serviceNames} onClose={() => setPanel(null)} />
       )}
     </div>
   );

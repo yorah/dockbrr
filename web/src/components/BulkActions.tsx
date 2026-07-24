@@ -76,7 +76,9 @@ export function ScanAllButton({
 // Apply every available update in the given set. Enqueues one SERVICE-scope
 // apply per update (never a project-scope `up`, which would recreate whole
 // stacks and revert siblings applied via a non-persistent pin override). The
-// per-project mutex serializes the jobs; the live panel opens on the first.
+// per-project mutex serializes the jobs; onApplied is called once with every
+// job that was successfully enqueued, so the caller can open a panel that
+// tracks the full set.
 export function ApplyAllButton({
   updates,
   onApplied,
