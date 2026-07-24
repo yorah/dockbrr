@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.2](https://github.com/yorah/dockbrr/compare/v0.12.1...v0.12.2) (2026-07-24)
+
+
+### Bug Fixes
+
+* **apply:** live multi-job panel for Apply all ([#87](https://github.com/yorah/dockbrr/issues/87)) ([27ed925](https://github.com/yorah/dockbrr/commit/27ed92540cd36a328bf2e6b73047dbfae9c67532))
+
 ## [0.12.1](https://github.com/yorah/dockbrr/compare/v0.12.0...v0.12.1) (2026-07-23)
 
 
