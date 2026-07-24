@@ -72,8 +72,10 @@ export function BulkApplyPanel({ jobs, serviceNames, onClose }: BulkApplyPanelPr
     autoExpanded.current = true;
     // Reacts to async query data resolving, not to props/state already
     // rendered this pass: see the equivalent note in useJobLog.ts.
+    // Merge, not replace: a row the user opened in the pre-resolution window
+    // must survive the auto-expand.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setOpenRows(new Set([jobs[idx].jobId]));
+    setOpenRows((prev) => new Set(prev).add(jobs[idx].jobId));
   }, [statuses, jobs]);
 
   useEffect(() => {
