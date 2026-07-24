@@ -67,6 +67,32 @@ test("Apply all does not mention dockbrr itself when no pending update is_self",
   }
 });
 
+test("Apply all reports every enqueued job id, not just the first", async () => {
+  server.use(
+    http.post("/api/updates/:id/apply", ({ params }) =>
+      HttpResponse.json({ job_id: Number(params.id) * 10 })),
+  );
+  const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+  const onApplied = vi.fn();
+  try {
+    renderWithClient(
+      <ApplyAllButton
+        updates={[makeUpdate({ id: 1, service_id: 10 }), makeUpdate({ id: 2, service_id: 11 })]}
+        onApplied={onApplied}
+        scopeNoun="across all projects"
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: /apply all/i }));
+    await waitFor(() => expect(onApplied).toHaveBeenCalledTimes(1));
+    expect(onApplied).toHaveBeenCalledWith([
+      { jobId: 10, serviceId: 10 },
+      { jobId: 20, serviceId: 11 },
+    ]);
+  } finally {
+    confirmSpy.mockRestore();
+  }
+});
+
 test("Apply all skips every mutation when the confirm is cancelled", async () => {
   let applyCalls = 0;
   server.use(

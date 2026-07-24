@@ -270,6 +270,8 @@ test("Apply all enqueues one service-scope apply per pending update, never a pro
       applied.push({ id: String(params.id), scope: body.scope });
       return HttpResponse.json({ job_id: Number(params.id) });
     }),
+    http.get("/api/jobs/:id", ({ params }) =>
+      HttpResponse.json({ id: Number(params.id), type: "apply", status: "running", scope: "service", exit_code: null, error: "" })),
   );
   const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
   try {
@@ -282,6 +284,56 @@ test("Apply all enqueues one service-scope apply per pending update, never a pro
     // would revert the already-applied redis sibling.
     expect(applied.every((a) => a.scope === "service")).toBe(true);
     expect(new Set(applied.map((a) => a.id))).toEqual(new Set(["100", "101"]));
+  } finally {
+    confirmSpy.mockRestore();
+  }
+});
+
+test("Apply all with exactly one pending update opens the single ApplyPanel, not the bulk panel", async () => {
+  server.use(
+    http.get("/api/projects", () =>
+      HttpResponse.json([
+        {
+          id: 1,
+          name: "app",
+          kind: "compose",
+          working_dir: "/srv",
+          auto_update_enabled: false,
+          services: [
+            {
+              id: 10,
+              name: "web",
+              image_ref: "nginx:1.30",
+              current_digest: "sha256:a",
+              state: "running",
+              pinned: false,
+              healthcheck: false,
+              auto_update_enabled: null,
+            },
+          ],
+        },
+      ]),
+    ),
+    http.get("/api/updates", () =>
+      HttpResponse.json([
+        { id: 100, service_id: 10, status: "available", tag: "1.31.2", to_digest: "sha256:a2", from_digest: "sha256:a", severity: "minor" },
+      ]),
+    ),
+    http.post("/api/updates/:id/apply", async ({ params }) =>
+      HttpResponse.json({ job_id: Number(params.id) })),
+    http.get("/api/jobs/:id", ({ params }) =>
+      HttpResponse.json({ id: Number(params.id), type: "apply", status: "running", scope: "service", exit_code: null, error: "" })),
+  );
+  const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+  try {
+    renderDashboardWithRouter();
+    await expandProject("app");
+    await waitFor(() => expect(screen.getByText("web")).toBeInTheDocument());
+    await userEvent.click(screen.getByRole("button", { name: /apply all updates in app/i }));
+    // Single-panel header: "Applying update (job #100)". The bulk panel's
+    // header ("Applying 1 update · 0/1 done, 0 failed") must not appear.
+    await waitFor(() => expect(screen.getByText(/applying update \(job #100\)/i)).toBeInTheDocument());
+    expect(screen.queryByText(/done,.*failed/i)).not.toBeInTheDocument();
   } finally {
     confirmSpy.mockRestore();
   }
@@ -316,6 +368,8 @@ test("Apply all excludes a gone service's pending update, even with Show removed
       applied.push({ id: String(params.id), scope: body.scope });
       return HttpResponse.json({ job_id: Number(params.id) });
     }),
+    http.get("/api/jobs/:id", ({ params }) =>
+      HttpResponse.json({ id: Number(params.id), type: "apply", status: "running", scope: "service", exit_code: null, error: "" })),
   );
   const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
   try {
@@ -453,6 +507,8 @@ test("global Check all runs a full scan; global Apply all applies each available
       applied.push({ id: String(params.id), scope: body.scope });
       return HttpResponse.json({ job_id: Number(params.id) });
     }),
+    http.get("/api/jobs/:id", ({ params }) =>
+      HttpResponse.json({ id: Number(params.id), type: "apply", status: "running", scope: "service", exit_code: null, error: "" })),
   );
   const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
   try {

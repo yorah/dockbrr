@@ -52,7 +52,7 @@ import { useScanRun } from "@/hooks/useScanRun";
 import { ApplyAllButton, CheckAllButton } from "@/components/BulkActions";
 import { SELF_UPDATE_CONFIRM } from "@/lib/selfUpdate";
 import type { Row } from "@/hooks/useDashboardRows";
-import type { Project, Service, Update } from "@/api/types";
+import type { AppliedJob, Project, Service, Update } from "@/api/types";
 
 const EMPTY = <span className="text-muted-foreground">-</span>;
 
@@ -80,6 +80,8 @@ export interface DashboardTableProps {
   updatesByService: Map<number, Update>;
   /** Called with the new job id after a row Apply enqueues, so the caller can open the live-log panel. */
   onApplied: (jobId: number) => void;
+  /** Called with every job id after a project Apply-all enqueues, so the caller can open the bulk panel. */
+  onAppliedBatch: (jobs: AppliedJob[]) => void;
   /** Opens the read-only changelog view for a service's pending or last-applied update. */
   onChangelog: (update: Update, service: Service) => void;
   /** Opens the live tail-logs drawer for a service. Defaults to a no-op (wired in Task 8). */
@@ -393,11 +395,11 @@ function ProjectAutoToggle({ project }: { project: Project }) {
 function ProjectBulkActions({
   project,
   updatesByService,
-  onApplied,
+  onAppliedBatch,
 }: {
   project: Project;
   updatesByService: Map<number, Update>;
-  onApplied: DashboardTableProps["onApplied"];
+  onAppliedBatch: DashboardTableProps["onAppliedBatch"];
 }) {
   // Excludes gone services even though "Show removed" being off already hides
   // their row from the table. Otherwise Apply all would silently reanimate
@@ -418,7 +420,7 @@ function ProjectBulkActions({
       />
       <ApplyAllButton
         updates={pending}
-        onApplied={onApplied}
+        onApplied={onAppliedBatch}
         scopeNoun={`in "${project.name}"`}
         ariaLabel={`Apply all updates in ${project.name}`}
       />
@@ -624,6 +626,7 @@ export function DashboardTable({
   onReview,
   updatesByService,
   onApplied,
+  onAppliedBatch,
   onChangelog,
   onLogs = () => {},
   groupLoose = false,
@@ -917,7 +920,7 @@ export function DashboardTable({
                         <ProjectBulkActions
                           project={original.project}
                           updatesByService={updatesByService}
-                          onApplied={onApplied}
+                          onAppliedBatch={onAppliedBatch}
                         />
                         {original.project.kind === "compose" && (
                           <Button

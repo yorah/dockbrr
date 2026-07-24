@@ -47,17 +47,27 @@ export const useProjectCompose = (id: number, enabled = true) =>
     queryKey: keys.projectCompose(id), enabled,
     queryFn: () => apiFetch<ComposeFiles>(`/api/projects/${id}/compose`),
   });
-export const useJob = (id: number, enabled = true) =>
-  useQuery({
-    queryKey: keys.job(id), enabled,
+// Terminal + failure job-status vocabularies (store/jobs.go). Shared so the
+// single-job panel, the bulk panel, and the poll interval never drift.
+export const TERMINAL_JOB_STATUSES: ReadonlySet<string> = new Set(["success", "failed", "canceled"]);
+export const FAILED_JOB_STATUSES: ReadonlySet<string> = new Set(["failed", "canceled"]);
+
+// Shared query options for a single job, so useJob (one job) and useQueries
+// (a bulk apply's N jobs) build identical keys/fetchers/polling. Terminal job
+// statuses per store/jobs.go: success|failed|canceled. Stop polling once the
+// job finishes, keep polling while queued|running.
+export function jobQueryOptions(id: number) {
+  return {
+    queryKey: keys.job(id),
     queryFn: () => apiFetch<Job>(`/api/jobs/${id}`),
-    refetchInterval: (q) => {
-      // Terminal job statuses per store/jobs.go: success|failed|canceled. Stop
-      // polling once the job finishes; keep polling while queued|running.
+    refetchInterval: (q: { state: { data?: Job } }) => {
       const s = q.state.data?.status;
-      return s && ["success", "failed", "canceled"].includes(s) ? false : 1500;
+      return s && TERMINAL_JOB_STATUSES.has(s) ? false : 1500;
     },
-  });
+  };
+}
+export const useJob = (id: number, enabled = true) =>
+  useQuery({ ...jobQueryOptions(id), enabled });
 // Plain fetch helper (not a query hook): the logs drawer (Task 8) fetches on
 // demand rather than subscribing, so there is no cache key to register here.
 export function fetchServiceLogs(serviceId: number, tail = 500): Promise<{ logs: string }> {
