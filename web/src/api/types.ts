@@ -158,3 +158,9 @@ export interface ScanRun {
   done: number;
   total: number;
 }
+// Reported by ApplyAllButton for each enqueued apply job so the panel can list
+// them and resolve each to its service. serviceId drives the row's label.
+export interface AppliedJob {
+  jobId: number;
+  serviceId: number;
+}
