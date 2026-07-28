@@ -97,7 +97,12 @@ func (s *Server) enqueueSelfUpdate(ctx context.Context) (int64, int, error) {
 	if s.deps.SelfUpdate == nil {
 		return 0, http.StatusConflict, errors.New("self-update is unavailable")
 	}
-	res, err := s.deps.SelfUpdate.Check(ctx)
+	// CheckFresh, not Check: the dashboard's "update available" badge comes from
+	// the registry detect path, which refreshes on its own schedule. A cached
+	// verdict can lag a brand-new release by up to the checker TTL (6h), which
+	// would refuse the very apply the UI just offered. Refetching also warms the
+	// cache, so the self_update job's own gate hits it without a second API call.
+	res, err := s.deps.SelfUpdate.CheckFresh(ctx)
 	if err != nil {
 		return 0, http.StatusConflict, errors.New("could not check for updates, try again later")
 	}
