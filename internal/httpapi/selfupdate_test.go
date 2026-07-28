@@ -234,6 +234,45 @@ func TestSelfUpdateApplyEnqueues(t *testing.T) {
 	}
 }
 
+// TestSelfUpdateApplyBypassesStaleCache pins the freshness contract of the
+// apply precondition: the dashboard's "update available" comes from the
+// registry detect path, which refreshes independently of the self-update
+// cache. Right after a release the cached GitHub verdict can still say "up to
+// date" for up to the TTL, so a cached check would refuse an apply the UI just
+// offered. The precondition must refetch.
+func TestSelfUpdateApplyBypassesStaleCache(t *testing.T) {
+	tag := "v0.4.2" // same as current: no update
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"tag_name":"` + tag + `","html_url":"https://x/y"}`))
+	}))
+	t.Cleanup(gh.Close)
+
+	srv, db, tok, csrf := authedServer(t, Deps{})
+	eng := &fakeEngine{}
+	d := selfUpdateDeps(t, db, gh.URL, "0.4.2")
+	d.Engine = eng
+	d.SelfID = "abc123def456"
+	srv.deps = mergeDeps(srv.deps, d)
+
+	// Warm the cache with the pre-release verdict (TTL is an hour in tests).
+	if rec := authedGet(t, srv, "/api/updates/self", tok, csrf); rec.Code != http.StatusOK {
+		t.Fatalf("warm: want 200, got %d", rec.Code)
+	}
+	// A new release lands; the cache is now stale but still within its TTL.
+	tag = "v9.0.0"
+
+	req := authReq(httptest.NewRequest(http.MethodPost, "/api/updates/self/apply", nil), tok, csrf)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("apply with stale cache = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if len(eng.enqueued) != 1 || eng.enqueued[0].Type != "self_update" {
+		t.Fatalf("enqueued = %+v, want one self_update job", eng.enqueued)
+	}
+}
+
 func TestSelfUpdateApplySingleFlight(t *testing.T) {
 	srv, db, tok, csrf := authedServer(t, Deps{})
 	eng := &fakeEngine{}
