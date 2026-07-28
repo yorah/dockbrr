@@ -56,11 +56,17 @@ export interface JobLogViewProps {
   // no parent wiring); a chrome wrapper that displays the job number in its
   // own header (ApplyPanel) can mirror it via this callback.
   onJobIdChange?: (jobId: number) => void;
+  // Height utility for the log box. Default grows with the log up to max-h-64
+  // (single-job panel, nothing below it to push). A caller that nests this in
+  // its own scroll container passes a FIXED height (BulkApplyPanel: "h-48"),
+  // otherwise every streamed line resizes the ancestor and both scrollbars
+  // toggle on and off.
+  logHeightClass?: string;
 }
 
 // One job's live status + log + in-place rollback. Extracted from ApplyPanel so
 // both the single-job panel and each BulkApplyPanel row render identically.
-export function JobLogView({ jobId: initialJobId, readOnly = false, autoClose = false, onClose, onJobIdChange }: JobLogViewProps) {
+export function JobLogView({ jobId: initialJobId, readOnly = false, autoClose = false, onClose, onJobIdChange, logHeightClass = "max-h-64" }: JobLogViewProps) {
   // Internal state so a rollback can swap this view to the new job id in place.
   const [jobId, setJobId] = useState(initialJobId);
   const { lines } = useJobLog(jobId);
@@ -124,7 +130,7 @@ export function JobLogView({ jobId: initialJobId, readOnly = false, autoClose = 
       <div
         ref={logRef}
         data-testid="apply-log"
-        className="mt-2 max-h-64 overflow-auto rounded-md bg-muted p-3 font-mono text-xs leading-relaxed text-foreground"
+        className={`mt-2 ${logHeightClass} overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-words rounded-md bg-muted p-3 font-mono text-xs leading-relaxed text-foreground [scrollbar-gutter:stable]`}
       >
         {lines.length === 0 ? (
           <p className="opacity-60">Waiting for log output…</p>
