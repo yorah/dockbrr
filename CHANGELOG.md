@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.3](https://github.com/yorah/dockbrr/compare/v0.12.2...v0.12.3) (2026-07-28)
+
+
+### Bug Fixes
+
+* **apply:** collapse bulk apply rows and stop panel flicker ([#89](https://github.com/yorah/dockbrr/issues/89)) ([2e59fea](https://github.com/yorah/dockbrr/commit/2e59feaaef7a0da30bc1f5b48634325d033db0fe))
+
 ## [0.12.2](https://github.com/yorah/dockbrr/compare/v0.12.1...v0.12.2) (2026-07-24)
 
 
