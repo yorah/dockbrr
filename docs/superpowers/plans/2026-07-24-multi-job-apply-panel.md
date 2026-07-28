@@ -4,6 +4,19 @@
 
 **Goal:** Show a live per-job panel when "Apply all" enqueues 2+ jobs, listing every job with expandable logs and per-row rollback, instead of collapsing to a single arbitrary job.
 
+> **Post-execution amendment (2026-07-28), applies to Task 4 below:** the
+> auto-expand rule this plan prescribes (`defaultOpen` / "first running row")
+> was implemented, manually tested, and then removed. In the real app the
+> expanded row's log filled the list's 320px scroll box, hiding the other rows,
+> and its auto-scroll kept the list jumping, so the remaining rows could not be
+> clicked open. Shipped behavior: every row starts COLLAPSED, the header carries
+> a determinate progress bar, and a row's log mounts only on click. The nested
+> scroll containers also needed stabilizing (fixed log height per bulk row via a
+> new `JobLogView` `logHeightClass` prop, Y-only list scroll with
+> `scrollbar-gutter: stable`, wrapped log lines). See the "Expansion behavior"
+> section of the design spec for the current contract; the Task 4 snippets below
+> are kept as the historical record of what was executed.
+
 **Architecture:** Extract today's single-job panel body into a reusable `JobLogView`. `ApplyPanel` becomes a thin wrapper around it (single-job path unchanged). A new `BulkApplyPanel` renders a list of `JobRow`s over `JobLogView`, computing aggregate progress + auto-close from the original apply job ids via `useQueries`. `ApplyAllButton` stops collapsing N->first and reports the full `{jobId, serviceId}[]` set; routes branch single vs bulk.
 
 **Tech Stack:** React 19, TypeScript, TanStack Query v5 (`useQuery`, `useQueries`), Vitest + Testing Library + MSW, Tailwind v4, lucide-react icons.
@@ -838,6 +851,6 @@ git commit -m "feat(apply): open BulkApplyPanel for multi-job applies from both 
 
 ## Self-Review Notes
 
-- **Spec coverage:** JobLogView extraction (Task 2), BulkApplyPanel+JobRow with expandable logs (Task 4), ApplyAllButton full-set reporting (Task 3), aggregate+auto-close from original ids (Task 4), per-row rollback via reused JobLogView (Task 2+4), service-label resolution from cached data (Task 5 `serviceNames`), batch-of-1 -> single panel (Task 5 `openBatch`), auto-expand first running row (Task 4 Step 3 note), no backend changes (all tasks). Covered.
+- **Spec coverage:** JobLogView extraction (Task 2), BulkApplyPanel+JobRow with expandable logs (Task 4), ApplyAllButton full-set reporting (Task 3), aggregate+auto-close from original ids (Task 4), per-row rollback via reused JobLogView (Task 2+4), service-label resolution from cached data (Task 5 `serviceNames`), batch-of-1 -> single panel (Task 5 `openBatch`), no backend changes (all tasks). Covered. The spec's auto-expand rule was implemented here and later dropped (see the post-execution amendment at the top); collapsed-by-default + header progress bar replaced it.
 - **Manual verification after Task 5:** `mise run dev`, trigger "Apply all" across a multi-service project, confirm the panel lists every job, rows expand to live logs, a failed row offers rollback, and the panel auto-closes only on full success.
 - **Known trade-off (from spec):** a row's collapsed status badge keys off the original apply job; after an in-row rollback the expanded log follows the rollback while the badge/aggregate still count the apply as failed. Intended — keeps the panel open until the user dismisses.
