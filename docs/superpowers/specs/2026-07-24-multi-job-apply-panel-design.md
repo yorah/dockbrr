@@ -39,7 +39,8 @@ bulk panel on top of it. The single-job path does not change visually.
   `useJobLog` for one job, renders the status line and the log box, and keeps the
   in-place rollback swap (internal `setJobId`). Props gate auto-close and the
   rollback offer so both hosts reuse it.
-  - Props: `{ jobId, readOnly?, autoClose?, showRollback?, onClose? }`.
+  - Props: `{ jobId, readOnly?, autoClose?, showRollback?, onClose?,
+    logHeightClass? }`.
   - When `autoClose` is set and the job reaches `success`, it runs the 4s
     countdown and calls `onClose`. `readOnly` still suppresses rollback and
     invalidation, as today.
@@ -124,11 +125,31 @@ resolvable: `service #<id>`.
 
 ## Expansion behavior
 
-- On open, auto-expand the first `running` job; if none is running yet, expand
-  the first job. This fixes the original "sat on a queued job" symptom by
-  surfacing a live log immediately.
+- Every row starts collapsed and stays collapsed until the user clicks it. No
+  auto-expand.
+  - Superseded an earlier "auto-expand the first `running` job" rule, which was
+    tried and reverted: the expanded log filled the list's 320px scroll box, so
+    the remaining rows were pushed out of view, and the log's auto-scroll kept
+    the list jumping under the pointer, making the other rows effectively
+    unclickable.
+  - The batch view's job is progress, not log tailing: per-row status
+    (`queued` / `applying…` / `applied` / `failed`) plus the header progress bar
+    carry it. A log is one click away when the user wants one.
+- The aggregate header carries a determinate progress bar
+  (`role="progressbar"`, `aria-valuenow` = terminal job count,
+  `aria-valuemax` = batch size), tinted danger once any job failed.
 - Rows toggle independently; multiple can be open at once (concurrent jobs across
   projects).
+- Layout stability (an expanded row nests a streaming log inside the list's own
+  scroll container, which oscillates if either box resizes per line):
+  - The list scrolls on the Y axis only, with `scrollbar-gutter: stable`, so a
+    toggling scrollbar cannot change the content width.
+  - `JobLogView` takes a `logHeightClass` prop. The single-job panel keeps the
+    growing default (`max-h-64`); a bulk row passes a FIXED height (`h-48`) so
+    each streamed line cannot resize the ancestor.
+  - The log box wraps long lines (`whitespace-pre-wrap break-words`,
+    `overflow-x-hidden`) instead of scrolling horizontally, which removes the
+    other half of the oscillation.
 - A finished row can still be expanded; its log replays from the SSE replay
   prefix (`handleJobLogs` history replay).
 
@@ -147,10 +168,12 @@ resolvable: `service #<id>`.
   service-scope apply per pending update; reports the full `{jobId, serviceId}[]`
   set (not just the first); marks each service busy; a 1-update batch still
   reports a single-element array.
-- **`BulkApplyPanel`** (new): header counts reflect per-job statuses; auto-closes
-  only when all succeed; stays open when one fails; expanding a row subscribes
-  its log; a failed row shows the rollback button and swaps to the rollback job
-  on click.
+- **`BulkApplyPanel`** (new): header counts reflect per-job statuses; the header
+  progress bar reports `aria-valuenow`/`aria-valuemax`; auto-closes only when all
+  succeed; stays open when one fails; every row starts collapsed and mounts no
+  `EventSource` until clicked; expanding a row subscribes its log; rows expand
+  independently and one opening does not close another; a failed row shows the
+  rollback button and swaps to the rollback job on click.
 - **`JobLogView` / `ApplyPanel`**: existing single-job tests stay green as a
   regression guard on the extraction (title, status line, auto-close, rollback).
 - **Routes**: a batch of 2+ renders `BulkApplyPanel`; a batch of 1 renders the
