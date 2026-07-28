@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.4](https://github.com/yorah/dockbrr/compare/v0.12.3...v0.12.4) (2026-07-28)
+
+
+### Bug Fixes
+
+* **selfupdate:** refetch the release verdict before enqueuing an apply ([#91](https://github.com/yorah/dockbrr/issues/91)) ([719c51e](https://github.com/yorah/dockbrr/commit/719c51e0d72eaf1af2ef3b1cd7e39030a4ca2950))
+
 ## [0.12.3](https://github.com/yorah/dockbrr/compare/v0.12.2...v0.12.3) (2026-07-28)
 
 
